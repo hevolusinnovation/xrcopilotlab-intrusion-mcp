@@ -21,13 +21,22 @@ public sealed class LogFileOptions
     /// <summary>sshd logs (Debian and Ubuntu: auth.log; RHEL: secure).</summary>
     public List<string> AuthFiles { get; set; } = ["/var/log/auth.log*"];
 
+    /// <summary>UFW logs (<c>ufw logging low</c>): the connections to closed ports.</summary>
+    public List<string> FirewallFiles { get; set; } = ["/var/log/ufw.log*"];
+
+    /// <summary>nginx access logs, <c>combined</c> format. Only the requests that match an attack pattern are kept.</summary>
+    public List<string> WebAccessFiles { get; set; } = ["/var/log/nginx/access.log*"];
+
+    /// <summary>CrowdSec logs: alerts and decisions.</summary>
+    public List<string> CrowdsecFiles { get; set; } = ["/var/log/crowdsec.log*"];
+
     /// <summary>How many days back to read.</summary>
     public int MaxDays { get; set; } = 30;
 }
 
 /// <summary>
 /// The real mode: reads the host's log files at every call, so nothing is kept and nothing is written. The account
-/// the server runs as must be able to read them (on Ubuntu: group <c>adm</c>).
+/// the server runs as must be able to read them (on Ubuntu: group <c>adm</c>). A log the host does not have is skipped.
 /// </summary>
 public sealed class FileLogSource(LogFileOptions options, ILogger<FileLogSource> logger) : ILogSource
 {
@@ -42,14 +51,23 @@ public sealed class FileLogSource(LogFileOptions options, ILogger<FileLogSource>
     public int MaxDays => options.MaxDays;
 
     public IReadOnlyList<string> Describe() =>
-        Expand(options.Fail2banFiles).Concat(Expand(options.AuthFiles)).DefaultIfEmpty("no log file found: check Logs:Fail2banFiles and Logs:AuthFiles").ToList();
+        AllPatterns().SelectMany(Expand).DefaultIfEmpty("no log file found: check the Logs:*Files settings").ToList();
+
+    private IEnumerable<List<string>> AllPatterns() =>
+        [options.Fail2banFiles, options.AuthFiles, options.FirewallFiles, options.WebAccessFiles, options.CrowdsecFiles];
 
     public IReadOnlyList<LogEvent> Read(DateTimeOffset since, DateTimeOffset now)
     {
         var floor = now.AddDays(-options.MaxDays);
         if (since < floor) since = floor;
 
-        var events = LogLines.Parse(Lines(options.Fail2banFiles, since), Lines(options.AuthFiles, since), _zone, now)
+        var logs = new LogSet(
+            Lines(options.Fail2banFiles, since),
+            Lines(options.AuthFiles, since),
+            Lines(options.FirewallFiles, since),
+            Lines(options.WebAccessFiles, since),
+            Lines(options.CrowdsecFiles, since));
+        var events = LogLines.Parse(logs, _zone, now)
             .Where(e => e.Time >= since && e.Time <= now)
             .ToList();
         events.Sort((a, b) => a.Time.CompareTo(b.Time));

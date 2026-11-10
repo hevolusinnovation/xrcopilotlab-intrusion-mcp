@@ -96,6 +96,7 @@ app.MapGet("/healthz", (IOptionsMonitor<ApiKeyOptions> keys, ILogSource source) 
 app.MapGet("/livez", () => Results.Ok(new { status = "ok" })).AllowAnonymous();
 
 app.MapMcp("/mcp").RequireAuthorization();
+app.MapRestApi();
 
 app.Logger.LogInformation("Intrusion MCP server: mode {Mode}, host {Host}, {Keys} active key(s)",
     server.Mode, app.Services.GetRequiredService<ILogSource>().Hostname,

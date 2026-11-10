@@ -23,6 +23,18 @@ public enum LogEventKind
 
     /// <summary>sshd let the user in (<c>Accepted password|publickey for … from …</c>).</summary>
     AcceptedLogin,
+
+    /// <summary>The firewall (UFW) dropped a connection to a closed port (<c>[UFW BLOCK] … SRC=… DPT=…</c>).</summary>
+    FirewallBlock,
+
+    /// <summary>A web request that matches a known attack pattern (nginx access log). Ordinary requests are not kept.</summary>
+    WebRequest,
+
+    /// <summary>CrowdSec recognised a scenario from this IP (<c>Ip … performed 'crowdsecurity/ssh-bf'</c>).</summary>
+    CrowdsecAlert,
+
+    /// <summary>CrowdSec decided a remedy for this IP (<c>… : 4h ban on Ip …</c>).</summary>
+    CrowdsecDecision,
 }
 
 /// <summary>Which log the event comes from.</summary>
@@ -30,9 +42,16 @@ public enum LogOrigin
 {
     Fail2ban,
     Auth,
+    Firewall,
+    WebAccess,
+    Crowdsec,
 }
 
-/// <summary>One parsed log line about a source IP.</summary>
+/// <summary>
+/// One parsed log line about a source IP. <see cref="Port"/> is the source port of an SSH attempt;
+/// <see cref="TargetPort"/> the port a blocked connection was aimed at. <see cref="Rule"/> is the web attack pattern
+/// or the CrowdSec scenario; <see cref="Detail"/> the CrowdSec remedy duration.
+/// </summary>
 public sealed record LogEvent(
     DateTimeOffset Time,
     LogEventKind Kind,
@@ -41,7 +60,13 @@ public sealed record LogEvent(
     string? Jail = null,
     string? User = null,
     int? Port = null,
-    string? Method = null)
+    string? Method = null,
+    int? TargetPort = null,
+    string? Protocol = null,
+    string? Path = null,
+    int? Status = null,
+    string? Rule = null,
+    string? Detail = null)
 {
     public bool IsBanStart => Kind is LogEventKind.Ban or LogEventKind.RestoreBan;
 }

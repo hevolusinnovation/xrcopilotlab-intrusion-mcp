@@ -44,11 +44,17 @@ public sealed class IntrusionQueries(ILogSource source, IGeoLocator geo, Intrusi
                     : AttackCatalog.CountsAttempts(j) ? day.Count(e => e.Jail == j && e.Kind == LogEventKind.Found) : 0))
             .ToList();
 
+        var detectors = history.GroupBy(e => e.Origin)
+            .Select(g => new DetectorStatus(DetectorName(g.Key), g.Count(e => e.Time >= now.AddHours(-24)), g.Max(e => e.Time)))
+            .OrderBy(d => d.Detector, StringComparer.Ordinal)
+            .ToList();
+
         return new StatusResult(source.Hostname, source.Simulated, source.Describe(), now,
             history.Count > 0 ? history[0].Time : null,
             history.Count > 0 ? history[^1].Time : null,
             day.Count,
             bans.Select(b => b.Ip).Distinct().Count(),
+            detectors,
             jails,
             geo.Attribution);
     }
@@ -75,16 +81,18 @@ public sealed class IntrusionQueries(ILogSource source, IGeoLocator geo, Intrusi
     public IpDetailResult IpDetail(DateTimeOffset now, Period period, string ip)
     {
         var events = Window(now, period);
-        var own = events.Where(e => e.SourceIp == ip).ToList();
+        // The 24 hours before the period only serve to judge its logins: the timeline is the period.
+        var own = events.Where(e => e.SourceIp == ip && e.Time >= period.From).ToList();
         var report = Reports(now, period).FirstOrDefault(r => r.Ip == ip);
         var timeline = own
             .Where(e => e.Kind != LogEventKind.InvalidUser)
             .OrderByDescending(e => e.Time)
             .Take(MaxTimeline)
-            .Select(e => new TimelineEntry(e.Time, e.Kind.ToString(), e.Jail, e.User, e.Port, e.Method))
+            .Select(e => new TimelineEntry(e.Time, e.Kind.ToString(), DetectorName(e.Origin), e.Jail, e.User, e.Port, e.Method,
+                e.TargetPort, e.Path, e.Status, e.Rule, e.Detail))
             .ToList();
         return new IpDetailResult(source.Hostname, source.Simulated, period, report,
-            _analyzer.SuspiciousLogins(events).Where(s => s.Ip == ip).ToList(),
+            _analyzer.SuspiciousLogins(events).Where(s => s.Ip == ip && s.Time >= period.From).ToList(),
             own.Count(e => e.Kind != LogEventKind.InvalidUser), timeline, geo.Attribution);
     }
 
@@ -129,11 +137,23 @@ public sealed class IntrusionQueries(ILogSource source, IGeoLocator geo, Intrusi
             inPeriod.Count(e => e.Kind == LogEventKind.Ban),
             bans.Select(b => b.Ip).Distinct().Count(),
             inPeriod.Count(e => e.Kind == LogEventKind.AcceptedLogin),
-            suspicious.Count);
+            suspicious.Count,
+            inPeriod.Count(e => e.Kind == LogEventKind.FirewallBlock),
+            inPeriod.Count(e => e.Kind == LogEventKind.WebRequest),
+            inPeriod.Count(e => e.Kind == LogEventKind.CrowdsecAlert));
 
-        return new SummaryResult(source.Hostname, source.Simulated, period, totals, byType, byCountry,
+        return new SummaryResult(source.Hostname, source.Simulated, period, totals, byType, byCountry, ThreatAnalyzer.TargetedPorts(inPeriod, 15),
             reports.Take(Math.Clamp(top, 1, MaxTop)).ToList(), campaigns, suspicious, points, geo.Attribution);
     }
+
+    public static string DetectorName(LogOrigin origin) => origin switch
+    {
+        LogOrigin.Fail2ban => "fail2ban",
+        LogOrigin.Auth => "sshd",
+        LogOrigin.Firewall => "ufw",
+        LogOrigin.WebAccess => "nginx",
+        _ => "crowdsec",
+    };
 
     private List<IpReport> Reports(DateTimeOffset now, Period period)
     {

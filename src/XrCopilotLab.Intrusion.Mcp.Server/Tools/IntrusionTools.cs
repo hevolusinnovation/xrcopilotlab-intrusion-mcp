@@ -5,8 +5,8 @@ using XrCopilotLab.Intrusion.Mcp.Core.Queries;
 namespace XrCopilotLab.Intrusion.Mcp.Server.Tools;
 
 /// <summary>
-/// The tools the agent sees. All read-only: they read the host's fail2ban and sshd logs (or the simulated host) and
-/// never ban, unban or change anything. Every answer says whether the data is simulated.
+/// The tools the agent sees. All read-only: they read the host's fail2ban, sshd, UFW, nginx and CrowdSec logs (or the
+/// simulated host) and never ban, unban or change anything. Every answer says whether the data is simulated.
 /// </summary>
 [McpServerToolType]
 public sealed class IntrusionTools(IntrusionQueries queries, TimeProvider clock)
@@ -15,8 +15,8 @@ public sealed class IntrusionTools(IntrusionQueries queries, TimeProvider clock)
 
     [McpServerTool(Name = "intrusion_status", ReadOnly = true),
      Description(
-        "State of the protection on the host: which fail2ban jails are active, how many addresses each one is banning now, " +
-        "bans and attempts in the last 24 hours, the time of the latest event. Call it first to know what the host watches.")]
+        "State of the protection on the host: which detectors are reporting (fail2ban, sshd, ufw, nginx, crowdsec), which fail2ban " +
+        "jails are active and how many addresses each one is banning now, events in the last 24 hours. Call it first to know what the host watches.")]
     public StatusResult Status() => queries.Status(clock.GetUtcNow());
 
     [McpServerTool(Name = "intrusion_banned_ips", ReadOnly = true),
@@ -30,13 +30,14 @@ public sealed class IntrusionTools(IntrusionQueries queries, TimeProvider clock)
     [McpServerTool(Name = "intrusion_attempts", ReadOnly = true),
      Description(
         "Intrusion attempts in a period, one row per source address, most serious first: attempts, bans, accounts tried, " +
-        "attack types, severity (Low, Medium, High, Critical), location. Filter by jail, attack type or country.")]
+        "attack types, severity (Low, Medium, High, Critical), location, closed ports probed, web attack patterns, CrowdSec scenarios. " +
+        "Filter by jail, attack type or country.")]
     public AttemptsResult Attempts(
         [Description(PeriodHelp)] int? hours = null,
         [Description("Start of the period (ISO 8601). Null = now minus hours.")] DateTimeOffset? since = null,
         [Description("End of the period (ISO 8601). Null = now.")] DateTimeOffset? until = null,
         [Description("Only addresses seen by this fail2ban jail. Null = all.")] string? jail = null,
-        [Description("Only this attack type: SshBruteForce, DistributedSshBruteForce, WebLoginBruteForce, WebVulnerabilityScan, RequestFlood, MailLoginBruteForce, RepeatOffender, LoginAfterFailures. Null = all.")] string? attackType = null,
+        [Description("Only this attack type: SshBruteForce, DistributedSshBruteForce, WebLoginBruteForce, WebVulnerabilityScan, WebExploitAttempt, RequestFlood, MailLoginBruteForce, PortScan, IndustrialProtocolProbe, RepeatOffender, LoginAfterFailures. Null = all.")] string? attackType = null,
         [Description("Only addresses in this country (ISO code, e.g. CN). Null = all.")] string? country = null,
         [Description("Max rows. Default 20, max 100.")] int top = 20)
     {
@@ -47,7 +48,7 @@ public sealed class IntrusionTools(IntrusionQueries queries, TimeProvider clock)
     [McpServerTool(Name = "intrusion_ip_detail", ReadOnly = true),
      Description(
         "Everything one address did in the period: the summary row, any suspicious login, and the timeline of its events " +
-        "(failed and successful logins, fail2ban matches, bans and unbans), newest first, up to 200.")]
+        "(failed and successful logins, fail2ban matches and bans, blocked connections, web attacks, CrowdSec alerts), newest first, up to 200.")]
     public IpDetailResult IpDetail(
         [Description("The source address (IPv4 or IPv6).")] string ip,
         [Description(PeriodHelp)] int? hours = null,
@@ -73,7 +74,7 @@ public sealed class IntrusionTools(IntrusionQueries queries, TimeProvider clock)
 
     [McpServerTool(Name = "intrusion_summary", ReadOnly = true),
      Description(
-        "The picture of a period in one call: totals, attempts by attack type and by country, the top attackers, distributed " +
+        "The picture of a period in one call: totals, attempts by attack type and by country, the most targeted closed ports, the top attackers, distributed " +
         "campaigns (one account tried from many addresses, each under the ban threshold), suspicious logins, and map points " +
         "(latitude, longitude, severity) ready for a map. Use it for a report or a dashboard.")]
     public SummaryResult Summary(

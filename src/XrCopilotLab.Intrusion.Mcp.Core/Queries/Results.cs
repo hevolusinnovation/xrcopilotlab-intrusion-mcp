@@ -8,6 +8,12 @@ public sealed record Period(DateTimeOffset From, DateTimeOffset To);
 
 public sealed record UserCount(string User, int Attempts);
 
+/// <summary>A closed port somebody tried: which service it is, how many blocked connections, from how many addresses.</summary>
+public sealed record PortCount(int Port, string? Service, int Blocks, int Addresses);
+
+/// <summary>A web attack pattern seen in the requests of an address, with one example path.</summary>
+public sealed record WebProbe(string Rule, string AttackType, int Requests, string Example);
+
 /// <summary>Everything one source address did in the period.</summary>
 public sealed record IpReport(
     string Ip,
@@ -20,6 +26,10 @@ public sealed record IpReport(
     IReadOnlyList<string> Jails,
     IReadOnlyList<UserCount> UsersTried,
     int SuccessfulLogins,
+    int FirewallBlocks,
+    IReadOnlyList<PortCount> PortsProbed,
+    IReadOnlyList<WebProbe> WebProbes,
+    IReadOnlyList<string> CrowdsecScenarios,
     DateTimeOffset FirstSeen,
     DateTimeOffset LastSeen);
 
@@ -59,6 +69,9 @@ public sealed record CountryCount(string? CountryCode, string? Country, int Addr
 
 public sealed record JailStatus(string Jail, string AttackType, int CurrentlyBanned, int BansLast24h, int AttemptsLast24h);
 
+/// <summary>One log the server reads: fail2ban, sshd, ufw, nginx, crowdsec.</summary>
+public sealed record DetectorStatus(string Detector, int EventsLast24h, DateTimeOffset? LatestEvent);
+
 public sealed record StatusResult(
     string Host,
     bool Simulated,
@@ -68,6 +81,7 @@ public sealed record StatusResult(
     DateTimeOffset? LatestEvent,
     int EventsLast24h,
     int CurrentlyBanned,
+    IReadOnlyList<DetectorStatus> Detectors,
     IReadOnlyList<JailStatus> Jails,
     string? GeoAttribution);
 
@@ -77,14 +91,18 @@ public sealed record BannedResult(string Host, bool Simulated, DateTimeOffset No
 
 public sealed record AttemptsResult(string Host, bool Simulated, Period Period, int Addresses, IReadOnlyList<IpReport> Top, string? GeoAttribution);
 
-public sealed record TimelineEntry(DateTimeOffset Time, string Kind, string? Jail, string? User, int? Port, string? Method);
+/// <summary>One event of an address: <c>Port</c> is its source port on SSH, <c>TargetPort</c> the closed port it tried,
+/// <c>Rule</c> the web pattern or CrowdSec scenario.</summary>
+public sealed record TimelineEntry(DateTimeOffset Time, string Kind, string Origin, string? Jail, string? User, int? Port, string? Method,
+    int? TargetPort, string? Path, int? Status, string? Rule, string? Detail);
 
 public sealed record IpDetailResult(string Host, bool Simulated, Period Period, IpReport? Report, IReadOnlyList<SuspiciousLogin> SuspiciousLogins,
     int TimelineCount, IReadOnlyList<TimelineEntry> Timeline, string? GeoAttribution);
 
 public sealed record SuspiciousLoginsResult(string Host, bool Simulated, Period Period, int SuccessfulLogins, IReadOnlyList<SuspiciousLogin> Suspicious, string? GeoAttribution);
 
-public sealed record SummaryTotals(int Attempts, int Addresses, int Bans, int CurrentlyBanned, int SuccessfulLogins, int SuspiciousLogins);
+public sealed record SummaryTotals(int Attempts, int Addresses, int Bans, int CurrentlyBanned, int SuccessfulLogins, int SuspiciousLogins,
+    int FirewallBlocks, int WebAttackRequests, int CrowdsecAlerts);
 
 public sealed record SummaryResult(
     string Host,
@@ -93,6 +111,7 @@ public sealed record SummaryResult(
     SummaryTotals Totals,
     IReadOnlyList<AttackTypeCount> ByAttackType,
     IReadOnlyList<CountryCount> ByCountry,
+    IReadOnlyList<PortCount> TopTargetedPorts,
     IReadOnlyList<IpReport> TopAttackers,
     IReadOnlyList<Campaign> Campaigns,
     IReadOnlyList<SuspiciousLogin> SuspiciousLogins,

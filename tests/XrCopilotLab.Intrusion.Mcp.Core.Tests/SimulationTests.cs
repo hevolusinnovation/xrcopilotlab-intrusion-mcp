@@ -38,9 +38,14 @@ public class SimulationTests
         var day = new SyntheticHost(Options).Generate(new DateOnly(2026, 11, 10));
         var rome = TimeZoneInfo.FindSystemTimeZoneById(Options.TimeZone);
 
-        var events = LogLines.Parse(day.Fail2banLines, day.AuthLines, rome, Now).ToList();
+        var events = LogLines.Parse(day.ToLogSet(), rome, Now).ToList();
 
         Assert.Equal(day.Fail2banLines.Count, events.Count(e => e.Origin == LogOrigin.Fail2ban));
+        Assert.Equal(day.FirewallLines.Count, events.Count(e => e.Origin == LogOrigin.Firewall));
+        Assert.Equal(day.CrowdsecLines.Count, events.Count(e => e.Origin == LogOrigin.Crowdsec));
+        // Ordinary web traffic is in the log but is not an event.
+        Assert.True(day.WebAccessLines.Count > events.Count(e => e.Origin == LogOrigin.WebAccess));
+        Assert.Contains(events, e => e.Origin == LogOrigin.WebAccess);
         Assert.NotEmpty(events);
         Assert.All(events, e => Assert.True(IpScope.IsDocumentation(e.SourceIp), $"{e.SourceIp} is not a documentation address"));
     }
@@ -109,5 +114,49 @@ public class SimulationTests
 
         Assert.All(source.Read(early.AddHours(-2), early), e => Assert.True(e.Time <= early));
         Assert.DoesNotContain(source.Read(early.AddHours(-2), early), e => e.Kind == LogEventKind.AcceptedLogin && e.SourceIp == SyntheticHost.IncidentIp);
+    }
+
+    [Fact]
+    public void The_intruder_scanned_the_ports_and_crowdsec_saw_it_before_the_login()
+    {
+        var q = Queries();
+        var detail = q.IpDetail(Now, q.Resolve(Now, 24, null, null), SyntheticHost.IncidentIp);
+        var report = detail.Report!;
+
+        Assert.Contains(nameof(AttackType.PortScan), report.AttackTypes);
+        Assert.Contains("crowdsecurity/ssh-slow-bf", report.CrowdsecScenarios);
+        Assert.Contains("crowdsecurity/iptables-scan-multi_ports", report.CrowdsecScenarios);
+
+        var login = detail.Timeline.Single(t => t.Kind == nameof(LogEventKind.AcceptedLogin)).Time;
+        var firstBlock = detail.Timeline.Where(t => t.Kind == nameof(LogEventKind.FirewallBlock)).Min(t => t.Time);
+        var slowBf = detail.Timeline.Single(t => t.Kind == nameof(LogEventKind.CrowdsecAlert) && t.Rule == "crowdsecurity/ssh-slow-bf").Time;
+        Assert.True(firstBlock < slowBf && slowBf < login);
+    }
+
+    [Fact]
+    public void An_industrial_probe_and_web_exploits_are_high()
+    {
+        var q = Queries();
+        var attempts = q.Attempts(Now, q.Resolve(Now, 24, null, null), null, null, null, 100).Top;
+
+        // One probe a day: a 24-hour window can hold two.
+        var ics = attempts.Where(r => r.AttackTypes.Contains(nameof(AttackType.IndustrialProtocolProbe)) && r.Ip.StartsWith("203.", StringComparison.Ordinal)).ToList();
+        Assert.NotEmpty(ics);
+        Assert.All(ics, r => Assert.Equal(nameof(Severity.High), r.Severity));
+        Assert.Contains(ics[0].PortsProbed, p => p.Port == 502 && p.Service == "Modbus/TCP");
+
+        var exploits = attempts.Where(r => r.AttackTypes.Contains(nameof(AttackType.WebExploitAttempt))).ToList();
+        Assert.NotEmpty(exploits);
+        Assert.All(exploits, r => Assert.NotEmpty(r.WebProbes));
+    }
+
+    [Fact]
+    public void Ordinary_visitors_and_firewall_noise_are_not_reported()
+    {
+        var q = Queries();
+        var attempts = q.Attempts(Now, q.Resolve(Now, 24, null, null), null, null, null, 100);
+
+        Assert.DoesNotContain(attempts.Top, r => r.Location.CountryCode == "IT");
+        Assert.All(attempts.Top, r => Assert.NotEmpty(r.AttackTypes));
     }
 }

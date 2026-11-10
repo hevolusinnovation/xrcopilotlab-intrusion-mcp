@@ -1,5 +1,6 @@
 using XrCopilotLab.Intrusion.Mcp.Core.Geo;
 using XrCopilotLab.Intrusion.Mcp.Core.Models;
+using XrCopilotLab.Intrusion.Mcp.Core.Parsing;
 using XrCopilotLab.Intrusion.Mcp.Core.Queries;
 
 namespace XrCopilotLab.Intrusion.Mcp.Core.Analysis;
@@ -84,46 +85,68 @@ public sealed class ThreatAnalyzer(IntrusionPolicy policy, IGeoLocator geo)
         var reports = new List<IpReport>();
         foreach (var byIp in period.GroupBy(e => e.SourceIp))
         {
+            var ip = byIp.Key;
             var events = byIp.ToList();
             var failures = events.Where(e => e.Kind == LogEventKind.FailedLogin).ToList();
-            var found = events.Where(e => e.Kind == LogEventKind.Found && AttackCatalog.CountsAttempts(e.Jail!)
-                                          && !(authAvailable && string.Equals(e.Jail, AttackCatalog.SshJail, StringComparison.OrdinalIgnoreCase))).ToList();
+            var found = events.Where(e => e.Kind == LogEventKind.Found && AttackCatalog.CountsAttempts(e.Jail!)).ToList();
+            var web = events.Where(e => e.Kind == LogEventKind.WebRequest).ToList();
+            var blocks = events.Where(e => e.Kind == LogEventKind.FirewallBlock).ToList();
+            var alerts = events.Where(e => e.Kind == LogEventKind.CrowdsecAlert).ToList();
             var jails = events.Where(e => e.Jail is not null).Select(e => e.Jail!).Distinct().Order().ToList();
 
-            // With auth.log, one sshd match is a mistyped password: brute force takes repeated failures or a ban.
-            var sshBanned = events.Any(e => e.IsBanStart && string.Equals(e.Jail, AttackCatalog.SshJail, StringComparison.OrdinalIgnoreCase));
-            // recidive writes a Found for every ban of every jail: an address is a repeat offender only once recidive bans it.
-            var recidiveBanned = events.Any(e => e.IsBanStart && string.Equals(e.Jail, AttackCatalog.RecidiveJail, StringComparison.OrdinalIgnoreCase))
-                                 || currentBans.Any(b => b.Ip == byIp.Key && string.Equals(b.Jail, AttackCatalog.RecidiveJail, StringComparison.OrdinalIgnoreCase));
-            var types = new HashSet<AttackType>(jails
-                .Where(j => !(authAvailable && string.Equals(j, AttackCatalog.SshJail, StringComparison.OrdinalIgnoreCase)))
-                .Where(j => recidiveBanned || !string.Equals(j, AttackCatalog.RecidiveJail, StringComparison.OrdinalIgnoreCase))
-                .Select(AttackCatalog.FromJail));
-            if (sshBanned || failures.Count >= policy.FailuresBeforeLogin)
-                types.Add(AttackType.SshBruteForce);
-            if (campaignMembers.Contains(byIp.Key)) { types.Remove(AttackType.SshBruteForce); types.Add(AttackType.DistributedSshBruteForce); }
-            if (suspicious[byIp.Key].Any(s => s.Reason == "after-failures")) types.Add(AttackType.LoginAfterFailures);
+            // One attempt, one count: sshd from auth.log when it is there, web from whichever of fail2ban and nginx saw more.
+            var sshFound = found.Count(e => IsSsh(e.Jail));
+            var webFound = found.Count(e => AttackCatalog.IsWeb(AttackCatalog.FromJail(e.Jail!)));
+            var otherFound = found.Count - sshFound - webFound;
+            var attempts = (authAvailable ? failures.Count : sshFound) + Math.Max(webFound, web.Count) + otherFound;
 
-            var attempts = failures.Count + found.Count;
+            // With auth.log, one sshd match is a mistyped password: brute force takes repeated failures or a ban.
+            var sshBanned = events.Any(e => e.IsBanStart && IsSsh(e.Jail));
+            // recidive writes a Found for every ban of every jail: an address is a repeat offender only once recidive bans it.
+            var recidiveBanned = events.Any(e => e.IsBanStart && IsRecidive(e.Jail)) || currentBans.Any(b => b.Ip == ip && IsRecidive(b.Jail));
+            var types = new HashSet<AttackType>(jails
+                .Where(j => !(authAvailable && IsSsh(j)))
+                .Where(j => recidiveBanned || !IsRecidive(j))
+                .Select(AttackCatalog.FromJail));
             var logins = events.Count(e => e.Kind == LogEventKind.AcceptedLogin);
-            // Nothing hostile: only logins, or a user who mistyped once and then got in.
-            if (types.Count == 0 && !suspicious[byIp.Key].Any() && (attempts == 0 || logins > 0)) continue;
+            // A stranger trying passwords is brute force even with one try; a user who got in after a typo is not.
+            if (sshBanned || failures.Count >= policy.FailuresBeforeLogin || (failures.Count > 0 && logins == 0)) types.Add(AttackType.SshBruteForce);
+            foreach (var r in web) types.Add(WebProbeRules.TypeOf(r.Rule!));
+            foreach (var a in alerts) types.Add(AttackCatalog.FromScenario(a.Rule!));
+
+            var ports = blocks.Where(b => b.TargetPort is not null).GroupBy(b => b.TargetPort!.Value).ToList();
+            if (ports.Count >= policy.PortScanMinPorts) types.Add(AttackType.PortScan);
+            if (ports.Any(p => AttackCatalog.IndustrialPorts.ContainsKey(p.Key))) types.Add(AttackType.IndustrialProtocolProbe);
+
+            if (campaignMembers.Contains(ip)) { types.Remove(AttackType.SshBruteForce); types.Add(AttackType.DistributedSshBruteForce); }
+            if (suspicious[ip].Any(s => s.Reason == "after-failures")) types.Add(AttackType.LoginAfterFailures);
+            if (types.Count > 1) types.Remove(AttackType.Other);
+
+            // Nothing hostile: a few blocked packets, only logins, or a user who mistyped once and then got in.
+            if (types.Count == 0 && !suspicious[ip].Any() && (attempts == 0 || logins > 0)) continue;
 
             var bans = events.Count(e => e.Kind == LogEventKind.Ban);
-            var severity = Grade(types, suspicious[byIp.Key].ToList(), bans, attempts);
+            var severity = Grade(types, suspicious[ip].ToList(), bans, attempts, alerts.Count);
 
             reports.Add(new IpReport(
-                byIp.Key,
-                geo.Locate(byIp.Key),
+                ip,
+                geo.Locate(ip),
                 severity.ToString(),
                 types.Order().Select(t => t.ToString()).ToList(),
                 attempts,
                 bans,
-                banned.Contains(byIp.Key),
+                banned.Contains(ip),
                 jails,
                 failures.Where(e => e.User is not null).GroupBy(e => e.User!).Select(g => new UserCount(g.Key, g.Count()))
                     .OrderByDescending(u => u.Attempts).ThenBy(u => u.User, StringComparer.Ordinal).Take(5).ToList(),
                 logins,
+                blocks.Count,
+                ports.Select(p => new PortCount(p.Key, AttackCatalog.ServiceOf(p.Key), p.Count(), 1))
+                    .OrderByDescending(p => AttackCatalog.IndustrialPorts.ContainsKey(p.Port)).ThenByDescending(p => p.Blocks).ThenBy(p => p.Port)
+                    .Take(10).ToList(),
+                web.GroupBy(r => r.Rule!).Select(g => new WebProbe(g.Key, WebProbeRules.TypeOf(g.Key).ToString(), g.Count(), g.First().Path ?? ""))
+                    .OrderByDescending(p => p.Requests).Take(5).ToList(),
+                alerts.Select(a => a.Rule!).Distinct().Order(StringComparer.Ordinal).ToList(),
                 events.Min(e => e.Time),
                 events.Max(e => e.Time)));
         }
@@ -134,6 +157,19 @@ public sealed class ThreatAnalyzer(IntrusionPolicy policy, IGeoLocator geo)
             .ThenBy(r => r.Ip, StringComparer.Ordinal)
             .ToList();
     }
+
+    /// <summary>The closed ports the whole period's traffic went for, industrial ports first.</summary>
+    public static IReadOnlyList<PortCount> TargetedPorts(IReadOnlyList<LogEvent> period, int top) =>
+        period.Where(e => e.Kind == LogEventKind.FirewallBlock && e.TargetPort is not null)
+            .GroupBy(e => e.TargetPort!.Value)
+            .Select(g => new PortCount(g.Key, AttackCatalog.ServiceOf(g.Key), g.Count(), g.Select(e => e.SourceIp).Distinct().Count()))
+            .OrderByDescending(p => p.Addresses).ThenByDescending(p => p.Blocks).ThenBy(p => p.Port)
+            .Take(top)
+            .ToList();
+
+    private static bool IsSsh(string? jail) => string.Equals(jail, AttackCatalog.SshJail, StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsRecidive(string? jail) => string.Equals(jail, AttackCatalog.RecidiveJail, StringComparison.OrdinalIgnoreCase);
 
     private HashSet<string> CampaignMembers(IReadOnlyList<LogEvent> period, IReadOnlySet<string> bannedInPeriod)
     {
@@ -147,12 +183,14 @@ public sealed class ThreatAnalyzer(IntrusionPolicy policy, IGeoLocator geo)
             .ToHashSet();
     }
 
-    private Severity Grade(HashSet<AttackType> types, List<SuspiciousLogin> suspicious, int bans, int attempts)
+    private Severity Grade(HashSet<AttackType> types, List<SuspiciousLogin> suspicious, int bans, int attempts, int crowdsecAlerts)
     {
         if (types.Contains(AttackType.LoginAfterFailures)) return Severity.Critical;
-        if (types.Contains(AttackType.RepeatOffender) || suspicious.Count > 0) return Severity.High;
-        if (bans > 0 || attempts >= policy.MediumAttempts || types.Contains(AttackType.DistributedSshBruteForce)
-            || types.Contains(AttackType.RequestFlood) || types.Contains(AttackType.WebLoginBruteForce))
+        if (types.Contains(AttackType.RepeatOffender) || types.Contains(AttackType.IndustrialProtocolProbe)
+            || types.Contains(AttackType.WebExploitAttempt) || suspicious.Count > 0)
+            return Severity.High;
+        if (bans > 0 || crowdsecAlerts > 0 || attempts >= policy.MediumAttempts || types.Contains(AttackType.DistributedSshBruteForce)
+            || types.Contains(AttackType.RequestFlood) || types.Contains(AttackType.WebLoginBruteForce) || types.Contains(AttackType.PortScan))
             return Severity.Medium;
         return Severity.Low;
     }

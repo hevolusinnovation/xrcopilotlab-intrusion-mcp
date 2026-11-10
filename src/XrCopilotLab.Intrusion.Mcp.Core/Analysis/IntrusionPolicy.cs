@@ -17,6 +17,9 @@ public sealed class IntrusionPolicy
     /// <summary>At most this many failures per address for it to count as part of a campaign (under fail2ban's maxretry).</summary>
     public int CampaignMaxPerIp { get; set; } = 4;
 
+    /// <summary>Distinct closed ports from one address in the period that make it a port scan.</summary>
+    public int PortScanMinPorts { get; set; } = 10;
+
     /// <summary>Attempts from one address in the period that make it at least medium severity.</summary>
     public int MediumAttempts { get; set; } = 10;
 

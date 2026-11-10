@@ -15,11 +15,20 @@ public enum AttackType
     /// <summary>Requests for pages that do not exist on the site, looking for a known vulnerable application.</summary>
     WebVulnerabilityScan,
 
+    /// <summary>Requests that carry an exploit: SQL injection, path traversal, command injection, Log4Shell, a known CVE.</summary>
+    WebExploitAttempt,
+
     /// <summary>More requests than the web server's rate limit allows: an attempt to overload the site.</summary>
     RequestFlood,
 
     /// <summary>Repeated failures on a mail login (SMTP AUTH, IMAP, POP3).</summary>
     MailLoginBruteForce,
+
+    /// <summary>Connections to many closed ports in a short time: mapping which services the host exposes.</summary>
+    PortScan,
+
+    /// <summary>Connections to the ports of industrial control protocols (Modbus, S7, IEC 104, DNP3, OPC UA…).</summary>
+    IndustrialProtocolProbe,
 
     /// <summary>An IP that came back after being banned several times (fail2ban jail <c>recidive</c>).</summary>
     RepeatOffender,
@@ -27,7 +36,7 @@ public enum AttackType
     /// <summary>A successful SSH login from an IP that had failed several times just before: possible compromise.</summary>
     LoginAfterFailures,
 
-    /// <summary>A fail2ban jail this server does not know.</summary>
+    /// <summary>A fail2ban jail or CrowdSec scenario this server does not classify.</summary>
     Other,
 }
 
