@@ -15,9 +15,21 @@ public sealed class IntrusionQueries(ILogSource source, IGeoLocator geo, Intrusi
 
     private readonly ThreatAnalyzer _analyzer = new(policy, geo);
 
-    /// <summary>The period of a call: explicit bounds win, otherwise the last <paramref name="hours"/> hours.</summary>
-    public Period Resolve(DateTimeOffset now, int? hours, DateTimeOffset? since, DateTimeOffset? until)
+    /// <summary>
+    /// The period of a call. <paramref name="slotMinutes"/> wins: the last complete slot aligned to the clock (with 30, at
+    /// 10:47 it is 10:00-10:30), so a scheduled round every 30 minutes sees each event exactly once, with no overlap and no
+    /// gap. Then explicit bounds, then the last <paramref name="hours"/> hours.
+    /// </summary>
+    public Period Resolve(DateTimeOffset now, int? hours, DateTimeOffset? since, DateTimeOffset? until, int? slotMinutes = null)
     {
+        if (slotMinutes is > 0)
+        {
+            var slot = TimeSpan.FromMinutes(Math.Min(slotMinutes.Value, 24 * 60));
+            var utc = now.ToUniversalTime();
+            var end = new DateTimeOffset(utc.Ticks - utc.Ticks % slot.Ticks, TimeSpan.Zero);
+            return new Period(end - slot, end);
+        }
+
         var to = until is { } u && u < now ? u : now;
         var maxHours = source.MaxDays * 24;
         var from = since ?? to.AddHours(-Math.Clamp(hours ?? DefaultHours, 1, maxHours));

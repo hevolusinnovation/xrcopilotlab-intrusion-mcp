@@ -11,6 +11,10 @@ namespace XrCopilotLab.Intrusion.Mcp.Server.Tools;
 [McpServerToolType]
 public sealed class IntrusionTools(IntrusionQueries queries, TimeProvider clock)
 {
+    private const string SlotHelp =
+        "For a scheduled round: the last complete slot of this many minutes aligned to the clock (30 at 10:47 = 10:00-10:30), " +
+        "so consecutive rounds never see the same event twice. Wins over hours, since and until.";
+
     private const string PeriodHelp = "Hours back from now. Default 24, max 720 (30 days). Ignored when since is given.";
 
     [McpServerTool(Name = "intrusion_status", ReadOnly = true),
@@ -36,13 +40,14 @@ public sealed class IntrusionTools(IntrusionQueries queries, TimeProvider clock)
         [Description(PeriodHelp)] int? hours = null,
         [Description("Start of the period (ISO 8601). Null = now minus hours.")] DateTimeOffset? since = null,
         [Description("End of the period (ISO 8601). Null = now.")] DateTimeOffset? until = null,
+        [Description(SlotHelp)] int? slotMinutes = null,
         [Description("Only addresses seen by this fail2ban jail. Null = all.")] string? jail = null,
         [Description("Only this attack type: SshBruteForce, DistributedSshBruteForce, WebLoginBruteForce, WebVulnerabilityScan, WebExploitAttempt, RequestFlood, MailLoginBruteForce, PortScan, IndustrialProtocolProbe, RepeatOffender, LoginAfterFailures. Null = all.")] string? attackType = null,
         [Description("Only addresses in this country (ISO code, e.g. CN). Null = all.")] string? country = null,
         [Description("Max rows. Default 20, max 100.")] int top = 20)
     {
         var now = clock.GetUtcNow();
-        return queries.Attempts(now, queries.Resolve(now, hours, since, until), jail, attackType, country, top);
+        return queries.Attempts(now, queries.Resolve(now, hours, since, until, slotMinutes), jail, attackType, country, top);
     }
 
     [McpServerTool(Name = "intrusion_ip_detail", ReadOnly = true),
@@ -66,10 +71,11 @@ public sealed class IntrusionTools(IntrusionQueries queries, TimeProvider clock)
     public SuspiciousLoginsResult SuspiciousLogins(
         [Description(PeriodHelp)] int? hours = null,
         [Description("Start of the period (ISO 8601). Null = now minus hours.")] DateTimeOffset? since = null,
-        [Description("End of the period (ISO 8601). Null = now.")] DateTimeOffset? until = null)
+        [Description("End of the period (ISO 8601). Null = now.")] DateTimeOffset? until = null,
+        [Description(SlotHelp)] int? slotMinutes = null)
     {
         var now = clock.GetUtcNow();
-        return queries.SuspiciousLogins(now, queries.Resolve(now, hours, since, until));
+        return queries.SuspiciousLogins(now, queries.Resolve(now, hours, since, until, slotMinutes));
     }
 
     [McpServerTool(Name = "intrusion_summary", ReadOnly = true),
@@ -81,9 +87,10 @@ public sealed class IntrusionTools(IntrusionQueries queries, TimeProvider clock)
         [Description(PeriodHelp)] int? hours = null,
         [Description("Start of the period (ISO 8601). Null = now minus hours.")] DateTimeOffset? since = null,
         [Description("End of the period (ISO 8601). Null = now.")] DateTimeOffset? until = null,
+        [Description(SlotHelp)] int? slotMinutes = null,
         [Description("Max top attackers. Default 10, max 100.")] int top = 10)
     {
         var now = clock.GetUtcNow();
-        return queries.Summary(now, queries.Resolve(now, hours, since, until), top);
+        return queries.Summary(now, queries.Resolve(now, hours, since, until, slotMinutes), top);
     }
 }

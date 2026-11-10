@@ -159,4 +159,18 @@ public class SimulationTests
         Assert.DoesNotContain(attempts.Top, r => r.Location.CountryCode == "IT");
         Assert.All(attempts.Top, r => Assert.NotEmpty(r.AttackTypes));
     }
+
+    [Fact]
+    public void Consecutive_slots_touch_without_overlapping()
+    {
+        var q = Queries();
+        var at1047 = new DateTimeOffset(2026, 11, 10, 10, 47, 12, TimeSpan.FromHours(1));
+
+        var slot = q.Resolve(at1047, null, null, null, 30);
+        var next = q.Resolve(at1047.AddMinutes(30), null, null, null, 30);
+
+        Assert.Equal(new DateTimeOffset(2026, 11, 10, 9, 0, 0, TimeSpan.Zero), slot.From);
+        Assert.Equal(new DateTimeOffset(2026, 11, 10, 9, 30, 0, TimeSpan.Zero), slot.To);
+        Assert.Equal(slot.To, next.From);
+    }
 }

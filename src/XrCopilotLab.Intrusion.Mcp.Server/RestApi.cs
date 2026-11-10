@@ -19,11 +19,11 @@ public static class RestApi
         api.MapGet("/banned", (IntrusionQueries q, TimeProvider clock, string? jail) =>
             q.Banned(clock.GetUtcNow(), Blank(jail)));
 
-        api.MapGet("/attempts", (IntrusionQueries q, TimeProvider clock, int? hours, DateTimeOffset? since, DateTimeOffset? until,
+        api.MapGet("/attempts", (IntrusionQueries q, TimeProvider clock, int? hours, DateTimeOffset? since, DateTimeOffset? until, int? slotMinutes,
                 string? jail, string? attackType, string? country, int? top) =>
         {
             var now = clock.GetUtcNow();
-            return q.Attempts(now, q.Resolve(now, hours, since, until), Blank(jail), Blank(attackType), Blank(country), top ?? 20);
+            return q.Attempts(now, q.Resolve(now, hours, since, until, slotMinutes), Blank(jail), Blank(attackType), Blank(country), top ?? 20);
         });
 
         api.MapGet("/ips/{ip}", (IntrusionQueries q, TimeProvider clock, string ip, int? hours, DateTimeOffset? since, DateTimeOffset? until) =>
@@ -32,16 +32,16 @@ public static class RestApi
             return q.IpDetail(now, q.Resolve(now, hours, since, until), ip.Trim());
         });
 
-        api.MapGet("/suspicious-logins", (IntrusionQueries q, TimeProvider clock, int? hours, DateTimeOffset? since, DateTimeOffset? until) =>
+        api.MapGet("/suspicious-logins", (IntrusionQueries q, TimeProvider clock, int? hours, DateTimeOffset? since, DateTimeOffset? until, int? slotMinutes) =>
         {
             var now = clock.GetUtcNow();
-            return q.SuspiciousLogins(now, q.Resolve(now, hours, since, until));
+            return q.SuspiciousLogins(now, q.Resolve(now, hours, since, until, slotMinutes));
         });
 
-        api.MapGet("/summary", (IntrusionQueries q, TimeProvider clock, int? hours, DateTimeOffset? since, DateTimeOffset? until, int? top) =>
+        api.MapGet("/summary", (IntrusionQueries q, TimeProvider clock, int? hours, DateTimeOffset? since, DateTimeOffset? until, int? slotMinutes, int? top) =>
         {
             var now = clock.GetUtcNow();
-            return q.Summary(now, q.Resolve(now, hours, since, until), top ?? 10);
+            return q.Summary(now, q.Resolve(now, hours, since, until, slotMinutes), top ?? 10);
         });
     }
 
