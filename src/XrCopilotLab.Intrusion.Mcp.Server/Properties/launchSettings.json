@@ -1,0 +1,13 @@
+{
+  "profiles": {
+    "simulated": {
+      "commandName": "Project",
+      "launchBrowser": false,
+      "applicationUrl": "http://localhost:5290",
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development",
+        "Server__Mode": "simulated"
+      }
+    }
+  }
+}

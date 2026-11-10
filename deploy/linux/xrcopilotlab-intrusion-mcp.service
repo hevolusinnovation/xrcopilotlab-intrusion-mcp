@@ -1,0 +1,38 @@
+# systemd unit for a real host: the server reads /var/log and never writes outside its own state.
+[Unit]
+Description=XRCopilotLab intrusion MCP server (read-only view of fail2ban and sshd logs)
+After=network-online.target fail2ban.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=xrcopilot-intrusion
+Group=xrcopilot-intrusion
+# adm: the group that can read /var/log/auth.log and /var/log/fail2ban.log on Debian and Ubuntu.
+SupplementaryGroups=adm
+WorkingDirectory=/opt/xrcopilotlab-intrusion-mcp
+ExecStart=/opt/xrcopilotlab-intrusion-mcp/XrCopilotLab.Intrusion.Mcp.Server
+Environment=ASPNETCORE_ENVIRONMENT=Production
+Environment=DOTNET_gcServer=0
+# ApiKeys__Hash=<sha256 of the key>: written by install.sh, readable by root and the service only.
+EnvironmentFile=/etc/xrcopilotlab-intrusion-mcp/env
+Restart=on-failure
+RestartSec=5
+
+# Hardening: read-only system, no privilege escalation, only the network it needs.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictSUIDSGID=true
+LockPersonality=true
+ReadOnlyPaths=/var/log
+CapabilityBoundingSet=
+
+[Install]
+WantedBy=multi-user.target

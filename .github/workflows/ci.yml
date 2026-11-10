@@ -1,0 +1,23 @@
+name: CI
+
+# Build e test su ogni PR verso main e su ogni push a main; riusato dal deploy.
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+      - name: Test
+        run: dotnet test XrCopilotLab.Intrusion.Mcp.slnx --configuration Release --verbosity minimal

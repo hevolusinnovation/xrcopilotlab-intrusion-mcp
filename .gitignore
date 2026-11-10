@@ -1,0 +1,21 @@
+# Build artifacts
+bin/
+obj/
+out/
+*.user
+*.suo
+.vs/
+.idea/
+.DS_Store
+
+# Local env files (never commit secrets)
+.env
+.env.local
+appsettings.Development.json
+appsettings.Local.json
+
+# Bicep build artifacts
+*.bicep.json
+
+# Release tarballs
+out/

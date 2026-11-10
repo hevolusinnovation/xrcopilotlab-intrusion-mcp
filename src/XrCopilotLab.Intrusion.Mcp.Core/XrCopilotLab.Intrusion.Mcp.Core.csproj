@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>XrCopilotLab.Intrusion.Mcp.Core</RootNamespace>
+    <AssemblyName>XrCopilotLab.Intrusion.Mcp.Core</AssemblyName>
+    <IsPackable>false</IsPackable>
+    <Description>Pure intrusion logic: fail2ban and sshd log parsing, attack classification, per-IP analysis, IP geolocation tables, the synthetic host of the simulated mode. No I/O.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="XrCopilotLab.Intrusion.Mcp.Core.Tests" />
+  </ItemGroup>
+
+</Project>

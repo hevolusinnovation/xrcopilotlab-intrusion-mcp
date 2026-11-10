@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/XrCopilotLab.Intrusion.Mcp.Core/XrCopilotLab.Intrusion.Mcp.Core.csproj" />
+    <Project Path="src/XrCopilotLab.Intrusion.Mcp.Server/XrCopilotLab.Intrusion.Mcp.Server.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/XrCopilotLab.Intrusion.Mcp.Core.Tests/XrCopilotLab.Intrusion.Mcp.Core.Tests.csproj" />
+  </Folder>
+</Solution>

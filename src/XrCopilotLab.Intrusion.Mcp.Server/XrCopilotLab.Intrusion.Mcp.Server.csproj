@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <RootNamespace>XrCopilotLab.Intrusion.Mcp.Server</RootNamespace>
+    <AssemblyName>XrCopilotLab.Intrusion.Mcp.Server</AssemblyName>
+    <UserSecretsId>xrcopilotlab-intrusion-mcp-dev</UserSecretsId>
+    <NoWarn>$(NoWarn);OTEL1000;OTEL1001</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\XrCopilotLab.Intrusion.Mcp.Core\XrCopilotLab.Intrusion.Mcp.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup Label="MCP server SDK">
+    <PackageReference Include="ModelContextProtocol" />
+    <PackageReference Include="ModelContextProtocol.AspNetCore" />
+  </ItemGroup>
+
+  <ItemGroup Label="Telemetry">
+    <PackageReference Include="OpenTelemetry.Extensions.Hosting" />
+    <PackageReference Include="OpenTelemetry.Instrumentation.AspNetCore" />
+    <PackageReference Include="Azure.Monitor.OpenTelemetry.AspNetCore" />
+  </ItemGroup>
+
+</Project>
