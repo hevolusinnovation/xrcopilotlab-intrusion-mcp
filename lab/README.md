@@ -7,7 +7,8 @@ what the package on `lab-01` detects.
 
 ```bash
 make lab-up      # builds and starts; creates lab/.env with the lab key on the first run
-make lab-down    # stops and deletes the lab's state
+make lab-down    # stops the lab (keeps the tunnel login: same public address)
+make lab-reset   # stops the lab and deletes all its state, tunnel login included
 ```
 
 ## What runs
