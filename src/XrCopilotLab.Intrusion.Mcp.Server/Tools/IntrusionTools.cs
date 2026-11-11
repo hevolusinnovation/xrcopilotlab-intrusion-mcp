@@ -1,6 +1,8 @@
 using System.ComponentModel;
+using ModelContextProtocol;
 using ModelContextProtocol.Server;
 using XrCopilotLab.Intrusion.Mcp.Core.Queries;
+using XrCopilotLab.Intrusion.Mcp.Server.Sources;
 
 namespace XrCopilotLab.Intrusion.Mcp.Server.Tools;
 
@@ -9,8 +11,10 @@ namespace XrCopilotLab.Intrusion.Mcp.Server.Tools;
 /// simulated host) and never ban, unban or change anything. Every answer says whether the data is simulated.
 /// </summary>
 [McpServerToolType]
-public sealed class IntrusionTools(IntrusionQueries queries, TimeProvider clock)
+public sealed class IntrusionTools(QueryScope scope, IHttpContextAccessor http, TimeProvider clock)
 {
+    private const string HostHelp = "Only this host (see intrusion_status for the names). Null = all the hosts of this workspace together.";
+
     private const string SlotHelp =
         "For a scheduled round: the last complete slot of this many minutes aligned to the clock (30 at 10:47 = 10:00-10:30), " +
         "so consecutive rounds never see the same event twice. Wins over hours, since and until.";
@@ -21,22 +25,31 @@ public sealed class IntrusionTools(IntrusionQueries queries, TimeProvider clock)
      Description(
         "State of the protection on the host: which detectors are reporting (fail2ban, sshd, ufw, nginx, crowdsec), which fail2ban " +
         "jails are active and how many addresses each one is banning now, events in the last 24 hours. Call it first to know what the host watches.")]
-    public StatusResult Status() => queries.Status(clock.GetUtcNow());
+    public async Task<StatusResult> Status(
+        [Description(HostHelp)] string? host = null, CancellationToken ct = default)
+    {
+        var (q, now) = await OpenAsync(host, ct);
+        return q.Status(now);
+    }
 
     [McpServerTool(Name = "intrusion_banned_ips", ReadOnly = true),
      Description(
         "The addresses fail2ban is banning right now, newest first, with the jail, the attack type, since when, and where " +
         "the address is (country, city, coordinates, network).")]
-    public BannedResult BannedIps(
-        [Description("Only this jail (sshd, nginx-http-auth, nginx-botsearch, nginx-limit-req, recidive…). Null = all.")] string? jail = null)
-        => queries.Banned(clock.GetUtcNow(), jail);
+    public async Task<BannedResult> BannedIps(
+        [Description("Only this jail (sshd, nginx-http-auth, nginx-botsearch, nginx-limit-req, recidive…). Null = all.")] string? jail = null,
+        [Description(HostHelp)] string? host = null, CancellationToken ct = default)
+    {
+        var (q, now) = await OpenAsync(host, ct);
+        return q.Banned(now, jail);
+    }
 
     [McpServerTool(Name = "intrusion_attempts", ReadOnly = true),
      Description(
         "Intrusion attempts in a period, one row per source address, most serious first: attempts, bans, accounts tried, " +
         "attack types, severity (Low, Medium, High, Critical), location, closed ports probed, web attack patterns, CrowdSec scenarios. " +
         "Filter by jail, attack type or country.")]
-    public AttemptsResult Attempts(
+    public async Task<AttemptsResult> Attempts(
         [Description(PeriodHelp)] int? hours = null,
         [Description("Start of the period (ISO 8601). Null = now minus hours.")] DateTimeOffset? since = null,
         [Description("End of the period (ISO 8601). Null = now.")] DateTimeOffset? until = null,
@@ -44,9 +57,10 @@ public sealed class IntrusionTools(IntrusionQueries queries, TimeProvider clock)
         [Description("Only addresses seen by this fail2ban jail. Null = all.")] string? jail = null,
         [Description("Only this attack type: SshBruteForce, DistributedSshBruteForce, WebLoginBruteForce, WebVulnerabilityScan, WebExploitAttempt, RequestFlood, MailLoginBruteForce, PortScan, IndustrialProtocolProbe, RepeatOffender, LoginAfterFailures. Null = all.")] string? attackType = null,
         [Description("Only addresses in this country (ISO code, e.g. CN). Null = all.")] string? country = null,
-        [Description("Max rows. Default 20, max 100.")] int top = 20)
+        [Description("Max rows. Default 20, max 100.")] int top = 20,
+        [Description(HostHelp)] string? host = null, CancellationToken ct = default)
     {
-        var now = clock.GetUtcNow();
+        var (queries, now) = await OpenAsync(host, ct);
         return queries.Attempts(now, queries.Resolve(now, hours, since, until, slotMinutes), jail, attackType, country, top);
     }
 
@@ -54,13 +68,14 @@ public sealed class IntrusionTools(IntrusionQueries queries, TimeProvider clock)
      Description(
         "Everything one address did in the period: the summary row, any suspicious login, and the timeline of its events " +
         "(failed and successful logins, fail2ban matches and bans, blocked connections, web attacks, CrowdSec alerts), newest first, up to 200.")]
-    public IpDetailResult IpDetail(
+    public async Task<IpDetailResult> IpDetail(
         [Description("The source address (IPv4 or IPv6).")] string ip,
         [Description(PeriodHelp)] int? hours = null,
         [Description("Start of the period (ISO 8601). Null = now minus hours.")] DateTimeOffset? since = null,
-        [Description("End of the period (ISO 8601). Null = now.")] DateTimeOffset? until = null)
+        [Description("End of the period (ISO 8601). Null = now.")] DateTimeOffset? until = null,
+        [Description(HostHelp)] string? host = null, CancellationToken ct = default)
     {
-        var now = clock.GetUtcNow();
+        var (queries, now) = await OpenAsync(host, ct);
         return queries.IpDetail(now, queries.Resolve(now, hours, since, until), ip.Trim());
     }
 
@@ -68,13 +83,14 @@ public sealed class IntrusionTools(IntrusionQueries queries, TimeProvider clock)
      Description(
         "Successful SSH logins a person should check: after repeated failures from the same address (possible compromise, " +
         "Critical) or from a country users are not expected to work from (High).")]
-    public SuspiciousLoginsResult SuspiciousLogins(
+    public async Task<SuspiciousLoginsResult> SuspiciousLogins(
         [Description(PeriodHelp)] int? hours = null,
         [Description("Start of the period (ISO 8601). Null = now minus hours.")] DateTimeOffset? since = null,
         [Description("End of the period (ISO 8601). Null = now.")] DateTimeOffset? until = null,
-        [Description(SlotHelp)] int? slotMinutes = null)
+        [Description(SlotHelp)] int? slotMinutes = null,
+        [Description(HostHelp)] string? host = null, CancellationToken ct = default)
     {
-        var now = clock.GetUtcNow();
+        var (queries, now) = await OpenAsync(host, ct);
         return queries.SuspiciousLogins(now, queries.Resolve(now, hours, since, until, slotMinutes));
     }
 
@@ -83,14 +99,25 @@ public sealed class IntrusionTools(IntrusionQueries queries, TimeProvider clock)
         "The picture of a period in one call: totals, attempts by attack type and by country, the most targeted closed ports, the top attackers, distributed " +
         "campaigns (one account tried from many addresses, each under the ban threshold), suspicious logins, and map points " +
         "(latitude, longitude, severity) ready for a map. Use it for a report or a dashboard.")]
-    public SummaryResult Summary(
+    public async Task<SummaryResult> Summary(
         [Description(PeriodHelp)] int? hours = null,
         [Description("Start of the period (ISO 8601). Null = now minus hours.")] DateTimeOffset? since = null,
         [Description("End of the period (ISO 8601). Null = now.")] DateTimeOffset? until = null,
         [Description(SlotHelp)] int? slotMinutes = null,
-        [Description("Max top attackers. Default 10, max 100.")] int top = 10)
+        [Description("Max top attackers. Default 10, max 100.")] int top = 10,
+        [Description(HostHelp)] string? host = null, CancellationToken ct = default)
     {
-        var now = clock.GetUtcNow();
+        var (queries, now) = await OpenAsync(host, ct);
         return queries.Summary(now, queries.Resolve(now, hours, since, until, slotMinutes), top);
+    }
+
+    private async Task<(IntrusionQueries Queries, DateTimeOffset Now)> OpenAsync(string? host, CancellationToken ct)
+    {
+        var user = http.HttpContext!.User;
+        var now = clock.GetUtcNow();
+        var name = string.IsNullOrWhiteSpace(host) ? null : host.Trim();
+        var queries = await scope.OpenAsync(user, name, now, ct)
+            ?? throw new McpException($"Host '{host}' is not one of this workspace's hosts: {string.Join(", ", scope.HostNames(user))}.");
+        return (queries, now);
     }
 }

@@ -68,7 +68,8 @@ public sealed class IntrusionQueries(ILogSource source, IGeoLocator geo, Intrusi
             bans.Select(b => b.Ip).Distinct().Count(),
             detectors,
             jails,
-            geo.Attribution);
+            geo.Attribution,
+            source.Hosts);
     }
 
     public BannedResult Banned(DateTimeOffset now, string? jail)
@@ -101,7 +102,7 @@ public sealed class IntrusionQueries(ILogSource source, IGeoLocator geo, Intrusi
             .OrderByDescending(e => e.Time)
             .Take(MaxTimeline)
             .Select(e => new TimelineEntry(e.Time, e.Kind.ToString(), DetectorName(e.Origin), e.Jail, e.User, e.Port, e.Method,
-                e.TargetPort, e.Path, e.Status, e.Rule, e.Detail))
+                e.TargetPort, e.Path, e.Status, e.Rule, e.Detail, e.Host))
             .ToList();
         return new IpDetailResult(source.Hostname, source.Simulated, period, report,
             _analyzer.SuspiciousLogins(events).Where(s => s.Ip == ip && s.Time >= period.From).ToList(),

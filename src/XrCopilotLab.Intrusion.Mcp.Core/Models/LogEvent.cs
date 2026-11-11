@@ -69,4 +69,7 @@ public sealed record LogEvent(
     string? Detail = null)
 {
     public bool IsBanStart => Kind is LogEventKind.Ban or LogEventKind.RestoreBan;
+
+    /// <summary>The host whose log the line comes from: a collector holds the events of several hosts.</summary>
+    public string? Host { get; init; }
 }

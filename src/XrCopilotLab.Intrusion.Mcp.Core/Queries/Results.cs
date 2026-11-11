@@ -1,4 +1,5 @@
 using XrCopilotLab.Intrusion.Mcp.Core.Geo;
+using XrCopilotLab.Intrusion.Mcp.Core.Sources;
 
 namespace XrCopilotLab.Intrusion.Mcp.Core.Queries;
 
@@ -83,7 +84,8 @@ public sealed record StatusResult(
     int CurrentlyBanned,
     IReadOnlyList<DetectorStatus> Detectors,
     IReadOnlyList<JailStatus> Jails,
-    string? GeoAttribution);
+    string? GeoAttribution,
+    IReadOnlyList<HostInfo>? Hosts = null);
 
 public sealed record BannedIp(string Ip, string Jail, string AttackType, DateTimeOffset Since, GeoLocation Location);
 
@@ -94,7 +96,7 @@ public sealed record AttemptsResult(string Host, bool Simulated, Period Period, 
 /// <summary>One event of an address: <c>Port</c> is its source port on SSH, <c>TargetPort</c> the closed port it tried,
 /// <c>Rule</c> the web pattern or CrowdSec scenario.</summary>
 public sealed record TimelineEntry(DateTimeOffset Time, string Kind, string Origin, string? Jail, string? User, int? Port, string? Method,
-    int? TargetPort, string? Path, int? Status, string? Rule, string? Detail);
+    int? TargetPort, string? Path, int? Status, string? Rule, string? Detail, string? Host = null);
 
 public sealed record IpDetailResult(string Host, bool Simulated, Period Period, IpReport? Report, IReadOnlyList<SuspiciousLogin> SuspiciousLogins,
     int TimelineCount, IReadOnlyList<TimelineEntry> Timeline, string? GeoAttribution);

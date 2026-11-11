@@ -67,8 +67,10 @@ public sealed class FileLogSource(LogFileOptions options, ILogger<FileLogSource>
             Lines(options.FirewallFiles, since),
             Lines(options.WebAccessFiles, since),
             Lines(options.CrowdsecFiles, since));
+        var host = Hostname;
         var events = LogLines.Parse(logs, _zone, now)
             .Where(e => e.Time >= since && e.Time <= now)
+            .Select(e => e with { Host = host })
             .ToList();
         events.Sort((a, b) => a.Time.CompareTo(b.Time));
         return events;
