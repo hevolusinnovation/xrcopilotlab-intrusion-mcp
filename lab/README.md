@@ -15,10 +15,31 @@ make lab-down    # stops and deletes the lab's state
 | Container | What | Notes |
 |---|---|---|
 | `lab-01` | Ubuntu 24.04 with systemd: sshd (password login, user `operatore`), nginx (site, `/admin/` with basic auth, the package's API under `/intrusion-mcp/`), fail2ban (`sshd`, `nginx-http-auth`, `nginx-botsearch`, `nginx-limit-req`, `recidive`, times shortened), a UFW-like firewall, the package (`xrcopilotlab-intrusion-mcp.service`, logs mode) | privileged: systemd as PID 1, iptables. A lab container, never a pattern for production |
-| `attacker` | nmap, ssh, Python: fixed scenarios against `lab-01` only, and the console | its lab networks are `internal`: nothing reaches the internet |
+| `attacker` | nmap, ssh, Python: fixed scenarios against `lab-01` only, and the console | its lab networks are `internal`: no attack reaches the internet |
+| `tunnel` | Dev Tunnels CLI, socat, a small controller driven by the console | the only container that goes out to the internet, for the tunnel |
 
 UFW logs through the kernel LOG target, which a container cannot read: the lab's firewall uses NFLOG, ulogd2 and
 rsyslog to write **the same line** to `/var/log/ufw.log`, so the package's parser is the one a real host uses.
+
+## Public address for XRCopilotLab (Dev Tunnels)
+
+The `tunnel` container gives lab-01's API a public HTTPS address with Microsoft Dev Tunnels, so that a connection
+in XRCopilotLab can call the lab running on a laptop. Nothing is installed on the Mac.
+
+1. In the console, **Collegamento a XRCopilotLab › Accedi con l'account Microsoft**: the console shows Microsoft's
+   link and a code; sign in there with an Entra ID (Hevolus), Microsoft or GitHub account.
+2. The tunnel opens by itself (persistent, anonymous access, expires after 30 days unused) and the console shows its
+   addresses: `…/api` for a connection with HTTP tools, `…/mcp` for an MCP client, and a button that copies the
+   `X-API-Key`.
+3. **Verifica dall'indirizzo pubblico** calls the package through the public address, as XRCopilotLab will.
+
+What the tunnel reaches: only lab-01's port 8091, which serves `/api/` and `/mcp` and nothing else (its own nginx
+logs, the firewall allows only the tunnel container). Anonymous access is needed because XRCopilotLab cannot log in to
+Dev Tunnels: every call still needs the key. The login and the tunnel id live in the `tunnel-login` volume:
+`make lab-down` keeps them (same address next time), `make lab-reset` deletes them.
+
+Dev Tunnels has no price list; the limits are 5 GB of traffic and 10 tunnels per user per month. It is a preview
+service for development and tests, not for a customer's server.
 
 ## Addresses and places
 

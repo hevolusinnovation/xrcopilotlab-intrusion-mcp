@@ -54,6 +54,17 @@ td.num { font-variant-numeric: tabular-nums; text-align: right; }
 .leaflet-popup-content { font: 13px/1.45 system-ui, sans-serif; }
 .muted { color: var(--muted); }
 .error { color: var(--critical); font-size: 12px; }
+.tunnel { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
+.tunnel .state { font-size: 13px; }
+.tunnel .state b.on { color: var(--ok); } .tunnel .state b.off { color: var(--muted); } .tunnel .state b.err { color: var(--critical); }
+.tunnel .code { font: 600 20px ui-monospace, Menlo, monospace; letter-spacing: .12em; }
+.tunnel .field { display: flex; gap: 6px; align-items: center; }
+.tunnel .field code { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; background: #0b0f13; border: 1px solid var(--line); border-radius: 6px; padding: 4px 6px; font-size: 12px; }
+.tunnel .label { color: var(--muted); font-size: 11px; }
+.btn { background: var(--accent); color: #0b0f13; border: 0; border-radius: 6px; padding: 5px 10px; font: 600 12px system-ui, sans-serif; cursor: pointer; }
+.btn.ghost { background: transparent; color: var(--text); border: 1px solid var(--line); }
+.btn:disabled { opacity: .5; cursor: default; }
+.tunnel a { color: var(--accent); }
 @media (max-width: 900px) {
   .app { grid-template-columns: 1fr; height: auto; }
   aside { border-right: 0; border-bottom: 1px solid var(--line); }
@@ -76,6 +87,11 @@ td.num { font-variant-numeric: tabular-nums; text-align: right; }
     </div>
 
     <div class="alert" id="alert"></div>
+
+    <div>
+      <h2>Collegamento a XRCopilotLab</h2>
+      <div class="tunnel" id="tunnel"><span class="muted">Controllo del tunnel…</span></div>
+    </div>
 
     <div>
       <h2>Attacchi</h2>
@@ -261,6 +277,73 @@ loadScenarios().then(refreshRuns);
 refreshLab();
 setInterval(refreshRuns, 1500);
 setInterval(refreshLab, 4000);
+// --- Tunnel: the lab's public address (Microsoft Dev Tunnels), for the XRCopilotLab connection ---------------
+let tunnelPhase = null;
+async function refreshTunnel() {
+  const t = await fetch("/api/tunnel/status").then(r => r.ok ? r.json() : null).catch(() => null);
+  const box = $("tunnel");
+  if (!t) { box.innerHTML = `<span class="error">Il container del tunnel non risponde.</span>`; return; }
+  if (t.phase === tunnelPhase && t.phase === "online" && box.dataset.url === t.url) return;  // keep the copy buttons stable
+  tunnelPhase = t.phase;
+  box.dataset.url = t.url || "";
+  const user = t.user ? ` · ${esc(t.user)}` : "";
+  if (t.phase === "logged-out") {
+    box.innerHTML = `<div class="state"><b class="off">Non collegato</b></div>
+      <div class="muted" style="font-size:12px">Per dare a lab-01 un indirizzo pubblico serve un account Microsoft (Entra ID Hevolus, Microsoft o GitHub). Il servizio è Microsoft Dev Tunnels, senza costi.</div>
+      ${t.error ? `<div class="error">${esc(t.error)}</div>` : ""}
+      <div><button class="btn" onclick="tunnelAction('login')">Accedi con l'account Microsoft</button></div>`;
+  } else if (t.phase === "login-pending") {
+    box.innerHTML = t.login
+      ? `<div class="state"><b class="off">Accesso in corso</b></div>
+         <div>Apri <a href="${esc(t.login.url)}" target="_blank" rel="noopener">${esc(t.login.url)}</a> e inserisci il codice:</div>
+         <div class="field"><span class="code">${esc(t.login.code)}</span><button class="btn ghost" onclick="copy('${esc(t.login.code)}', this)">Copia</button></div>
+         <div class="muted" style="font-size:12px">Questa pagina si aggiorna da sola quando l'accesso è completato.</div>`
+      : `<div class="state"><b class="off">Richiesta del codice…</b></div>`;
+  } else if (t.phase === "online") {
+    box.innerHTML = `<div class="state"><b class="on">● Online</b>${user} · dalle ${esc(t.since || "")}</div>
+      <div><div class="label">Indirizzo della connessione (blueprint, tool HTTP)</div>
+        <div class="field"><code>${esc(t.url)}/api</code><button class="btn ghost" onclick="copy('${esc(t.url)}/api', this)">Copia</button></div></div>
+      <div><div class="label">Indirizzo MCP</div>
+        <div class="field"><code>${esc(t.url)}/mcp</code><button class="btn ghost" onclick="copy('${esc(t.url)}/mcp', this)">Copia</button></div></div>
+      <div><div class="label">Intestazione X-API-Key</div>
+        <div class="field"><code>••••••••••••••••</code><button class="btn ghost" onclick="copyKey(this)">Copia la chiave</button></div></div>
+      <div class="field"><button class="btn" onclick="checkTunnel(this)">Verifica dall'indirizzo pubblico</button><span id="tunnel-check" class="muted" style="font-size:12px"></span></div>
+      <div><button class="btn ghost" onclick="tunnelAction('restart')">Riavvia</button> <button class="btn ghost" onclick="tunnelAction('logout')">Esci</button></div>`;
+  } else if (t.phase === "error") {
+    box.innerHTML = `<div class="state"><b class="err">Tunnel chiuso</b>${user}</div><div class="error">${esc(t.error || "")}</div>
+      <div><button class="btn" onclick="tunnelAction('restart')">Riapri il tunnel</button> <button class="btn ghost" onclick="tunnelAction('logout')">Esci</button></div>`;
+  } else {
+    box.innerHTML = `<div class="state"><b class="off">Apertura del tunnel…</b>${user}</div>`;
+  }
+}
+
+async function tunnelAction(action) {
+  tunnelPhase = null;
+  await fetch(`/api/tunnel/${action}`, { method: "POST" }).catch(() => null);
+  refreshTunnel();
+}
+
+async function copy(text, button) {
+  await navigator.clipboard.writeText(text);
+  const old = button.textContent; button.textContent = "Copiato"; setTimeout(() => button.textContent = old, 1500);
+}
+
+async function copyKey(button) {
+  const r = await fetch("/api/tunnel/key").then(r => r.json());
+  copy(r.key, button);
+}
+
+async function checkTunnel(button) {
+  button.disabled = true; $("tunnel-check").textContent = "verifica in corso…";
+  const r = await fetch("/api/tunnel/check").then(r => r.json()).catch(() => ({ ok: false, error: "nessuna risposta" }));
+  $("tunnel-check").innerHTML = r.ok
+    ? `<span style="color:var(--ok)">funziona: risponde ${esc(r.host)} (${esc((r.detectors || []).join(", "))})</span>`
+    : `<span class="error">${esc(r.error)}</span>`;
+  button.disabled = false;
+}
+
+refreshTunnel();
+setInterval(refreshTunnel, 2000);
 </script>
 </body>
 </html>

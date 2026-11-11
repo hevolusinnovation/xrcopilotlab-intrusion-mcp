@@ -1,7 +1,9 @@
-# The intrusion lab: lab-01 (an Ubuntu server with the customer package installed) and the attacker, which also serves
-# the console on http://localhost:8090. Three networks with documentation addresses (RFC 5737): every attacker
-# address gets an invented city, as in the simulated mode. None of them reaches the internet.
-#   make lab-up    /    make lab-down
+# The intrusion lab: lab-01 (an Ubuntu server with the customer package installed), the attacker, which also serves
+# the console on http://localhost:8090, and the tunnel that gives lab-01's API a public address (Dev Tunnels).
+# Three networks with documentation addresses (RFC 5737): every attacker address gets an invented city, as in the
+# simulated mode. None of them reaches the internet.
+#   make lab-up    /    make lab-down    /    make lab-reset
+
 name: intrusion-lab
 
 services:
@@ -22,6 +24,7 @@ services:
       it:       { ipv4_address: 198.51.100.20 }
       internet: { ipv4_address: 203.0.113.250 }
       homes:    { ipv4_address: 192.0.2.250 }
+      tunnel:   { ipv4_address: 10.77.0.20 }
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/healthz"]
       interval: 10s
@@ -47,6 +50,25 @@ services:
     depends_on:
       lab-01: { condition: service_healthy }
 
+  # The lab's public address (Microsoft Dev Tunnels): login and address from the console, nothing on the Mac.
+  tunnel:
+    build:
+      context: tunnel
+    hostname: tunnel
+    environment:
+      LAB_API: 10.77.0.20:8091
+    volumes:
+      - tunnel-login:/root
+    networks:
+      tunnel:  { ipv4_address: 10.77.0.30 }
+      console: {}
+    depends_on:
+      lab-01: { condition: service_healthy }
+
+volumes:
+  # The Dev Tunnels login and the tunnel id: kept by make lab-down, so the address does not change.
+  tunnel-login: {}
+
 networks:
   # Docker gives its own addresses from the /28 at the top; the attackers' addresses are added below it.
   it:
@@ -58,5 +80,9 @@ networks:
   homes:
     internal: true
     ipam: { config: [ { subnet: 192.0.2.0/24, ip_range: 192.0.2.240/28, gateway: 192.0.2.254 } ] }
+  # lab-01's API-only port, for the tunnel container.
+  tunnel:
+    internal: true
+    ipam: { config: [ { subnet: 10.77.0.0/24 } ] }
   # The only network with a way out: it publishes the console on the Mac's localhost. The attacks never use it.
   console: {}

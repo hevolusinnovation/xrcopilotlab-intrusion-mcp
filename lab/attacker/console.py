@@ -17,6 +17,7 @@ API = f"http://{os.environ.get('TARGET_IT', '198.51.100.20')}/intrusion-mcp/api/
 KEY = os.environ["LAB_API_KEY"]
 STATIC = Path(__file__).parent / "static"
 READ_ROUTES = {"status", "summary", "banned", "suspicious-logins", "attempts"}
+TUNNEL = os.environ.get("TUNNEL_CONTROLLER", "http://tunnel:8092")
 runner = scenarios.Runner()
 
 
@@ -41,6 +42,14 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, scenarios.describe())
         if url.path == "/api/runs":
             return self._send(200, {"current": runner.current["id"] if runner.current else None, "runs": runner.runs[::-1]})
+        if url.path == "/api/tunnel/status":
+            return self._forward(TUNNEL + "/status", "GET")
+        if url.path == "/api/tunnel/key":
+            # The console is published on the Mac's localhost only: the key goes to the person who copies it into
+            # the XRCopilotLab connection, and nowhere else.
+            return self._send(200, {"key": KEY})
+        if url.path == "/api/tunnel/check":
+            return self._check_tunnel()
         if url.path.startswith("/api/lab/"):
             route = url.path[len("/api/lab/"):]
             if route not in READ_ROUTES:
@@ -53,7 +62,35 @@ class Handler(BaseHTTPRequestHandler):
         if len(parts) == 4 and parts[:2] == ["api", "scenarios"] and parts[3] == "run":
             run, error = runner.start(parts[2])
             return self._send(202, run) if run else self._send(409, {"error": error})
+        if len(parts) == 3 and parts[:2] == ["api", "tunnel"] and parts[2] in ("login", "logout", "restart"):
+            return self._forward(f"{TUNNEL}/{parts[2]}", "POST")
         return self._send(404, {"error": "not found"})
+
+    def _forward(self, target, method):
+        request = urllib.request.Request(target, method=method, data=b"" if method == "POST" else None)
+        try:
+            with urllib.request.urlopen(request, timeout=20) as response:
+                return self._send(response.status, response.read())
+        except urllib.error.HTTPError as ex:
+            return self._send(ex.code, ex.read() or {"error": f"tunnel answered {ex.code}"})
+        except OSError as ex:
+            return self._send(502, {"error": f"tunnel unreachable: {ex}"})
+
+    def _check_tunnel(self):
+        """Calls the package through the public address, as XRCopilotLab will: proves the whole path works."""
+        try:
+            with urllib.request.urlopen(TUNNEL + "/status", timeout=10) as response:
+                url = json.loads(response.read()).get("url")
+            if not url:
+                return self._send(409, {"ok": False, "error": "il tunnel non è aperto"})
+            request = urllib.request.Request(url + "/api/status", headers={"X-API-Key": KEY})
+            with urllib.request.urlopen(request, timeout=30) as response:
+                status = json.loads(response.read())
+            return self._send(200, {"ok": True, "host": status.get("host"), "detectors": [d["detector"] for d in status.get("detectors", [])]})
+        except urllib.error.HTTPError as ex:
+            return self._send(200, {"ok": False, "error": f"risposta {ex.code} dall'indirizzo pubblico"})
+        except OSError as ex:
+            return self._send(200, {"ok": False, "error": f"indirizzo pubblico non raggiungibile: {ex}"})
 
     def _proxy(self, route, query):
         request = urllib.request.Request(API + route + (f"?{query}" if query else ""), headers={"X-API-Key": KEY})

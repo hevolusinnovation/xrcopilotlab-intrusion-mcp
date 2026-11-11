@@ -5,8 +5,8 @@ banaction = iptables-multiport
 findtime  = 1m
 maxretry  = 5
 bantime   = 10m
-# The console's own addresses (docker-assigned range): it reads the API through nginx and must never be banned.
-ignoreip  = 127.0.0.1/8 ::1 198.51.100.240/28
+# The console (docker-assigned range) and the tunnel (10.77.0.0/24) read the API through nginx: never banned.
+ignoreip  = 127.0.0.1/8 ::1 198.51.100.240/28 10.77.0.0/24
 
 [sshd]
 enabled = true

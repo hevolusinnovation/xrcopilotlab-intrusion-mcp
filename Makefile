@@ -9,7 +9,8 @@
 #   make smoke                                 # /healthz on the deployed fqdn
 #   make package      VERSION=1.0.0            # tarball for a real host (RID=linux-x64|linux-arm64): single binary + systemd unit + install script
 #   make lab-up                                # Docker lab: Ubuntu server with the package installed + attack console on http://localhost:8090
-#   make lab-down                              # stops the lab and deletes its state
+#   make lab-down                              # stops the lab (keeps the tunnel login: same public address)
+#   make lab-reset                             # stops the lab and deletes all its state, tunnel login included
 #   make key                                   # prints the SHA-256 of a key read from the terminal (never the key)
 #
 # INTRUSION_MCP_API_KEY is read from the environment (e.g. from Key Vault), never written in a file of the repo.
@@ -26,7 +27,7 @@ IMAGE   := $(ACR)/xrcopilotlab-intrusion-mcp:$(TAG)
 SERVER  := src/XrCopilotLab.Intrusion.Mcp.Server/XrCopilotLab.Intrusion.Mcp.Server.csproj
 RID     ?= linux-x64
 
-.PHONY: help build test run docker-build docker-push deploy smoke package key lab-up lab-down
+.PHONY: help build test run docker-build docker-push deploy smoke package key lab-up lab-down lab-reset
 
 help:
 	@grep -E '^#   make' Makefile | sed 's/^#   //'
@@ -74,5 +75,10 @@ lab-up:
 	docker compose -f lab/docker-compose.yml --env-file lab/.env up -d --build
 	@echo "console: http://localhost:8090"
 
+# Keeps the Dev Tunnels login and the tunnel id (volume tunnel-login): the public address stays the same.
 lab-down:
+	docker compose -f lab/docker-compose.yml --env-file lab/.env down
+
+# Deletes everything, the tunnel login too: the next tunnel gets a new address.
+lab-reset:
 	docker compose -f lab/docker-compose.yml --env-file lab/.env down -v

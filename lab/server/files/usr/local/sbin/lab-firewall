@@ -9,5 +9,7 @@ iptables -A INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
 iptables -A INPUT -p icmp -j ACCEPT
 iptables -A INPUT -p tcp --dport 22 -j ACCEPT
 iptables -A INPUT -p tcp --dport 80 -j ACCEPT
+# The package API for the Dev Tunnel, from the tunnel container only (nginx allows the same range).
+iptables -A INPUT -p tcp -s 10.77.0.0/24 --dport 8091 -j ACCEPT
 iptables -A INPUT -m limit --limit 50/s --limit-burst 200 -j NFLOG --nflog-group 1 --nflog-prefix "[UFW BLOCK] "
 iptables -A INPUT -j DROP
