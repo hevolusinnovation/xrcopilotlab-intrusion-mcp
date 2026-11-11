@@ -1,0 +1,34 @@
+# The usual jails, with times shortened for a demo: a ban lasts minutes, not hours, so the attackers come back.
+[DEFAULT]
+backend   = auto
+banaction = iptables-multiport
+findtime  = 1m
+maxretry  = 5
+bantime   = 10m
+# The console's own addresses (docker-assigned range): it reads the API through nginx and must never be banned.
+ignoreip  = 127.0.0.1/8 ::1 198.51.100.240/28
+
+[sshd]
+enabled = true
+logpath = /var/log/auth.log
+
+[nginx-http-auth]
+enabled = true
+logpath = /var/log/nginx/error.log
+
+[nginx-botsearch]
+enabled  = true
+logpath  = /var/log/nginx/error.log
+maxretry = 3
+
+[nginx-limit-req]
+enabled  = true
+logpath  = /var/log/nginx/error.log
+maxretry = 10
+
+[recidive]
+enabled  = true
+logpath  = /var/log/fail2ban.log
+findtime = 1h
+maxretry = 3
+bantime  = 30m

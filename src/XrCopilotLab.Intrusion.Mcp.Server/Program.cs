@@ -60,7 +60,9 @@ else
     var logs = builder.Configuration.GetSection(LogFileOptions.SectionName).Get<LogFileOptions>() ?? new LogFileOptions();
     var geo = builder.Configuration.GetSection(GeoOptions.SectionName).Get<GeoOptions>() ?? new GeoOptions();
     builder.Services.AddSingleton<ILogSource>(sp => new FileLogSource(logs, sp.GetRequiredService<ILogger<FileLogSource>>()));
-    builder.Services.AddSingleton<IGeoLocator>(sp => GeoDatabaseLoader.Load(geo, sp.GetRequiredService<ILoggerFactory>().CreateLogger("Geo")));
+    // Documentation addresses (RFC 5737) never reach a real host from the internet: they are the Docker lab's attackers,
+    // and get the invented places of the simulated mode, so the lab's map has cities. Every other address: DB-IP.
+    builder.Services.AddSingleton<IGeoLocator>(sp => new DocumentationAwareGeo(GeoDatabaseLoader.Load(geo, sp.GetRequiredService<ILoggerFactory>().CreateLogger("Geo"))));
 }
 builder.Services.AddSingleton<IntrusionQueries>();
 builder.Services.AddScoped<IntrusionTools>();

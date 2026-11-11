@@ -1,0 +1,53 @@
+# Intrusion lab
+
+A Docker lab for demos and tests: an Ubuntu 24.04 server (`lab-01`) with sshd, nginx, fail2ban and a firewall, on
+which the **customer package** is installed by its own `install.sh` (same tarball as `make package`), and an attacker
+that also serves the console on **http://localhost:8090**: attack buttons, and the map (OpenStreetMap) and table of
+what the package on `lab-01` detects.
+
+```bash
+make lab-up      # builds and starts; creates lab/.env with the lab key on the first run
+make lab-down    # stops and deletes the lab's state
+```
+
+## What runs
+
+| Container | What | Notes |
+|---|---|---|
+| `lab-01` | Ubuntu 24.04 with systemd: sshd (password login, user `operatore`), nginx (site, `/admin/` with basic auth, the package's API under `/intrusion-mcp/`), fail2ban (`sshd`, `nginx-http-auth`, `nginx-botsearch`, `nginx-limit-req`, `recidive`, times shortened), a UFW-like firewall, the package (`xrcopilotlab-intrusion-mcp.service`, logs mode) | privileged: systemd as PID 1, iptables. A lab container, never a pattern for production |
+| `attacker` | nmap, ssh, Python: fixed scenarios against `lab-01` only, and the console | its lab networks are `internal`: nothing reaches the internet |
+
+UFW logs through the kernel LOG target, which a container cannot read: the lab's firewall uses NFLOG, ulogd2 and
+rsyslog to write **the same line** to `/var/log/ufw.log`, so the package's parser is the one a real host uses.
+
+## Addresses and places
+
+Three networks with documentation addresses (RFC 5737). The attacker adds its personas' addresses, and the package
+places documentation addresses in the invented cities of the simulated mode (`DocumentationAwareGeo`); every other
+address goes to DB-IP. So the map has cities, and no real address is ever involved.
+
+| Scenario | From | Expected detection |
+|---|---|---|
+| Scansione delle porte | 203.0.113.6 (Moscow) | PortScan |
+| Protocolli industriali | 203.0.113.7 (Seoul) | IndustrialProtocolProbe, High |
+| Forza bruta SSH veloce | 203.0.113.20 (Shenzhen) | SshBruteForce, banned by `sshd` |
+| Intrusione lenta e accesso | 198.51.100.213 (Chișinău) | PortScan, SshBruteForce, LoginAfterFailures, Critical |
+| Scansione del sito | 203.0.113.14 (Hong Kong) | WebVulnerabilityScan, banned by `nginx-botsearch` |
+| Exploit web | 203.0.113.9 (Saint Petersburg) | WebExploitAttempt, High |
+| Forza bruta area riservata | 203.0.113.18 (São Paulo) | WebLoginBruteForce, banned by `nginx-http-auth` |
+| Flood | 203.0.113.15 (Dallas) | RequestFlood, banned by `nginx-limit-req` |
+| Campagna distribuita | 192.0.2.11–22 (12 cities) | DistributedSshBruteForce on `scada`, no ban |
+
+All verified on 2026-11-11 with `make lab-up`, one scenario after the other.
+
+## What the lab found in the package
+
+- The single binary aborted at start on a host without ICU (`libicu`): `install.sh` now installs it when missing.
+- With the default settings every log was read twice (the configuration list is appended to the defaults), so every
+  attempt was counted twice: the file list is now de-duplicated.
+
+## Secrets
+
+`lab/.env` (git-ignored) holds `LAB_API_KEY`; `lab-01` stores only its hash, as `install.sh` does at a customer's, and
+the console adds it to its calls, so the browser never sees it. `operatore`'s password and `/admin/`'s are lab values,
+written in the scenarios on purpose: they exist only inside the lab.

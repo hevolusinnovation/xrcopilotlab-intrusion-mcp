@@ -101,9 +101,13 @@ public sealed class FileLogSource(LogFileOptions options, ILogger<FileLogSource>
         }
     }
 
-    private static IEnumerable<string> Expand(IEnumerable<string> patterns)
+    // The defaults of LogFileOptions and the bound configuration end up in the same list (binding appends):
+    // a file listed twice would be read twice, and every attempt counted twice.
+    private static IEnumerable<string> Expand(IEnumerable<string> patterns) => ExpandAll(patterns).Distinct(StringComparer.Ordinal);
+
+    private static IEnumerable<string> ExpandAll(IEnumerable<string> patterns)
     {
-        foreach (var pattern in patterns)
+        foreach (var pattern in patterns.Distinct(StringComparer.Ordinal))
         {
             var dir = Path.GetDirectoryName(pattern);
             var name = Path.GetFileName(pattern);

@@ -174,9 +174,14 @@ sudo ./install.sh
 The tarball holds a self-contained single binary (no .NET to install), the systemd unit and the install script. The
 service runs as `xrcopilot-intrusion` in group `adm` (to read `/var/log`), with a read-only system
 (`ProtectSystem=strict`), and listens on `127.0.0.1:8080` only: publish it through the host's nginx with TLS and an
-allowlist of XRCopilotLab's addresses (the script prints an example). **Not yet tried on a real host.** Two things to
+allowlist of XRCopilotLab's addresses (the script prints an example). Tried in the Docker lab (`lab/`), not yet on a customer's host. Two things to
 check there: that `/var/log/crowdsec.log` is readable by the group `adm` (its default mode is not verified), and the
 exact line formats of the host's CrowdSec version, which here come from its documentation, not from a real log.
+
+## Docker lab
+
+`make lab-up` starts an Ubuntu server with the package installed by `install.sh` and a console with attack buttons
+and an OpenStreetMap of the attackers on http://localhost:8090: see [lab/README.md](lab/README.md).
 
 ## Register it in XRCopilotLab
 

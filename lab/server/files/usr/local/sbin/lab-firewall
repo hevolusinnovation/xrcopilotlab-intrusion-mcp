@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# What UFW does with `default deny incoming` and `logging low`: open ssh and http, log and drop the rest. UFW logs
+# with the kernel LOG target, which a container cannot read; NFLOG + ulogd2 + rsyslog write the same line to
+# /var/log/ufw.log (see /etc/rsyslog.d/20-ufw.conf). fail2ban inserts its chains in front of these rules.
+set -euo pipefail
+iptables -F INPUT
+iptables -A INPUT -i lo -j ACCEPT
+iptables -A INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+iptables -A INPUT -p icmp -j ACCEPT
+iptables -A INPUT -p tcp --dport 22 -j ACCEPT
+iptables -A INPUT -p tcp --dport 80 -j ACCEPT
+iptables -A INPUT -m limit --limit 50/s --limit-burst 200 -j NFLOG --nflog-group 1 --nflog-prefix "[UFW BLOCK] "
+iptables -A INPUT -j DROP

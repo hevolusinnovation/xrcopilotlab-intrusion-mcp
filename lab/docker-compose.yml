@@ -1,0 +1,62 @@
+# The intrusion lab: lab-01 (an Ubuntu server with the customer package installed) and the attacker, which also serves
+# the console on http://localhost:8090. Three networks with documentation addresses (RFC 5737): every attacker
+# address gets an invented city, as in the simulated mode. None of them reaches the internet.
+#   make lab-up    /    make lab-down
+name: intrusion-lab
+
+services:
+  lab-01:
+    build:
+      context: ..
+      dockerfile: lab/server/Dockerfile
+    hostname: lab-01
+    # systemd as PID 1, iptables for the firewall and fail2ban: a lab container, never a pattern for production.
+    privileged: true
+    cgroup: host
+    tmpfs: [/run, /run/lock]
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+    environment:
+      LAB_API_KEY: ${LAB_API_KEY:?run make lab-up, which creates lab/.env}
+    networks:
+      it:       { ipv4_address: 198.51.100.20 }
+      internet: { ipv4_address: 203.0.113.250 }
+      homes:    { ipv4_address: 192.0.2.250 }
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/healthz"]
+      interval: 10s
+      retries: 30
+
+  attacker:
+    build:
+      context: attacker
+    hostname: attacker
+    cap_add: [NET_ADMIN, NET_RAW]
+    environment:
+      LAB_API_KEY: ${LAB_API_KEY:?run make lab-up, which creates lab/.env}
+      TARGET_IT: 198.51.100.20
+      TARGET_INTERNET: 203.0.113.250
+      TARGET_HOMES: 192.0.2.250
+    ports:
+      - "127.0.0.1:8090:8090"
+    networks:
+      it:       {}
+      internet: {}
+      homes:    {}
+      console:  {}
+    depends_on:
+      lab-01: { condition: service_healthy }
+
+networks:
+  # Docker gives its own addresses from the /28 at the top; the attackers' addresses are added below it.
+  it:
+    internal: true
+    ipam: { config: [ { subnet: 198.51.100.0/24, ip_range: 198.51.100.240/28, gateway: 198.51.100.254 } ] }
+  internet:
+    internal: true
+    ipam: { config: [ { subnet: 203.0.113.0/24, ip_range: 203.0.113.240/28, gateway: 203.0.113.254 } ] }
+  homes:
+    internal: true
+    ipam: { config: [ { subnet: 192.0.2.0/24, ip_range: 192.0.2.240/28, gateway: 192.0.2.254 } ] }
+  # The only network with a way out: it publishes the console on the Mac's localhost. The attacks never use it.
+  console: {}

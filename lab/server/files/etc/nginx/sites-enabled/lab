@@ -1,0 +1,25 @@
+# Alveo Energia's public site (static), a reserved area with a password, and the intrusion package published as
+# install.sh suggests: only the console's addresses may read it.
+server {
+    listen 80 default_server;
+    server_name _;
+    root /var/www/html;
+
+    location / {
+        limit_req zone=lab burst=20 nodelay;
+        limit_req_status 429;
+    }
+
+    location /admin/ {
+        auth_basic "Area riservata";
+        auth_basic_user_file /etc/nginx/lab.htpasswd;
+    }
+
+    location /intrusion-mcp/ {
+        allow 198.51.100.240/28;
+        deny  all;
+        proxy_pass http://127.0.0.1:8080/;
+        proxy_http_version 1.1;
+        proxy_buffering off;
+    }
+}

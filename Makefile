@@ -7,7 +7,9 @@
 #   make docker-push  TAG=1.0.0                # ACR push (after `az acr login -n crhevoluscoi`)
 #   make deploy       TAG=1.0.0                # demo Container App hev-intrusion-mcp, simulated mode (needs INTRUSION_MCP_API_KEY)
 #   make smoke                                 # /healthz on the deployed fqdn
-#   make package      VERSION=1.0.0            # linux-x64 tarball for a real host: single binary + systemd unit + install script
+#   make package      VERSION=1.0.0            # tarball for a real host (RID=linux-x64|linux-arm64): single binary + systemd unit + install script
+#   make lab-up                                # Docker lab: Ubuntu server with the package installed + attack console on http://localhost:8090
+#   make lab-down                              # stops the lab and deletes its state
 #   make key                                   # prints the SHA-256 of a key read from the terminal (never the key)
 #
 # INTRUSION_MCP_API_KEY is read from the environment (e.g. from Key Vault), never written in a file of the repo.
@@ -22,9 +24,9 @@ ACR     ?= crhevoluscoi.azurecr.io
 APP     ?= hev-intrusion-mcp
 IMAGE   := $(ACR)/xrcopilotlab-intrusion-mcp:$(TAG)
 SERVER  := src/XrCopilotLab.Intrusion.Mcp.Server/XrCopilotLab.Intrusion.Mcp.Server.csproj
-DIST    := out/xrcopilotlab-intrusion-mcp-$(VERSION)-linux-x64
+RID     ?= linux-x64
 
-.PHONY: help build test run docker-build docker-push deploy smoke package key
+.PHONY: help build test run docker-build docker-push deploy smoke package key lab-up lab-down
 
 help:
 	@grep -E '^#   make' Makefile | sed 's/^#   //'
@@ -60,14 +62,17 @@ smoke:
 	curl -fsS https://$$FQDN/healthz && echo
 
 package:
-	rm -rf $(DIST) && mkdir -p $(DIST)
-	dotnet publish $(SERVER) -c Release -r linux-x64 --self-contained true \
-	  -p:PublishSingleFile=true -p:DebugType=none -o $(DIST)/bin
-	cp deploy/linux/xrcopilotlab-intrusion-mcp.service deploy/linux/install.sh deploy/linux/appsettings.Production.json $(DIST)/
-	chmod +x $(DIST)/install.sh
-	tar -C out -czf $(DIST).tar.gz $(notdir $(DIST))
-	@echo "package: $(DIST).tar.gz"
+	deploy/package.sh $(VERSION) $(RID) out
 
 # Reads the key from the terminal so it never lands in the shell history: `make key`
 key:
 	@read -s -p "key: " K; echo; printf '%s' "$$K" | shasum -a 256 | cut -d' ' -f1
+
+# The lab key lives in lab/.env (git-ignored), created on the first run; the console sends it, the server keeps its hash.
+lab-up:
+	@test -f lab/.env || printf 'LAB_API_KEY=%s\n' "$$(openssl rand -hex 32)" > lab/.env
+	docker compose -f lab/docker-compose.yml --env-file lab/.env up -d --build
+	@echo "console: http://localhost:8090"
+
+lab-down:
+	docker compose -f lab/docker-compose.yml --env-file lab/.env down -v
