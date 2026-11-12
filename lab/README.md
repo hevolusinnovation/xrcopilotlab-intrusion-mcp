@@ -5,6 +5,11 @@ which the **customer package** is installed by its own `install.sh` (same tarbal
 that also serves the console on **http://localhost:8090**: attack buttons, and the map (OpenStreetMap) and table of
 what the package on `lab-01` detects.
 
+![The lab console](../docs/images/console.jpg)
+
+What each part of the console shows, and how to give the lab a public address for XRCopilotLab, in plain words:
+[README › The test console](../README.md#the-test-console-docker-lab).
+
 ```bash
 make lab-up      # builds and starts; creates lab/.env with the lab key on the first run
 make lab-down    # stops the lab (keeps the tunnel login: same public address)
@@ -13,11 +18,14 @@ make lab-reset   # stops the lab and deletes all its state, tunnel login include
 
 ## What runs
 
-| Container | What | Notes |
+The `make` commands use the service names (`make lab-shell SVC=attacker`); plain Docker uses the container names
+(`docker exec -it intrusion-lab-01 bash`, `docker logs -f intrusion-lab-tunnel`).
+
+| Service (container) | What | Notes |
 |---|---|---|
-| `lab-01` | Ubuntu 24.04 with systemd: sshd (password login, user `operatore`), nginx (site, `/admin/` with basic auth, the package's API under `/intrusion-mcp/`), fail2ban (`sshd`, `nginx-http-auth`, `nginx-botsearch`, `nginx-limit-req`, `recidive`, times shortened), a UFW-like firewall, the package (`xrcopilotlab-intrusion-mcp.service`, logs mode) | privileged: systemd as PID 1, iptables. A lab container, never a pattern for production |
-| `attacker` | nmap, ssh, Python: fixed scenarios against `lab-01` only, and the console | its lab networks are `internal`: no attack reaches the internet |
-| `tunnel` | Dev Tunnels CLI, socat, a small controller driven by the console | the only container that goes out to the internet, for the tunnel |
+| `lab-01` (`intrusion-lab-01`) | Ubuntu 24.04 with systemd: sshd (password login, user `operatore`), nginx (site, `/admin/` with basic auth, the package's API under `/intrusion-mcp/`), fail2ban (`sshd`, `nginx-http-auth`, `nginx-botsearch`, `nginx-limit-req`, `recidive`, times shortened), a UFW-like firewall, the package (`xrcopilotlab-intrusion-mcp.service`, logs mode) | privileged: systemd as PID 1, iptables. A lab container, never a pattern for production |
+| `attacker` (`intrusion-lab-attacker`) | nmap, ssh, Python: fixed scenarios against `lab-01` only, and the console | its lab networks are `internal`: no attack reaches the internet |
+| `tunnel` (`intrusion-lab-tunnel`) | Dev Tunnels CLI, socat, a small controller driven by the console | the only container that goes out to the internet, for the tunnel |
 
 UFW logs through the kernel LOG target, which a container cannot read: the lab's firewall uses NFLOG, ulogd2 and
 rsyslog to write **the same line** to `/var/log/ufw.log`, so the package's parser is the one a real host uses.
