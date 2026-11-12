@@ -3,11 +3,14 @@
 # Three networks with documentation addresses (RFC 5737): every attacker address gets an invented city, as in the
 # simulated mode. None of them reaches the internet.
 #   make lab-up    /    make lab-down    /    make lab-reset
+# Fixed container names (intrusion-lab-01, intrusion-lab-attacker, intrusion-lab-tunnel), so `docker exec` and
+# `docker logs` work without the compose suffix; the services keep their short names for `make lab-shell SVC=…`.
 
 name: intrusion-lab
 
 services:
   lab-01:
+    container_name: intrusion-lab-01
     build:
       context: ..
       dockerfile: lab/server/Dockerfile
@@ -31,6 +34,7 @@ services:
       retries: 30
 
   attacker:
+    container_name: intrusion-lab-attacker
     build:
       context: attacker
     hostname: attacker
@@ -52,6 +56,7 @@ services:
 
   # The lab's public address (Microsoft Dev Tunnels): login and address from the console, nothing on the Mac.
   tunnel:
+    container_name: intrusion-lab-tunnel
     build:
       context: tunnel
     hostname: tunnel

@@ -8,7 +8,8 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/* \
  && curl -fsSL -o /usr/local/bin/devtunnel "https://tunnelsassetsprod.blob.core.windows.net/cli/linux-$([ "$TARGETARCH" = "arm64" ] && echo arm64 || echo x64)-devtunnel" \
  && chmod +x /usr/local/bin/devtunnel
-WORKDIR /tunnel
-COPY controller.py ./
+COPY controller.py /tunnel/
+# devtunnel keeps its login in ./DevTunnels: run from /root, the tunnel-login volume, so the login survives make lab-down.
+WORKDIR /root
 EXPOSE 8092
 CMD ["python3", "-u", "/tunnel/controller.py"]
