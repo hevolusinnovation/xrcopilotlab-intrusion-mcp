@@ -7,6 +7,9 @@
   is unused for 30 days.
 
 Listens on :8092, on the console network only; the console proxies it.
+
+While the tunnel is open its address is written to URL_FILE (a volume lab-01 mounts read-only), where the package
+reads it: the monitoring page then shows it as XRCopilotLab's temporary test address. Removed when the tunnel closes.
 """
 import json
 import os
@@ -19,6 +22,7 @@ from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 PORT = 8091
 LAB_API = os.environ.get("LAB_API", "10.77.0.20:8091")
 ID_FILE = "/root/tunnel-id"
+URL_FILE = os.environ.get("TUNNEL_URL_FILE", "/state/url")
 DEVICE = re.compile(r"open the page (?P<url>https://\S+) and enter the code (?P<code>[A-Z0-9-]+)")
 WEB_URL = re.compile(r"https://\S+?-%d\.\S+?devtunnels\.ms\S*" % PORT)
 
@@ -30,6 +34,23 @@ host_process = None
 def set_state(**kw):
     with lock:
         state.update(kw)
+        url = state["url"] if state["phase"] == "online" else None
+    publish(url)
+
+
+def publish(url):
+    """The address for the package on lab-01: written atomically, removed when there is none."""
+    try:
+        if url:
+            os.makedirs(os.path.dirname(URL_FILE), exist_ok=True)
+            with open(URL_FILE + ".tmp", "w") as f:
+                f.write(url + "\n")
+            os.chmod(URL_FILE + ".tmp", 0o644)
+            os.replace(URL_FILE + ".tmp", URL_FILE)
+        elif os.path.exists(URL_FILE):
+            os.remove(URL_FILE)
+    except OSError as ex:
+        print("cannot publish the tunnel address:", ex)
 
 
 def devtunnel(*args, timeout=60):

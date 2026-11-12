@@ -37,6 +37,9 @@ public sealed class LogFileOptions
     /// <summary>Falco JSON file output (<c>json_output: true</c>): what processes did on the host. <c>install.sh --with falco</c> writes it here.</summary>
     public List<string> FalcoFiles { get; set; } = ["/var/log/falco/events.json*"];
 
+    /// <summary>ModSecurity's JSON audit log (OWASP CRS, detection only): web attacks, request bodies included. <c>install.sh --with modsecurity</c> writes it here.</summary>
+    public List<string> ModSecurityFiles { get; set; } = ["/var/log/modsecurity/audit.json*"];
+
     /// <summary>
     /// The host's own addresses, to tell an attack coming in from a connection the host opened (a Suricata alert on
     /// malware calling home). Empty = the addresses of the host's network interfaces.
@@ -67,7 +70,8 @@ public sealed class FileLogSource(LogFileOptions options, ILogger<FileLogSource>
         AllPatterns().SelectMany(Expand).DefaultIfEmpty("no log file found: check the Logs:*Files settings").ToList();
 
     private IEnumerable<List<string>> AllPatterns() =>
-        [options.Fail2banFiles, options.AuthFiles, options.FirewallFiles, options.WebAccessFiles, options.CrowdsecFiles, options.SuricataFiles, options.FalcoFiles];
+        [options.Fail2banFiles, options.AuthFiles, options.FirewallFiles, options.WebAccessFiles, options.CrowdsecFiles, options.SuricataFiles, options.FalcoFiles,
+            options.ModSecurityFiles];
 
     private IReadOnlySet<string>? _local;
 
@@ -106,7 +110,8 @@ public sealed class FileLogSource(LogFileOptions options, ILogger<FileLogSource>
             Lines(options.WebAccessFiles, since),
             Lines(options.CrowdsecFiles, since),
             Lines(options.SuricataFiles, since),
-            Lines(options.FalcoFiles, since));
+            Lines(options.FalcoFiles, since),
+            Lines(options.ModSecurityFiles, since));
         var events = LogLines.Parse(logs, _zone, now, Local)
             .Where(e => e.Time >= since && e.Time <= now)
             .ToList();

@@ -9,17 +9,21 @@
 # service. A second run with nothing changed changes nothing but the restart.
 #   --no-start   install and enable the service without starting it (an image build, where systemd is not running yet)
 #   --new-key    replace the stored key (asked again, or INTRUSION_MCP_API_KEY): the old key stops working
-#   --with fail2ban,crowdsec,suricata
+#   --with fail2ban,crowdsec,suricata,falco,modsecurity
 #                also install and configure these security packages (guardians.sh), idempotently, in detection mode
+#   --no-dashboard
+#                do not publish the monitoring page (dashboard.sh: nginx on port 8471, HTTPS, password, internal network only)
 set -euo pipefail
 
 START=1
 NEW_KEY=0
+DASHBOARD=1
 WITH=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --no-start) START=0 ;;
     --new-key)  NEW_KEY=1 ;;
+    --no-dashboard) DASHBOARD=0 ;;
     --with)     [[ $# -ge 2 ]] || { echo "--with needs a list, e.g. --with fail2ban,suricata" >&2; exit 2; }; IFS=, read -ra WITH <<< "$2"; shift ;;
     --with=*)   IFS=, read -ra WITH <<< "${1#--with=}" ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
@@ -40,6 +44,8 @@ OLD_VERSION="$(cat "$APP_DIR/VERSION" 2>/dev/null || true)"
 [[ $EUID -eq 0 ]] || { echo "run as root: sudo $0" >&2; exit 1; }
 # shellcheck source=guardians.sh
 . "$HERE/guardians.sh"
+# shellcheck source=dashboard.sh
+. "$HERE/dashboard.sh"
 for g in "${WITH[@]}"; do
   [[ " $GUARDIANS_SUPPORTED " == *" $g "* ]] || { echo "--with: unknown package '$g' (supported: $GUARDIANS_SUPPORTED)" >&2; exit 2; }
 done
@@ -60,7 +66,9 @@ if ! ldconfig -p | grep -q 'libicuuc\.so'; then
   apt-get install -y -qq --no-install-recommends "$ICU_PKG"
 fi
 
-# The guardians first: the service below then starts with their logs (and groups) in place.
+# nginx first (the page and ModSecurity live in it), then the guardians: the service below then starts with their logs
+# (and groups) in place.
+[[ $DASHBOARD -eq 1 ]] && dashboard_nginx
 for g in "${WITH[@]}"; do "guardian_$g"; done
 command -v fail2ban-client >/dev/null || echo "warning: fail2ban is not installed (--with fail2ban): the server will only see sshd logins" >&2
 
@@ -95,9 +103,12 @@ elif [[ $START -eq 1 || $NEW_KEY -eq 1 || -n "${INTRUSION_MCP_API_KEY:-}" ]]; th
   echo "key: stored (its SHA-256 only)"
 fi
 
+[[ $DASHBOARD -eq 1 ]] && dashboard_setup
+
 install -m 0644 "$HERE/$SERVICE.service" "$UNIT"
 if [[ $START -eq 1 ]]; then
   guardians_start "${WITH[@]}"
+  [[ $DASHBOARD -eq 1 ]] && dashboard_start
   systemctl daemon-reload
   systemctl enable "$SERVICE" >/dev/null 2>&1
   # restart, not start: on a second run the new program and unit must take over.
@@ -112,9 +123,15 @@ if [[ $START -eq 1 ]]; then
   curl -fsS "$URL/healthz" && echo || { echo "the service does not answer: journalctl -u $SERVICE -n 50" >&2; exit 1; }
 else
   systemctl enable "$SERVICE"
+  [[ $DASHBOARD -eq 1 ]] && systemctl enable nginx >/dev/null 2>&1
   [[ -f "$ETC_DIR/env" ]] || echo "installed, not started: write $ETC_DIR/env (ApiKeys__Hash=<sha256 of the key>) before the first start"
 fi
 
+if [[ -n "${DASHBOARD_NEW_PASSWORD:-}" ]]; then
+  echo
+  echo "Monitoring page: https://<this server>:$DASHBOARD_PORT  user: admin  password: $DASHBOARD_NEW_PASSWORD"
+  echo "The password is shown only now. To change it: sudo rm $DASHBOARD_DIR/htpasswd and run install.sh again."
+fi
 [[ -n "$OLD_VERSION" ]] && { echo "upgraded to $NEW_VERSION"; exit 0; }
 cat <<'EOF'
 
@@ -122,6 +139,7 @@ Installed. The server listens on 127.0.0.1:8470 only (not 8080: CrowdSec's local
 and allow only XRCopilotLab's outbound addresses, for example:
 
   location /intrusion-mcp/ {
+      modsecurity off;                 # with --with modsecurity: don't inspect our own API
       allow <XRCopilotLab address>;
       deny  all;
       proxy_pass http://127.0.0.1:8470/;

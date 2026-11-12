@@ -44,9 +44,9 @@ RUN useradd -m -s /bin/bash -G sudo operatore && echo 'operatore:Alveo2026!' | c
 # the only time lab-01 reaches the internet: the ET Open rules are fetched now). The key arrives at start (lab-entrypoint).
 COPY --from=package /out/package.tar.gz /tmp/package.tar.gz
 RUN mkdir /tmp/package && tar -xzf /tmp/package.tar.gz -C /tmp/package --strip-components=1 \
- && /tmp/package/install.sh --no-start --with suricata,falco \
+ && DASHBOARD_PASSWORD=AlveoLab2026! /tmp/package/install.sh --no-start --with suricata,falco,modsecurity \
  && suricata-update -q --no-test --local /etc/suricata/rules/lab.rules \
- && systemctl enable suricata.service falco-modern-bpf.service \
+ && systemctl enable suricata.service falco-modern-bpf.service nginx.service \
  && rm -rf /tmp/package /tmp/package.tar.gz /var/lib/apt/lists/*
 
 STOPSIGNAL SIGRTMIN+3

@@ -1,10 +1,16 @@
-"""The lab console: the attack buttons and what lab-01's intrusion package sees, on http://localhost:8090.
+"""The lab console: the attack buttons and what the intrusion package sees, on http://localhost:8090.
 
-The package's API is read through lab-01's nginx (/intrusion-mcp/), as XRCopilotLab would read it at a customer's,
-with the lab key added here: the browser never sees it. Only GET is forwarded, only to the package's read routes.
+By default the target is lab-01, read through its nginx (/intrusion-mcp/) with the lab key added here: the browser
+never sees it. Only GET is forwarded, only to the package's read routes.
+
+A different server running the package can be tested instead ("Server da testare"): you give its API address and its
+API key, and the console attacks it only after GET {url}/status answers 200 with that key. The key is proof that you
+administer that server (only its owner has it): the console refuses to attack a server you cannot already read. Against
+an external server only the web-layer scenarios run, from this container's own address.
 """
 import json
 import os
+import threading
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -13,13 +19,25 @@ from pathlib import Path
 
 import scenarios
 
-API = f"http://{os.environ.get('TARGET_IT', '198.51.100.20')}/intrusion-mcp/api/"
+LAB_API = f"http://{os.environ.get('TARGET_IT', '198.51.100.20')}/intrusion-mcp/api/"
 KEY = os.environ["LAB_API_KEY"]
 STATIC = Path(__file__).parent / "static"
-READ_ROUTES = {"status", "summary", "banned", "suspicious-logins", "attempts", "host-activity"}
+READ_ROUTES = {"status", "summary", "banned", "suspicious-logins", "attempts", "host-activity", "guardians", "posture"}
 TUNNEL = os.environ.get("TUNNEL_CONTROLLER", "http://tunnel:8092")
 runner = scenarios.Runner()
 scenarios.start_c2()
+
+# The server under test. None = lab-01 (the default). Otherwise {"api": base, "key": key, "host": hostname, "web": host}
+# after its key has been verified. Guarded by a lock: the HTTP server is threaded.
+_target_lock = threading.Lock()
+external = None
+
+
+def current_target():
+    with _target_lock:
+        if external is None:
+            return {"mode": "lab", "api": LAB_API, "key": KEY}
+        return {"mode": "external", **external}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -51,6 +69,9 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, {"key": KEY})
         if url.path == "/api/tunnel/check":
             return self._check_tunnel()
+        if url.path == "/api/target":
+            t = current_target()
+            return self._send(200, {"mode": t["mode"], "host": t.get("host"), "api": None if t["mode"] == "lab" else t["api"]})
         if url.path.startswith("/api/lab/"):
             route = url.path[len("/api/lab/"):]
             if route not in READ_ROUTES:
@@ -61,11 +82,49 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         parts = urllib.parse.urlsplit(self.path).path.strip("/").split("/")
         if len(parts) == 4 and parts[:2] == ["api", "scenarios"] and parts[3] == "run":
-            run, error = runner.start(parts[2])
+            run, error = runner.start(parts[2], current_target())
             return self._send(202, run) if run else self._send(409, {"error": error})
         if len(parts) == 3 and parts[:2] == ["api", "tunnel"] and parts[2] in ("login", "logout", "restart"):
             return self._forward(f"{TUNNEL}/{parts[2]}", "POST")
+        if url_path(self.path) == "/api/target":
+            return self._set_target()
+        if url_path(self.path) == "/api/target/clear":
+            global external
+            with _target_lock:
+                external = None
+            return self._send(200, {"mode": "lab"})
         return self._send(404, {"error": "not found"})
+
+    def _set_target(self):
+        """Arms an external server, after its key proves the caller may read (and so may test) it."""
+        global external
+        try:
+            length = int(self.headers.get("Content-Length", 0))
+            body = json.loads(self.rfile.read(length) or b"{}")
+        except (ValueError, json.JSONDecodeError):
+            return self._send(400, {"error": "richiesta non valida"})
+        raw, key = str(body.get("url", "")).strip(), str(body.get("key", "")).strip()
+        if not raw or not key:
+            return self._send(400, {"error": "servono l'indirizzo e la chiave del server"})
+        base = raw.rstrip("/")
+        if not base.endswith("/api"):
+            base += "/api"
+        parsed = urllib.parse.urlsplit(base)
+        if parsed.scheme not in ("http", "https") or not parsed.hostname:
+            return self._send(400, {"error": "l'indirizzo deve essere http(s)://…"})
+        try:
+            request = urllib.request.Request(base + "/status", headers={"X-API-Key": key})
+            with urllib.request.urlopen(request, timeout=15) as response:
+                status = json.loads(response.read())
+        except urllib.error.HTTPError as ex:
+            msg = "chiave rifiutata dal server" if ex.code in (401, 403) else f"il server risponde {ex.code}"
+            return self._send(400, {"error": msg})
+        except (OSError, json.JSONDecodeError) as ex:
+            return self._send(400, {"error": f"il server non risponde: {ex}"})
+        with _target_lock:
+            external = {"api": base + "/", "key": key, "host": status.get("host", parsed.hostname), "web": parsed.hostname}
+        return self._send(200, {"mode": "external", "host": status.get("host"),
+                                "detectors": [d["detector"] for d in status.get("detectors", [])]})
 
     def _forward(self, target, method):
         request = urllib.request.Request(target, method=method, data=b"" if method == "POST" else None)
@@ -94,16 +153,21 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, {"ok": False, "error": f"indirizzo pubblico non raggiungibile: {ex}"})
 
     def _proxy(self, route, query):
-        request = urllib.request.Request(API + route + (f"?{query}" if query else ""), headers={"X-API-Key": KEY})
+        t = current_target()
+        request = urllib.request.Request(t["api"] + route + (f"?{query}" if query else ""), headers={"X-API-Key": t["key"]})
         try:
             with urllib.request.urlopen(request, timeout=20) as response:
                 return self._send(response.status, response.read())
         except urllib.error.HTTPError as ex:
-            return self._send(ex.code, {"error": f"lab-01 answered {ex.code}"})
+            return self._send(ex.code, {"error": f"il server risponde {ex.code}"})
         except OSError as ex:
-            return self._send(502, {"error": f"lab-01 unreachable: {ex}"})
+            return self._send(502, {"error": f"il server non risponde: {ex}"})
+
+
+def url_path(path):
+    return urllib.parse.urlsplit(path).path
 
 
 if __name__ == "__main__":
-    print("console on :8090, package API at", API)
+    print("console on :8090, default target", LAB_API)
     ThreadingHTTPServer(("0.0.0.0", 8090), Handler).serve_forever()

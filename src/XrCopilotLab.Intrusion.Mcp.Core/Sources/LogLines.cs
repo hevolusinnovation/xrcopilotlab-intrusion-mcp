@@ -11,7 +11,8 @@ public sealed record LogSet(
     IEnumerable<string> WebAccess,
     IEnumerable<string> Crowdsec,
     IEnumerable<string>? Suricata = null,
-    IEnumerable<string>? Falco = null);
+    IEnumerable<string>? Falco = null,
+    IEnumerable<string>? ModSecurity = null);
 
 /// <summary>Turns the lines of the logs into events. Lines that say nothing about a source IP are skipped, except
 /// Falco's, which are about the host itself.</summary>
@@ -34,6 +35,8 @@ public static class LogLines
             if (SuricataEveParser.TryParse(line, local ?? NoAddresses, out var e)) yield return e!;
         foreach (var line in logs.Falco ?? [])
             if (FalcoParser.TryParse(line, out var e)) yield return e!;
+        foreach (var line in logs.ModSecurity ?? [])
+            if (ModSecurityParser.TryParse(line, zone, out var e)) yield return e!;
     }
 
     private static readonly IReadOnlySet<string> NoAddresses = new HashSet<string>();

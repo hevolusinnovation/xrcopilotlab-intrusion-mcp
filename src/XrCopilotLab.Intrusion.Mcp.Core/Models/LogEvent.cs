@@ -45,6 +45,12 @@ public enum LogEventKind
     /// the event is tied to the address that opened the session (<see cref="LogEvent.LinkedBy"/>).
     /// </summary>
     HostAlert,
+
+    /// <summary>
+    /// ModSecurity with the OWASP CRS found enough evidence in one web request to block it (audit log, rule 949110). In
+    /// detection-only mode the request went through: it was an attack all the same, and the WAF saw its body too.
+    /// </summary>
+    WafAlert,
 }
 
 /// <summary>Which log the event comes from.</summary>
@@ -57,6 +63,7 @@ public enum LogOrigin
     Crowdsec,
     Suricata,
     Falco,
+    ModSecurity,
 }
 
 /// <summary>
@@ -67,7 +74,9 @@ public enum LogOrigin
 /// 2 medium) and whether the host itself opened the connection (<see cref="Outbound"/>). A Falco alert carries the
 /// rule in <see cref="Rule"/>, its tags in <see cref="Detail"/>, the file in <see cref="Path"/>, the process in
 /// <see cref="Command"/> and <see cref="Parent"/>, the account that logged in in <see cref="User"/>, and how it was tied
-/// to an address in <see cref="LinkedBy"/> (<c>ssh-session</c>, <c>web-exploit</c>).
+/// to an address in <see cref="LinkedBy"/> (<c>ssh-session</c>, <c>web-exploit</c>). A ModSecurity alert carries the
+/// request in <see cref="Method"/>, <see cref="Path"/> and <see cref="Status"/>, the first CRS rule in <see cref="Rule"/>
+/// and <see cref="SignatureId"/>, its attack families in <see cref="Detail"/> and the anomaly score in <see cref="Score"/>.
 /// </summary>
 public sealed record LogEvent(
     DateTimeOffset Time,
@@ -89,7 +98,8 @@ public sealed record LogEvent(
     bool Outbound = false,
     string? Command = null,
     string? Parent = null,
-    string? LinkedBy = null)
+    string? LinkedBy = null,
+    int? Score = null)
 {
     public bool IsBanStart => Kind is LogEventKind.Ban or LogEventKind.RestoreBan;
 

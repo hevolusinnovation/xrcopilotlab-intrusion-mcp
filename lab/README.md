@@ -23,8 +23,8 @@ The `make` commands use the service names (`make lab-shell SVC=attacker`); plain
 
 | Service (container) | What | Notes |
 |---|---|---|
-| `lab-01` (`intrusion-lab-01`) | Ubuntu 24.04 with systemd: sshd (password login, user `operatore`, in the `sudo` group), nginx (site, `/admin/` with basic auth, the package's API under `/intrusion-mcp/`), fail2ban (`sshd`, `nginx-http-auth`, `nginx-botsearch`, `nginx-limit-req`, `recidive`, times shortened), a UFW-like firewall, **Suricata 8** with the ET Open rules (installed by the package's own `install.sh --with suricata` at build, the only moment lab-01 reaches the internet; it listens on all four interfaces with `--pcap=any -k none`), **Falco 0.45** with the modern eBPF probe (same `install.sh --with falco`; two container-only rules are turned off in `/etc/falco/rules.d/lab.yaml`, since lab-01 is itself a container), the package (`xrcopilotlab-intrusion-mcp.service`, logs mode) | privileged: systemd as PID 1, iptables. A lab container, never a pattern for production |
-| `attacker` (`intrusion-lab-attacker`) | nmap, ssh, Python: fixed scenarios against `lab-01` only, and the console | its lab networks are `internal`: no attack reaches the internet |
+| `lab-01` (`intrusion-lab-01`) | Ubuntu 24.04 with systemd: sshd (password login, user `operatore`, in the `sudo` group), nginx (site, `/admin/` with basic auth, the package's API under `/intrusion-mcp/`), fail2ban (`sshd`, `nginx-http-auth`, `nginx-botsearch`, `nginx-limit-req`, `recidive`, times shortened), a UFW-like firewall, **Suricata 8** with the ET Open rules (installed by the package's own `install.sh --with suricata` at build, the only moment lab-01 reaches the internet; it listens on all four interfaces with `--pcap=any -k none`), **Falco 0.45** with the modern eBPF probe (same `install.sh --with falco`; two container-only rules are turned off in `/etc/falco/rules.d/lab.yaml`, since lab-01 is itself a container), **ModSecurity 3 + OWASP CRS** in nginx (`install.sh --with modsecurity`, detection only; the toolkit's own API and the monitoring page are excluded), the package's read-only **monitoring page** (nginx on 8471, served inside the container), the package (`xrcopilotlab-intrusion-mcp.service`, logs mode) | privileged: systemd as PID 1, iptables. A lab container, never a pattern for production |
+| `attacker` (`intrusion-lab-attacker`) | nmap, ssh, Python: fixed scenarios against `lab-01`, the console, and a **"Server da testare"** field that runs the web scenarios against another server once its API key proves you can already read it | its lab networks are `internal`: no attack reaches the internet |
 | `tunnel` (`intrusion-lab-tunnel`) | Dev Tunnels CLI, socat, a small controller driven by the console | the only container that goes out to the internet, for the tunnel |
 
 UFW logs through the kernel LOG target, which a container cannot read: the lab's firewall uses NFLOG, ulogd2 and
@@ -63,7 +63,8 @@ address goes to DB-IP. So the map has cities, and no real address is ever involv
 | Forza bruta SSH veloce | 203.0.113.20 (Shenzhen) | SshBruteForce, banned by `sshd` |
 | Intrusione lenta e accesso | 198.51.100.213 (Chișinău) | PortScan, SshBruteForce, LoginAfterFailures, Critical |
 | Scansione del sito | 203.0.113.14 (Hong Kong) | WebVulnerabilityScan, banned by `nginx-botsearch` |
-| Exploit web | 203.0.113.9 (Saint Petersburg) | WebExploitAttempt, High |
+| Exploit web | 203.0.113.9 (Saint Petersburg) | WebExploitAttempt, High (nginx access log + ModSecurity) |
+| Attacco nascosto nel modulo contatti | 203.0.113.41 (Hanoi) | SQL injection, XSS and command injection in the body of a `POST /contatti.html`: the access log shows only `POST /contatti.html 200`; **ModSecurity** sees them (`WebExploitAttempt`). The first message is a legitimate enquiry and is not reported |
 | Forza bruta area riservata | 203.0.113.18 (São Paulo) | WebLoginBruteForce, banned by `nginx-http-auth` |
 | Flood | 203.0.113.15 (Dallas) | RequestFlood, banned by `nginx-limit-req` |
 | Campagna distribuita | 192.0.2.11–22 (12 cities) | DistributedSshBruteForce on `scada`, no ban |
@@ -71,7 +72,7 @@ address goes to DB-IP. So the map has cities, and no real address is ever involv
 | Backdoor che chiama casa | 203.0.113.66 (Moscow) | lab-01 calls the attacker's controller: CommandAndControl, Critical (Suricata: the lab's own rule and ET Open's `ET MALWARE Generic Request to gate.php Dotted-Quad`) |
 
 All verified on 2026-11-11 with `make lab-up`, one scenario after the other; the backdoor and Suricata on 2026-11-12;
-the intruder inside and Falco on 2026-11-12 (full night: five Falco alerts, all tied to 198.51.100.213, none left
+the intruder inside and Falco on 2026-11-12; ModSecurity, the monitoring page and the external-target flow on 2026-11-12 (full night: five Falco alerts, all tied to 198.51.100.213, none left
 without an address).
 
 **Falco sees every container on the Docker machine**, not only lab-01: Docker Desktop runs them all on one kernel. The
@@ -107,6 +108,13 @@ Modbus or S7 conversation ever starts (see [docs/security-tools.md](../docs/secu
 - Launchpad's API failed for over an hour (`GPGKeyTemporarilyNotFoundError`) and `add-apt-repository` with it, so
   `--with suricata` could not install. The OISF repository is now added by hand, with its two signing keys fetched by
   fingerprint from keyserver.ubuntu.com and checked.
+- The OWASP CRS package's own rule loader (`owasp-crs.load`) uses `IncludeOptional`, which libmodsecurity v3 rejects:
+  `nginx -t` failed and nginx would not start. `--with modsecurity` includes the CRS files one by one, and runs
+  `nginx -t` before and after, removing its file if it fails.
+- ModSecurity inspected the toolkit's own API and monitoring page too (`modsecurity on` at the `http` level), filling
+  the audit log the toolkit reads with its own polling. Those locations now carry `modsecurity off;`.
+- The monitoring page returned 500: nginx (`www-data`) could not traverse the service's `0750` config folder to read
+  the page's `htpasswd`. The page's files moved to `/etc/nginx/xrcopilotlab-dashboard`, which nginx can reach.
 - With the default settings every log was read twice (the configuration list is appended to the defaults), so every
   attempt was counted twice: the file list is now de-duplicated.
 

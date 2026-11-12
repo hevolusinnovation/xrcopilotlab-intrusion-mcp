@@ -16,6 +16,8 @@ Environment=ASPNETCORE_ENVIRONMENT=Production
 Environment=DOTNET_gcServer=0
 # ApiKeys__Hash=<sha256 of the key>: written by install.sh, readable by root and the service only.
 EnvironmentFile=/etc/xrcopilotlab-intrusion-mcp/env
+# The monitoring page's own key (ApiKeys__Keys__0__*): written by install.sh, absent with --no-dashboard.
+EnvironmentFile=-/etc/xrcopilotlab-intrusion-mcp/dashboard.env
 Restart=on-failure
 RestartSec=5
 

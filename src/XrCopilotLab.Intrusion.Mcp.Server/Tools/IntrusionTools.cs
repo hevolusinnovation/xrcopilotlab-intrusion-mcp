@@ -1,15 +1,16 @@
 using System.ComponentModel;
 using ModelContextProtocol.Server;
+using XrCopilotLab.Intrusion.Mcp.Core.Guard;
 using XrCopilotLab.Intrusion.Mcp.Core.Queries;
 
 namespace XrCopilotLab.Intrusion.Mcp.Server.Tools;
 
 /// <summary>
-/// The tools the agent sees. All read-only: they read the host's fail2ban, sshd, UFW, nginx, CrowdSec, Suricata and Falco logs (or the
+/// The tools the agent sees. All read-only: they read the host's fail2ban, sshd, UFW, nginx, CrowdSec, Suricata, Falco and ModSecurity logs (or the
 /// simulated host) and never ban, unban or change anything. Every answer says whether the data is simulated.
 /// </summary>
 [McpServerToolType]
-public sealed class IntrusionTools(IntrusionQueries queries, TimeProvider clock)
+public sealed class IntrusionTools(IntrusionQueries queries, GuardQueries guard, TimeProvider clock)
 {
     private const string SlotHelp =
         "For a scheduled round: the last complete slot of this many minutes aligned to the clock (30 at 10:47 = 10:00-10:30), " +
@@ -34,7 +35,7 @@ public sealed class IntrusionTools(IntrusionQueries queries, TimeProvider clock)
     [McpServerTool(Name = "intrusion_attempts", ReadOnly = true),
      Description(
         "Intrusion attempts in a period, one row per source address, most serious first: attempts, bans, accounts tried, " +
-        "attack types, severity (Low, Medium, High, Critical), location, closed ports probed, web attack patterns, CrowdSec scenarios, Suricata signatures (outbound = the host itself connected: possible compromise), host activity (what Falco saw it do once inside). " +
+        "attack types, severity (Low, Medium, High, Critical), location, closed ports probed, web attack patterns, WAF findings (ModSecurity + OWASP CRS: attack family, CRS rule, anomaly score, also attacks hidden in POST bodies), CrowdSec scenarios, Suricata signatures (outbound = the host itself connected: possible compromise), host activity (what Falco saw it do once inside). " +
         "Filter by jail, attack type or country.")]
     public AttemptsResult Attempts(
         [Description(PeriodHelp)] int? hours = null,
@@ -53,7 +54,7 @@ public sealed class IntrusionTools(IntrusionQueries queries, TimeProvider clock)
     [McpServerTool(Name = "intrusion_ip_detail", ReadOnly = true),
      Description(
         "Everything one address did in the period: the summary row, any suspicious login, and the timeline of its events " +
-        "(failed and successful logins, fail2ban matches and bans, blocked connections, web attacks, CrowdSec alerts, Suricata alerts, and the Falco alerts of the session it opened), newest first, up to 200.")]
+        "(failed and successful logins, fail2ban matches and bans, blocked connections, web attacks, CrowdSec alerts, Suricata alerts, ModSecurity alerts (with the CRS anomaly score), and the Falco alerts of the session it opened), newest first, up to 200.")]
     public IpDetailResult IpDetail(
         [Description("The source address (IPv4 or IPv6).")] string ip,
         [Description(PeriodHelp)] int? hours = null,
@@ -110,5 +111,29 @@ public sealed class IntrusionTools(IntrusionQueries queries, TimeProvider clock)
     {
         var now = clock.GetUtcNow();
         return queries.HostActivity(now, queries.Resolve(now, hours, since, until, slotMinutes), attackType, unlinkedOnly);
+    }
+
+    [McpServerTool(Name = "intrusion_guardians", ReadOnly = true),
+     Description(
+        "The host's protection as it is configured now: each guardian (sshd, nginx, ufw, fail2ban, crowdsec, suricata, falco, modsecurity) " +
+        "with its role, status (ok, stopped, log-unreadable, missing), version, mode (detection = reports only, blocking = stops traffic), " +
+        "whether install.sh --with configured it, when its log and its rules were last updated; the TCP ports open to the network; " +
+        "and sshd's settings (password logins, root login). Read it before advising a change: it says what is there to build on.")]
+    public GuardiansResult Guardians() => guard.Guardians(clock.GetUtcNow());
+
+    [McpServerTool(Name = "intrusion_posture", ReadOnly = true),
+     Description(
+        "Checks of the host's configuration against what attacked it: incidents first (someone got in), then SSH with passwords, " +
+        "services and industrial ports open to the network, a slow brute force nobody banned, no web firewall, guardians stopped or " +
+        "unreadable, old IDS rules. Each finding has a stable id, a severity grown with the evidence of the period, the evidence, a " +
+        "recommendation in plain words and, when this package can do it, the command that fixes it. Nothing is applied. " +
+        "Use it to propose a security plan for this customer. Default period: the last 7 days.")]
+    public PostureResult Posture(
+        [Description("Hours of attacks to weigh the checks with. Default 168 (7 days).")] int? hours = null,
+        [Description("Start of the period (ISO 8601). Null = now minus hours.")] DateTimeOffset? since = null,
+        [Description("End of the period (ISO 8601). Null = now.")] DateTimeOffset? until = null)
+    {
+        var now = clock.GetUtcNow();
+        return guard.Posture(now, queries.Resolve(now, hours ?? GuardQueries.DefaultPostureHours, since, until));
     }
 }

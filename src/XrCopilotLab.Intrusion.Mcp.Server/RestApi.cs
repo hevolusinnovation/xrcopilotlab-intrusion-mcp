@@ -1,3 +1,4 @@
+using XrCopilotLab.Intrusion.Mcp.Core.Guard;
 using XrCopilotLab.Intrusion.Mcp.Core.Queries;
 
 namespace XrCopilotLab.Intrusion.Mcp.Server;
@@ -49,6 +50,14 @@ public static class RestApi
         {
             var now = clock.GetUtcNow();
             return q.HostActivity(now, q.Resolve(now, hours, since, until, slotMinutes), Blank(attackType), unlinkedOnly ?? false);
+        });
+
+        api.MapGet("/guardians", (GuardQueries g, TimeProvider clock) => g.Guardians(clock.GetUtcNow()));
+
+        api.MapGet("/posture", (GuardQueries g, IntrusionQueries q, TimeProvider clock, int? hours, DateTimeOffset? since, DateTimeOffset? until) =>
+        {
+            var now = clock.GetUtcNow();
+            return g.Posture(now, q.Resolve(now, hours ?? GuardQueries.DefaultPostureHours, since, until));
         });
     }
 

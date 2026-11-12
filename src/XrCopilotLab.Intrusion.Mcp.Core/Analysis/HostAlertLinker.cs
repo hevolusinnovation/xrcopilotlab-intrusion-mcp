@@ -51,5 +51,6 @@ public static class HostAlertLinker
 
     private static bool IsWebExploit(LogEvent e) =>
         (e.Kind == LogEventKind.WebRequest && WebProbeRules.TypeOf(e.Rule!) == AttackType.WebExploitAttempt)
-        || (e.Kind == LogEventKind.IdsAlert && AttackCatalog.FromIdsAlert(e) == AttackType.WebExploitAttempt);
+        || (e.Kind == LogEventKind.IdsAlert && AttackCatalog.FromIdsAlert(e) == AttackType.WebExploitAttempt)
+        || (e.Kind == LogEventKind.WafAlert && ModSecurityParser.TypeOf(e) == AttackType.WebExploitAttempt);
 }

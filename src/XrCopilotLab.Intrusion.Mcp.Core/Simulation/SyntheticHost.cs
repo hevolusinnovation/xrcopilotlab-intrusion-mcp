@@ -33,16 +33,17 @@ public sealed record SimulatedDay(
     IReadOnlyList<string> WebAccessLines,
     IReadOnlyList<string> CrowdsecLines,
     IReadOnlyList<string> SuricataLines,
-    IReadOnlyList<string> FalcoLines)
+    IReadOnlyList<string> FalcoLines,
+    IReadOnlyList<string> ModSecurityLines)
 {
-    public LogSet ToLogSet() => new(Fail2banLines, AuthLines, FirewallLines, WebAccessLines, CrowdsecLines, SuricataLines, FalcoLines);
+    public LogSet ToLogSet() => new(Fail2banLines, AuthLines, FirewallLines, WebAccessLines, CrowdsecLines, SuricataLines, FalcoLines, ModSecurityLines);
 }
 
 /// <summary>
 /// A synthetic Linux host exposed on the internet with SSH and nginx, behind UFW, protected by fail2ban, with CrowdSec
 /// running in detection mode (alerts and decisions, no bouncer). For any day it generates the lines that day would
 /// have left in <c>auth.log</c>, <c>fail2ban.log</c>, <c>ufw.log</c>, the nginx <c>access.log</c> and
-/// <c>crowdsec.log</c>, Suricata's <c>eve.json</c> and Falco's <c>events.json</c>, and runs the fail2ban rules on them (maxretry, findtime, bantime, recidive), so bans follow
+/// <c>crowdsec.log</c>, Suricata's <c>eve.json</c>, Falco's <c>events.json</c> and ModSecurity's <c>audit.json</c>, and runs the fail2ban rules on them (maxretry, findtime, bantime, recidive), so bans follow
 /// from the attempts. Deterministic and pure: same seed and day, same lines; no clock, no I/O.
 /// <para>What a day contains:</para>
 /// <list type="bullet">
@@ -63,6 +64,8 @@ public sealed record SimulatedDay(
 /// key, starts the backdoor and a miner from <c>/dev/shm</c>, clears <c>wtmp</c>); on some days a command injection that
 /// works, and the web server starts a shell; every day an inventory agent reading <c>/etc/shadow</c> as root, which no
 /// login explains;</item>
+/// <item>ModSecurity (OWASP CRS, detection only): the web exploits above that the CRS recognises, and a few SQL injections
+/// hidden in the body of a POST to the contact form, which the access log shows as an ordinary <c>POST /contact.php 200</c>;</item>
 /// <item>legitimate logins and ordinary web traffic, which must not be reported.</item>
 /// </list>
 /// </summary>
@@ -179,9 +182,11 @@ public sealed class SyntheticHost(SimulationOptions options)
         Suricata(new Random(unchecked(Options.Seed * 17 + day.DayNumber * 104_729)), attempts, w);
         // And Falco from another, for the same reason.
         Falco(new Random(unchecked(Options.Seed * 13 + day.DayNumber * 15_485_863)), attempts, w);
+        // And ModSecurity from a third.
+        ModSecurity(new Random(unchecked(Options.Seed * 19 + day.DayNumber * 7_919)), attempts, w);
 
         return new SimulatedDay(day, w.Fail2ban.Sorted(), w.Auth.Sorted(), w.Firewall.Sorted(), w.Web.Sorted(), w.Crowdsec.Sorted(), w.Suricata.Sorted(),
-            w.Falco.Sorted());
+            w.Falco.Sorted(), w.ModSecurity.Sorted());
     }
 
     // ---- scenarios: attempts against the services ------------------------------------------------------------------
@@ -647,6 +652,49 @@ public sealed class SyntheticHost(SimulationOptions options)
             $"{{\"hostname\":\"{Options.Hostname}\",\"output\":{Json($"{utc:HH:mm:ss.fffffff}00: {priority} {rule} | user={user} command={command}")},\"output_fields\":{{\"container.id\":\"host\",\"fd.name\":{Json(file)},\"proc.aname[2]\":{Ancestor(1)},\"proc.aname[3]\":{Ancestor(2)},\"proc.aname[4]\":{Ancestor(3)},\"proc.cmdline\":{Json(command)},\"proc.env[SSH_CLIENT]\":{Json(sshClient ?? "")},\"proc.env[SUDO_USER]\":{Json(sudoUser ?? "")},\"proc.pname\":{Ancestor(0)},\"user.loginname\":{Json(loginName ?? "<NA>")},\"user.name\":{Json(user)}}},\"priority\":\"{priority}\",\"rule\":\"{rule}\",\"source\":\"syscall\",\"tags\":[{string.Join(",", tags.Select(t => Json(t)))}],\"time\":\"{utc:yyyy-MM-dd'T'HH:mm:ss.fffffff}00Z\"}}"));
     }
 
+    // ---- ModSecurity + OWASP CRS (audit.json) ----------------------------------------------------------------------
+
+    /// <summary>The CRS rule each exploit of the scenarios trips. The PHPUnit path carries no payload the CRS knows at
+    /// paranoia level 1: the WAF does not report it, as on a real host.</summary>
+    private static readonly Dictionary<string, (int Id, string Message, string Tag, int Score)> CrsRules = new(StringComparer.Ordinal)
+    {
+        ["sql-injection"] = (942100, "SQL Injection Attack Detected via libinjection", "attack-sqli", 15),
+        ["path-traversal"] = (930100, "Path Traversal Attack (/../)", "attack-lfi", 20),
+        ["command-injection"] = (932100, "Remote Command Execution: Unix Command Injection", "attack-rce", 15),
+        ["log4shell"] = (944150, "Potential Remote Command Execution: Log4j / Log4shell", "attack-rce", 10),
+    };
+
+    private void ModSecurity(Random rng, List<Attempt> attempts, Writer w)
+    {
+        foreach (var a in attempts.Where(a => a.Service == Service.WebExploit && a.Rule is not null && CrsRules.ContainsKey(a.Rule)))
+        {
+            var (id, message, tag, score) = CrsRules[a.Rule!];
+            AuditEntry(w, a.At, a.Ip, rng, "GET", a.Path ?? "/", a.Status ?? 404, id, message, tag, score);
+        }
+
+        // SQL injections in a form: nginx logs "POST /contact.php 200", nothing to see there; the WAF reads the body.
+        for (var i = rng.Next(1, 4); i > 0; i--)
+        {
+            var ip = $"198.51.100.{rng.Next(220, 250)}";
+            var at = w.Day.AddSeconds(rng.Next(0, 86_000));
+            for (var k = rng.Next(2, 7); k > 0; k--, at = at.AddSeconds(rng.Next(2, 15)))
+            {
+                w.Web.Add(at, Access(at, w.Zone, ip, "POST", "/contact.php", 200, rng.Next(900, 1400), "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"));
+                AuditEntry(w, at, ip, rng, "POST", "/contact.php", 200, 942100, "SQL Injection Attack Detected via libinjection", "attack-sqli", 20);
+            }
+        }
+    }
+
+    private static void AuditEntry(Writer w, DateTime local, string ip, Random rng, string method, string uri, int status,
+        int ruleId, string message, string tag, int score)
+    {
+        static string Json(string v) => "\"" + v.Replace("\\", "\\\\", StringComparison.Ordinal).Replace("\"", "\\\"", StringComparison.Ordinal) + "\"";
+        string Message(int id, string text, string severity, string[] tags) =>
+            $"{{\"message\":{Json(text)},\"details\":{{\"ruleId\":\"{id}\",\"severity\":\"{severity}\",\"ver\":\"OWASP_CRS/3.3.5\",\"tags\":[{string.Join(",", tags.Select(Json))}]}}}}";
+        w.ModSecurity.Add(local, string.Create(CultureInfo.InvariantCulture,
+            $"{{\"transaction\":{{\"client_ip\":\"{ip}\",\"time_stamp\":\"{local:ddd MMM d HH:mm:ss yyyy}\",\"client_port\":{Port(rng)},\"host_ip\":\"{HostAddress}\",\"host_port\":443,\"request\":{{\"method\":\"{method}\",\"http_version\":1.1,\"uri\":{Json(uri)}}},\"response\":{{\"http_code\":{status}}},\"producer\":{{\"modsecurity\":\"ModSecurity v3.0.12 (Linux)\",\"secrules_engine\":\"DetectionOnly\"}},\"messages\":[{Message(ruleId, message, "2", ["application-multi", tag, "paranoia-level/1", "OWASP_CRS"])},{Message(949110, $"Inbound Anomaly Score Exceeded (Total Score: {score})", "2", ["application-multi", "anomaly-evaluation"])}]}}}}"));
+    }
+
     private static string ExploitScenario(string rule) => rule switch
     {
         "sql-injection" => "crowdsecurity/http-sqli-probing",
@@ -721,6 +769,7 @@ public sealed class SyntheticHost(SimulationOptions options)
         public DateTime Day { get; } = day;
         public Lines Suricata { get; } = new();
         public Lines Falco { get; } = new();
+        public Lines ModSecurity { get; } = new();
         public Lines Fail2ban { get; } = new();
         public Lines Auth { get; } = new();
         public Lines Firewall { get; } = new();

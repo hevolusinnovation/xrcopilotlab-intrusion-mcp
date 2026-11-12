@@ -94,6 +94,18 @@ td.num { font-variant-numeric: tabular-nums; text-align: right; }
     </div>
 
     <div>
+      <h2>Server da testare</h2>
+      <div class="tunnel" id="target">
+        <div class="state" id="target-state"><b class="on">● lab-01</b> · laboratorio</div>
+        <div class="label">Per provare un altro server con il pacchetto installato: il suo indirizzo API e la sua chiave. La chiave prova che amministri quel server.</div>
+        <div class="field"><input id="target-url" placeholder="https://server-del-cliente/intrusion-mcp" style="flex:1;min-width:0"></div>
+        <div class="field"><input id="target-key" type="password" placeholder="chiave API del server" style="flex:1;min-width:0"></div>
+        <div class="field"><button class="btn" id="target-set">Verifica e usa</button><button class="btn ghost" id="target-clear">Torna a lab-01</button></div>
+        <span id="target-msg" class="muted" style="font-size:12px"></span>
+      </div>
+    </div>
+
+    <div>
       <h2>Attacchi</h2>
       <div class="scenarios" id="scenarios"></div>
     </div>
@@ -104,8 +116,9 @@ td.num { font-variant-numeric: tabular-nums; text-align: right; }
     </div>
 
     <div class="muted" style="font-size:12px">
-      Gli attacchi partono solo verso lab-01, dentro la rete del laboratorio. Gli indirizzi sono di documentazione
-      (RFC 5737) e le città sono inventate. La mappa e la tabella sono quello che vede il pacchetto installato su lab-01.
+      Senza un server da testare gli attacchi partono solo verso lab-01, dentro la rete del laboratorio, da indirizzi di
+      documentazione (RFC 5737) con città inventate. Verso un server esterno partono dal nostro indirizzo e solo gli
+      attacchi web, e solo dopo che la chiave ha provato che puoi già leggere quel server.
     </div>
   </aside>
 
@@ -256,10 +269,11 @@ async function refreshLab() {
 }
 
 let scenarios = [];
+let targetMode = "lab";
 async function loadScenarios() {
   scenarios = await fetch("/api/scenarios").then(r => r.json());
   $("scenarios").innerHTML = scenarios.map(s => `
-    <button class="scenario" data-id="${esc(s.id)}">
+    <button class="scenario" data-id="${esc(s.id)}" data-web="${s.web ? 1 : 0}">
       <b>${esc(s.title)}</b><span>da ${esc(s.source)} · ${esc(s.place)}</span>
       <span class="expect">${esc(s.expect)}</span>
     </button>`).join("");
@@ -272,12 +286,44 @@ async function run(id) {
   refreshRuns();
 }
 
+// Verify and arm an external server; or go back to lab-01. The attacks against it start only after this succeeds.
+async function setTarget() {
+  const url = $("target-url").value.trim(), key = $("target-key").value.trim();
+  if (!url || !key) { $("target-msg").textContent = "servono l'indirizzo e la chiave"; return; }
+  $("target-set").disabled = true; $("target-msg").textContent = "verifica in corso…";
+  try {
+    const r = await fetch("/api/target", { method: "POST", body: JSON.stringify({ url, key }) });
+    const d = await r.json();
+    if (!r.ok) { $("target-msg").innerHTML = `<span class="error">${esc(d.error || "non verificato")}</span>`; }
+    else { $("target-msg").innerHTML = `<span style="color:var(--ok)">verificato: ${esc(d.host)} (${esc((d.detectors || []).join(", "))})</span>`; $("target-key").value = ""; }
+  } catch { $("target-msg").innerHTML = `<span class="error">nessuna risposta</span>`; }
+  $("target-set").disabled = false;
+  refreshTarget(); refreshLab();
+}
+async function clearTarget() {
+  await fetch("/api/target/clear", { method: "POST" }).catch(() => null);
+  $("target-msg").textContent = ""; refreshTarget(); refreshLab();
+}
+async function refreshTarget() {
+  const t = await fetch("/api/target").then(r => r.json()).catch(() => null);
+  if (!t) return;
+  targetMode = t.mode;
+  $("target-state").innerHTML = t.mode === "external"
+    ? `<b class="on">● ${esc(t.host || "server esterno")}</b> · esterno — solo attacchi web, dal nostro indirizzo`
+    : `<b class="on">● lab-01</b> · laboratorio`;
+  refreshRuns();
+}
+$("target-set").addEventListener("click", setTarget);
+$("target-clear").addEventListener("click", clearTarget);
+
 async function refreshRuns() {
   const data = await fetch("/api/runs").then(r => r.json()).catch(() => null);
   if (!data) return;
   const running = data.runs.find(r => r.id === data.current);
   $("scenarios").querySelectorAll("button").forEach(b => {
-    b.disabled = !!running;
+    const blocked = targetMode === "external" && b.dataset.web !== "1";
+    b.disabled = !!running || blocked;
+    b.title = blocked ? "Non disponibile contro un server esterno (solo attacchi web)" : "";
     b.classList.toggle("running", !!running && running.scenario === b.dataset.id);
   });
   const last = data.runs[0];
@@ -290,7 +336,7 @@ async function refreshRuns() {
 }
 
 $("hours").addEventListener("change", refreshLab);
-loadScenarios().then(refreshRuns);
+loadScenarios().then(refreshTarget);
 refreshLab();
 setInterval(refreshRuns, 1500);
 setInterval(refreshLab, 4000);

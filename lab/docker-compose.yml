@@ -21,6 +21,8 @@ services:
     tmpfs: [/run, /run/lock]
     volumes:
       - /sys/fs/cgroup:/sys/fs/cgroup:rw
+      # The tunnel's public address, written by the tunnel container: the package shows it on its page.
+      - tunnel-state:/var/lib/xrcopilotlab-intrusion-mcp/tunnel:ro
     environment:
       LAB_API_KEY: ${LAB_API_KEY:?run make lab-up, which creates lab/.env}
     networks:
@@ -64,6 +66,7 @@ services:
       LAB_API: 10.77.0.20:8091
     volumes:
       - tunnel-login:/root
+      - tunnel-state:/state
     networks:
       tunnel:  { ipv4_address: 10.77.0.30 }
       console: {}
@@ -73,6 +76,8 @@ services:
 volumes:
   # The Dev Tunnels login and the tunnel id: kept by make lab-down, so the address does not change.
   tunnel-login: {}
+  # The tunnel's current address (one file), shared with lab-01.
+  tunnel-state: {}
 
 networks:
   # Docker gives its own addresses from the /28 at the top; the attackers' addresses are added below it.

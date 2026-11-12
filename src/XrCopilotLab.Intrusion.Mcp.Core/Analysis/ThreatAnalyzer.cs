@@ -95,13 +95,15 @@ public sealed class ThreatAnalyzer(IntrusionPolicy policy, IGeoLocator geo)
             var alerts = events.Where(e => e.Kind == LogEventKind.CrowdsecAlert).ToList();
             var ids = events.Where(e => e.Kind == LogEventKind.IdsAlert).ToList();
             var host = events.Where(e => e.Kind == LogEventKind.HostAlert).ToList();
+            var waf = events.Where(e => e.Kind == LogEventKind.WafAlert).ToList();
             var jails = events.Where(e => e.Jail is not null).Select(e => e.Jail!).Distinct().Order().ToList();
 
-            // One attempt, one count: sshd from auth.log when it is there, web from whichever of fail2ban and nginx saw more.
+            // One attempt, one count: sshd from auth.log when it is there, web from whichever of fail2ban, nginx and the WAF
+            // saw more (they see the same requests; the WAF also sees the bodies).
             var sshFound = found.Count(e => IsSsh(e.Jail));
             var webFound = found.Count(e => AttackCatalog.IsWeb(AttackCatalog.FromJail(e.Jail!)));
             var otherFound = found.Count - sshFound - webFound;
-            var attempts = (authAvailable ? failures.Count : sshFound) + Math.Max(webFound, web.Count) + otherFound;
+            var attempts = (authAvailable ? failures.Count : sshFound) + Math.Max(webFound, Math.Max(web.Count, waf.Count)) + otherFound;
 
             // With auth.log, one sshd match is a mistyped password: brute force takes repeated failures or a ban.
             var sshBanned = events.Any(e => e.IsBanStart && IsSsh(e.Jail));
@@ -118,6 +120,7 @@ public sealed class ThreatAnalyzer(IntrusionPolicy policy, IGeoLocator geo)
             foreach (var a in alerts) types.Add(AttackCatalog.FromScenario(a.Rule!));
             foreach (var a in ids) types.Add(AttackCatalog.FromIdsAlert(a));
             foreach (var a in host) types.Add(AttackCatalog.FromHostAlert(a));
+            foreach (var a in waf) types.Add(ModSecurityParser.TypeOf(a));
 
             var ports = blocks.Where(b => b.TargetPort is not null).GroupBy(b => b.TargetPort!.Value).ToList();
             if (ports.Count >= policy.PortScanMinPorts) types.Add(AttackType.PortScan);
@@ -160,6 +163,10 @@ public sealed class ThreatAnalyzer(IntrusionPolicy policy, IGeoLocator geo)
                     .Select(g => new HostActivity(g.Key, AttackCatalog.FromHostAlert(g.First()).ToString(), g.Min(a => a.Priority ?? FalcoParser.MaxPriority),
                         g.Count(), g.First().User, g.First().Command, g.First().Path, g.First().LinkedBy ?? ""))
                     .OrderBy(x => x.Priority).ThenByDescending(x => x.Alerts).Take(10).ToList(),
+                waf.GroupBy(ModSecurityParser.FamilyOf)
+                    .Select(g => new WafFinding(g.Key, ModSecurityParser.TypeOf(g.First()).ToString(), g.First().SignatureId, g.First().Rule!, g.Count(),
+                        g.Max(a => a.Score ?? 0), $"{g.First().Method} {g.First().Path}"))
+                    .OrderByDescending(x => x.Requests).Take(10).ToList(),
                 events.Min(e => e.Time),
                 events.Max(e => e.Time)));
         }

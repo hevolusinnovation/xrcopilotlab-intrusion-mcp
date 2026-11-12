@@ -1,10 +1,10 @@
-# The security packages ("guardians") the toolkit reads, installed on request: install.sh --with fail2ban,crowdsec,suricata,falco
+# The security packages ("guardians") the toolkit reads, installed on request: install.sh --with fail2ban,crowdsec,suricata,falco,modsecurity
 # Sourced by install.sh, as root. Every function is idempotent: a package already there is configured, not reinstalled,
 # and a configuration this script did not write is left alone. Everything runs in detection mode: nothing here blocks
 # traffic that fail2ban would not already block. UFW is never switched on: a firewall turned on by a script can lock
 # everyone out of SSH.
 
-GUARDIANS_SUPPORTED="fail2ban crowdsec suricata falco"
+GUARDIANS_SUPPORTED="fail2ban crowdsec suricata falco modsecurity"
 SERVICE_DROPIN_DIR=/etc/systemd/system/xrcopilotlab-intrusion-mcp.service.d
 
 installed() { dpkg-query -W -f='${Status}' "$1" 2>/dev/null | grep -q "install ok installed"; }
@@ -279,6 +279,96 @@ ROTATE
   echo "falco: alerts in $FALCO_LOG (notice and above)"
 }
 
+# ModSecurity v3 with the OWASP Core Rule Set, in nginx, in detection only (SecRuleEngine DetectionOnly): it reads every
+# request, bodies included, and writes the ones the CRS would block to a JSON audit log; it blocks nothing. Switched on
+# for every site with one file in /etc/nginx/conf.d (http level): the sites' own files are not touched, and a site
+# with "modsecurity off;" stays off. nginx is checked with nginx -t before and after: if it fails, the file is removed
+# and nginx is left as it was.
+MODSEC_DIR=/etc/modsecurity/xrcopilotlab
+MODSEC_NGINX=/etc/nginx/conf.d/xrcopilotlab-modsecurity.conf
+MODSEC_LOG=/var/log/modsecurity/audit.json
+
+guardian_modsecurity() {
+  command -v nginx >/dev/null || { echo "modsecurity: nginx is not installed: ModSecurity works inside nginx" >&2; return 1; }
+  if ! nginx -t >/dev/null 2>&1; then
+    echo "modsecurity: nginx -t already fails before any change: fix nginx first, nothing changed" >&2; return 1
+  fi
+  if installed libnginx-mod-http-modsecurity && installed modsecurity-crs; then
+    echo "modsecurity: already installed"
+  else
+    echo "modsecurity: installing (nginx module, OWASP CRS, detection only)"
+    apt_install libnginx-mod-http-modsecurity modsecurity-crs
+  fi
+
+  install -d -m 0755 "$MODSEC_DIR"
+  # Our own main file: Ubuntu's modsecurity.conf keeps response bodies, audits only 4xx/5xx answers (in detection only
+  # an attack is answered 200: it would never be written) and turns on the status engine.
+  cat > "$MODSEC_DIR/main.conf" <<'CONF'
+# Written by xrcopilotlab-intrusion-mcp (install.sh --with modsecurity). Detection only: nothing is blocked.
+SecRuleEngine DetectionOnly
+SecRequestBodyAccess On
+SecRequestBodyLimit 13107200
+SecRequestBodyNoFilesLimit 131072
+# A body larger than the limit is inspected up to the limit, not refused.
+SecRequestBodyLimitAction ProcessPartial
+SecRequestBodyJsonDepthLimit 512
+SecRule REQUEST_HEADERS:Content-Type "^(?:application(?:/soap\+|/)|text/)xml" "id:200000,phase:1,t:none,t:lowercase,pass,nolog,ctl:requestBodyProcessor=XML"
+SecRule REQUEST_HEADERS:Content-Type "^application/json" "id:200001,phase:1,t:none,t:lowercase,pass,nolog,ctl:requestBodyProcessor=JSON"
+SecResponseBodyAccess Off
+SecPcreMatchLimit 1000
+SecPcreMatchLimitRecursion 1000
+SecTmpDir /tmp/
+SecDataDir /tmp/
+SecArgumentSeparator &
+SecCookieFormat 0
+SecUnicodeMapFile /etc/nginx/unicode.mapping 20127
+SecStatusEngine Off
+# The transactions a rule logged (an attack), as one JSON line each. Parts A, H, Z: client, request line, rules matched;
+# no headers (cookies, Authorization) and no bodies.
+SecAuditEngine RelevantOnly
+SecAuditLogRelevantStatus "^5"
+SecAuditLogParts AHZ
+SecAuditLogType Serial
+SecAuditLogFormat JSON
+SecAuditLog /var/log/modsecurity/audit.json
+# The OWASP CRS, file by file: the package's owasp-crs.load uses IncludeOptional, which ModSecurity v3 rejects.
+Include /etc/modsecurity/crs/crs-setup.conf
+Include /etc/modsecurity/crs/REQUEST-900-EXCLUSION-RULES-BEFORE-CRS.conf
+Include /usr/share/modsecurity-crs/rules/*.conf
+Include /etc/modsecurity/crs/RESPONSE-999-EXCLUSION-RULES-AFTER-CRS.conf
+CONF
+
+  # nginx's master (root) opens the log and its workers write it: created first, 0640 group adm, for the toolkit.
+  install -d -m 0750 -g adm /var/log/modsecurity
+  [[ -f "$MODSEC_LOG" ]] || install -m 0640 -g adm /dev/null "$MODSEC_LOG"
+  chgrp adm "$MODSEC_LOG" && chmod 0640 "$MODSEC_LOG"
+  # copytruncate: ModSecurity keeps the log open by name and nginx -s reload does not reopen it.
+  cat > /etc/logrotate.d/xrcopilotlab-modsecurity <<'ROTATE'
+/var/log/modsecurity/audit.json {
+    daily
+    rotate 7
+    compress
+    delaycompress
+    missingok
+    notifempty
+    copytruncate
+}
+ROTATE
+
+  cat > "$MODSEC_NGINX" <<CONF
+# Written by xrcopilotlab-intrusion-mcp (install.sh --with modsecurity): ModSecurity + OWASP CRS, detection only, on every site.
+modsecurity on;
+modsecurity_rules_file $MODSEC_DIR/main.conf;
+CONF
+  if ! nginx -t >/dev/null 2>&1; then
+    rm -f "$MODSEC_NGINX"
+    echo "modsecurity: nginx -t fails with ModSecurity on (is it already on in a site of yours?): removed $MODSEC_NGINX, nginx unchanged" >&2
+    nginx -t 2>&1 | tail -3 >&2
+    return 1
+  fi
+  echo "modsecurity: on for every nginx site, detection only, attacks in $MODSEC_LOG"
+}
+
 # The start of whatever was configured; called by install.sh once systemd is up (not with --no-start).
 guardians_start() {
   local g
@@ -293,6 +383,9 @@ guardians_start() {
         systemctl daemon-reload
         systemctl enable "$FALCO_SERVICE" >/dev/null 2>&1 || true
         systemctl restart "$FALCO_SERVICE" ;;
+      modsecurity)
+        # A restart, not a reload: ModSecurity opens its audit log once, when nginx starts.
+        [[ -f "$MODSEC_NGINX" ]] && systemctl restart nginx ;;
       *) ;;
     esac
   done

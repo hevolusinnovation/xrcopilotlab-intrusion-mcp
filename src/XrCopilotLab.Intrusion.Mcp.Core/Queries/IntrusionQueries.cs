@@ -16,6 +16,10 @@ public sealed class IntrusionQueries(ILogSource source, IGeoLocator geo, Intrusi
 
     private readonly ThreatAnalyzer _analyzer = new(policy, geo);
 
+    public string Host => source.Hostname;
+
+    public bool Simulated => source.Simulated;
+
     /// <summary>
     /// The period of a call. <paramref name="slotMinutes"/> wins: the last complete slot aligned to the clock (with 30, at
     /// 10:47 it is 10:00-10:30), so a scheduled round every 30 minutes sees each event exactly once, with no overlap and no
@@ -102,7 +106,7 @@ public sealed class IntrusionQueries(ILogSource source, IGeoLocator geo, Intrusi
             .OrderByDescending(e => e.Time)
             .Take(MaxTimeline)
             .Select(e => new TimelineEntry(e.Time, e.Kind.ToString(), DetectorName(e.Origin), e.Jail, e.User, e.Port, e.Method,
-                e.TargetPort, e.Path, e.Status, e.Rule, e.Detail, e.Outbound, e.Command, e.LinkedBy))
+                e.TargetPort, e.Path, e.Status, e.Rule, e.Detail, e.Outbound, e.Command, e.LinkedBy, e.Score))
             .ToList();
         return new IpDetailResult(source.Hostname, source.Simulated, period, report,
             _analyzer.SuspiciousLogins(events).Where(s => s.Ip == ip && s.Time >= period.From).ToList(),
@@ -155,7 +159,8 @@ public sealed class IntrusionQueries(ILogSource source, IGeoLocator geo, Intrusi
             inPeriod.Count(e => e.Kind == LogEventKind.WebRequest),
             inPeriod.Count(e => e.Kind == LogEventKind.CrowdsecAlert),
             inPeriod.Count(e => e.Kind == LogEventKind.IdsAlert),
-            inPeriod.Count(e => e.Kind == LogEventKind.HostAlert));
+            inPeriod.Count(e => e.Kind == LogEventKind.HostAlert),
+            inPeriod.Count(e => e.Kind == LogEventKind.WafAlert));
 
         return new SummaryResult(source.Hostname, source.Simulated, period, totals, byType, byCountry, ThreatAnalyzer.TargetedPorts(inPeriod, 15),
             reports.Take(Math.Clamp(top, 1, MaxTop)).ToList(), campaigns, suspicious, points,
@@ -192,6 +197,7 @@ public sealed class IntrusionQueries(ILogSource source, IGeoLocator geo, Intrusi
         LogOrigin.WebAccess => "nginx",
         LogOrigin.Suricata => "suricata",
         LogOrigin.Falco => "falco",
+        LogOrigin.ModSecurity => "modsecurity",
         _ => "crowdsec",
     };
 

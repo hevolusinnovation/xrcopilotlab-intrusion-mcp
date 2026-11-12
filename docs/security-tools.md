@@ -10,6 +10,10 @@ unprivileged user in group `adm`, reads only, and never blocks. Its catalogue ha
 > suricata` installs it, and the Docker lab runs it with the ET Open rules. What the real install showed, and this note
 > had not verified, is at the end of the Suricata section.
 >
+> **Update, 12 November 2026: ModSecurity + OWASP CRS is done** (version 0.4.0): the toolkit reads
+> `/var/log/modsecurity/audit.json`, `install.sh --with modsecurity` installs it in detection only and excludes the
+> toolkit's own API, and a read-only monitoring page plus the `intrusion_guardians`/`intrusion_posture` tools were added.
+>
 > **Update, 12 November 2026: Falco is done** (version 0.3.0): the toolkit reads `/var/log/falco/events.json`, ties
 > each alert to the attacker's address, `install.sh --with falco` installs it, and the lab runs it. What the real
 > install showed is at the end of the Falco section. ModSecurity is next.
@@ -264,6 +268,27 @@ format and new attack types (about 1–2 weeks), L = a new kind of data or a new
 - **New attack types:** finer `WebExploitAttempt` subtypes (`Xss`, `RemoteFileInclusion`, `ProtocolViolation`), with
   the CRS rule ID as evidence.
 - **Overlap:** high with our nginx regex and CrowdSec AppSec. **Effort M.** Our `WebProbeRules` stays as the fallback.
+- **Tried on Ubuntu 24.04, 12 November 2026** (nginx 1.24, libmodsecurity 3.0.12, CRS 3.3.5, paranoia level 1):
+  - It can be switched on **without touching the customer's sites**: one file in `/etc/nginx/conf.d/` (`modsecurity on;`
+    plus our rules file) applies to every `server` at the `http` level. A site with `modsecurity off;` stays off.
+  - The package's `owasp-crs.load` uses `IncludeOptional`, which libmodsecurity v3 rejects (`nginx -t` fails): our
+    rules file includes the CRS files one by one. `install.sh` must run `nginx -t` and remove its file if it fails.
+  - The Ubuntu default `modsecurity.conf` keeps response bodies and logs only 4xx/5xx; it also sets
+    `SecStatusEngine On`. We write our own: `DetectionOnly`, no response bodies, `SecAuditLogFormat JSON`, parts
+    `AHZ` (no headers: no cookies or `Authorization` in the log), status engine off.
+  - Detection-only works: nothing was blocked (the answers stayed 200/404). SQLi, XSS, path traversal, a command
+    injection **in a POST body** (which the access log cannot show) and the sqlmap User-Agent were all found; rule
+    949110 ("Inbound Anomaly Score Exceeded") says the request would have been blocked. The `attack-*` tags give the type.
+  - The audit log has the client address and port, method, URI, rule IDs, messages and matched data. The time is
+    **local time without a zone** (`Thu Nov 12 13:51:22 2026`). A password in a POST that matched no rule is not
+    written; one that matched a rule would be, in `data`.
+  - `nginx -s reload` does **not** reopen the audit log (libmodsecurity keeps it open by name): logrotate must use
+    `copytruncate`. Tried: writing goes on at the start of the truncated file.
+  - Rule 920350 ("Host header is a numeric IP") fires on every request to the bare IP, at severity 4: it alone is
+    not an attack. No false positives on ordinary traffic (JSON with apostrophes, a comment with `1=1`, HTML in a
+    WordPress post, admin-ajax). The nginx `error.log` gets nothing.
+  - **Cost:** about 17 MB more per nginx worker (`worker_processes auto` = one per core: about 35 MB on 2 cores), and
+    +0.75 ms per request (from 0.33 to 1.09 ms; 30,000 → 9,000 requests/s on 14 cores).
 
 ### sshguard
 - **Detects:** brute force on SSH and some mail/FTP services, and blocks the attacker (like fail2ban).

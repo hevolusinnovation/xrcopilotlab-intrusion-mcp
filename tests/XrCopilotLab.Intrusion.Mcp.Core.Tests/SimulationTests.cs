@@ -53,6 +53,9 @@ public class SimulationTests
         Assert.Equal(day.FalcoLines.Count, events.Count(e => e.Origin == LogOrigin.Falco));
         Assert.All(events.Where(e => e.Origin == LogOrigin.Falco && e.HasAddress), e => Assert.Equal("ssh-session", e.LinkedBy));
         Assert.Contains(events, e => e.Origin == LogOrigin.Falco && !e.HasAddress);
+        // Every audit entry is above the CRS blocking score: each one is an event.
+        Assert.Equal(day.ModSecurityLines.Count, events.Count(e => e.Origin == LogOrigin.ModSecurity));
+        Assert.Contains(events, e => e.Origin == LogOrigin.ModSecurity && e.Method == "POST");
         Assert.NotEmpty(events);
         Assert.All(events.Where(e => e.HasAddress), e => Assert.True(IpScope.IsDocumentation(e.SourceIp), $"{e.SourceIp} is not a documentation address"));
     }
@@ -215,7 +218,9 @@ public class SimulationTests
 
         var exploits = attempts.Where(r => r.AttackTypes.Contains(nameof(AttackType.WebExploitAttempt))).ToList();
         Assert.NotEmpty(exploits);
-        Assert.All(exploits, r => Assert.NotEmpty(r.WebProbes));
+        Assert.All(exploits, r => Assert.True(r.WebProbes.Count + r.WafFindings.Count > 0));
+        // Injections hidden in a POST body: the access log shows nothing, only the WAF has them.
+        Assert.Contains(exploits, r => r.WebProbes.Count == 0 && r.WafFindings.Any(f => f.Example == "POST /contact.php"));
     }
 
     [Fact]

@@ -29,6 +29,10 @@ public sealed record HostActivity(string Rule, string AttackType, int Priority, 
 public sealed record HostAlert(DateTimeOffset Time, string Rule, string AttackType, string Severity, int Priority, string? User,
     string? Command, string? Parent, string? File, string? Ip, string? LinkedBy, string? Tags);
 
+/// <summary>An attack family the WAF (ModSecurity + OWASP CRS) found in the requests of an address: the first CRS rule
+/// that matched, the highest anomaly score (5 or more would have been blocked), one example request.</summary>
+public sealed record WafFinding(string Family, string AttackType, int? RuleId, string Rule, int Requests, int MaxScore, string Example);
+
 /// <summary>Everything one source address did in the period.</summary>
 public sealed record IpReport(
     string Ip,
@@ -47,6 +51,7 @@ public sealed record IpReport(
     IReadOnlyList<string> CrowdsecScenarios,
     IReadOnlyList<IdsSignature> IdsSignatures,
     IReadOnlyList<HostActivity> HostActivity,
+    IReadOnlyList<WafFinding> WafFindings,
     DateTimeOffset FirstSeen,
     DateTimeOffset LastSeen);
 
@@ -86,7 +91,7 @@ public sealed record CountryCount(string? CountryCode, string? Country, int Addr
 
 public sealed record JailStatus(string Jail, string AttackType, int CurrentlyBanned, int BansLast24h, int AttemptsLast24h);
 
-/// <summary>One log the server reads: fail2ban, sshd, ufw, nginx, crowdsec, suricata, falco.</summary>
+/// <summary>One log the server reads: fail2ban, sshd, ufw, nginx, crowdsec, suricata, falco, modsecurity.</summary>
 public sealed record DetectorStatus(string Detector, int EventsLast24h, DateTimeOffset? LatestEvent);
 
 public sealed record StatusResult(
@@ -109,10 +114,10 @@ public sealed record BannedResult(string Host, bool Simulated, DateTimeOffset No
 public sealed record AttemptsResult(string Host, bool Simulated, Period Period, int Addresses, IReadOnlyList<IpReport> Top, string? GeoAttribution);
 
 /// <summary>One event of an address: <c>Port</c> is its source port on SSH, <c>TargetPort</c> the closed port it tried,
-/// <c>Rule</c> the web pattern, CrowdSec scenario, Suricata signature or Falco rule; <c>Outbound</c> a connection the host
+/// <c>Rule</c> the web pattern, CrowdSec scenario, Suricata signature, Falco rule or CRS rule (<c>Score</c>: its anomaly score); <c>Outbound</c> a connection the host
 /// opened; <c>Command</c> the process of a Falco alert, <c>LinkedBy</c> how that alert was tied to this address.</summary>
 public sealed record TimelineEntry(DateTimeOffset Time, string Kind, string Origin, string? Jail, string? User, int? Port, string? Method,
-    int? TargetPort, string? Path, int? Status, string? Rule, string? Detail, bool Outbound = false, string? Command = null, string? LinkedBy = null);
+    int? TargetPort, string? Path, int? Status, string? Rule, string? Detail, bool Outbound = false, string? Command = null, string? LinkedBy = null, int? Score = null);
 
 public sealed record IpDetailResult(string Host, bool Simulated, Period Period, IpReport? Report, IReadOnlyList<SuspiciousLogin> SuspiciousLogins,
     int TimelineCount, IReadOnlyList<TimelineEntry> Timeline, string? GeoAttribution);
@@ -120,7 +125,7 @@ public sealed record IpDetailResult(string Host, bool Simulated, Period Period, 
 public sealed record SuspiciousLoginsResult(string Host, bool Simulated, Period Period, int SuccessfulLogins, IReadOnlyList<SuspiciousLogin> Suspicious, string? GeoAttribution);
 
 public sealed record SummaryTotals(int Attempts, int Addresses, int Bans, int CurrentlyBanned, int SuccessfulLogins, int SuspiciousLogins,
-    int FirewallBlocks, int WebAttackRequests, int CrowdsecAlerts, int IdsAlerts, int HostAlerts);
+    int FirewallBlocks, int WebAttackRequests, int CrowdsecAlerts, int IdsAlerts, int HostAlerts, int WafAlerts);
 
 public sealed record SummaryResult(
     string Host,
