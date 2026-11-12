@@ -17,5 +17,7 @@ dotnet publish "$HERE/src/XrCopilotLab.Intrusion.Mcp.Server/XrCopilotLab.Intrusi
   -c Release -r "$RID" --self-contained true -p:PublishSingleFile=true -p:DebugType=none -p:Version="$VERSION" -o "$DIST/bin"
 cp "$HERE/deploy/linux/xrcopilotlab-intrusion-mcp.service" "$HERE/deploy/linux/install.sh" "$HERE/deploy/linux/appsettings.Production.json" "$DIST/"
 chmod +x "$DIST/install.sh"
-tar -C "$OUT" -czf "${DIST}.tar.gz" "$NAME"
+printf '%s\n' "$VERSION" > "$DIST/VERSION"
+printf '%s\n' "$RID" > "$DIST/RID"
+COPYFILE_DISABLE=1 tar --no-xattrs -C "$OUT" -czf "${DIST}.tar.gz" "$NAME"
 echo "${DIST}.tar.gz"
