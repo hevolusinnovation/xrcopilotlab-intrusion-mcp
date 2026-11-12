@@ -16,6 +16,8 @@
 #   make lab-down                              # stops the lab (keeps the tunnel login: same public address)
 #   make lab-restart                           # lab-down + lab-up, rebuilding the images
 #   make lab-rebuild                           # rebuilds the images from scratch (no cache) and restarts the lab
+#   make lab-up-msf                            # lab-up + the Metasploit container (official image, ~2 GB), for its opt-in scenarios
+#   make lab-down-msf                          # stops the Metasploit container, leaves the rest of the lab running
 #   make lab-ps                                # state and health of the lab's containers
 #   make lab-logs     [SVC=tunnel]             # follows the logs (all containers, or one: lab-01|attacker|tunnel)
 #   make lab-shell    [SVC=lab-01]             # shell in a lab container
@@ -40,7 +42,8 @@ SVC     ?= lab-01
 LAB     := docker compose -f lab/docker-compose.yml --env-file lab/.env
 
 .PHONY: help build test run docker-build docker-push deploy smoke package key up down \
-        lab-build lab-up lab-down lab-restart lab-rebuild lab-ps lab-logs lab-shell lab-open lab-reset
+        lab-build lab-up lab-down lab-restart lab-rebuild lab-ps lab-logs lab-shell lab-open lab-reset \
+        lab-up-msf lab-down-msf
 
 help:
 	@grep -E '^#   make' Makefile | sed 's/^#   //'
@@ -100,6 +103,15 @@ lab-up: lab/.env
 # Keeps the Dev Tunnels login and the tunnel id (volume tunnel-login): the public address stays the same.
 lab-down: lab/.env
 	$(LAB) down
+
+# The optional Metasploit container (official image, ~2 GB): the "metasploit" compose profile. First run pulls the
+# image and msfrpcd takes ~30 s to answer; the console's "Metasploit · …" scenarios light up when it does.
+lab-up-msf: lab/.env
+	$(LAB) --profile metasploit up -d --build
+	@echo "Metasploit container up (msfrpcd); console: http://localhost:8090"
+
+lab-down-msf: lab/.env
+	$(LAB) stop metasploit && $(LAB) rm -f metasploit
 
 lab-restart: lab-down lab-up
 

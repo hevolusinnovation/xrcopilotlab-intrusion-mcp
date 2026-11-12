@@ -155,6 +155,72 @@ def nmap(source, args, log):
     log(f"    porte aperte trovate: {', '.join(open_ports) if open_ports else 'nessuna'}")
 
 
+# --- Metasploit (opt-in) ----------------------------------------------------------------------------------------
+# A real attack engine, in its own container (the official image, started with  make lab-up-msf). The console drives
+# it over msfrpcd: nothing is installed here but the small pymetasploit3 client. Unlike the hand-written scenarios,
+# Metasploit does not spoof the source address — lab-01's guardians see the attack coming from the Metasploit
+# container's own lab address, which is exactly what we want to test. Still lab-only: these scenarios are not marked
+# "web", so the console refuses them against an external server under test, and the engine reaches lab-01 only.
+
+MSF_HOST = os.environ.get("MSF_RPC_HOST", "metasploit")
+MSF_PORT = int(os.environ.get("MSF_RPC_PORT", "55553"))
+MSF_PASSWORD = os.environ.get("MSF_RPC_PASSWORD", "labmsf")
+
+
+def _msf_client():
+    """Connects to the Metasploit container's RPC and authenticates. Raises if it is not running."""
+    from pymetasploit3.msfrpc import MsfRpcClient
+    return MsfRpcClient(MSF_PASSWORD, server=MSF_HOST, port=MSF_PORT, ssl=False)
+
+
+def metasploit_available():
+    """True when the Metasploit container answers on msfrpcd (started with make lab-up-msf)."""
+    try:
+        _msf_client()
+        return True
+    except Exception:
+        return False
+
+
+def _emit(data, log):
+    for raw in (data or "").splitlines():
+        line = raw.strip()
+        if line.startswith(("[+]", "[*]", "[-]", "[!]")):
+            log(f"    {line}")
+
+
+def _msf(source, modules, log, timeout=420):
+    """Runs Metasploit modules against lab-01 over RPC, one after another, streaming each module's result lines."""
+    try:
+        client = _msf_client()
+    except Exception as ex:
+        log(f"Metasploit non raggiungibile ({ex}): avvia il suo container con  make lab-up-msf")
+        return
+    target = target_for(source)
+    log(f"metasploit → {target} ({len(modules)} moduli, dall'indirizzo del container Metasploit nel lab)")
+    console = client.consoles.console()
+    try:
+        for module, opts in modules:
+            console.read()  # drain anything buffered before this module
+            console.write(f"use {module}\n")
+            console.write(f"set RHOSTS {target}\n")
+            for key, value in opts.items():
+                console.write(f"set {key} {value}\n")
+            log(f"    [{module}]")
+            console.write("run\n")
+            deadline = time.time() + timeout
+            time.sleep(2)  # let the module start before we test is_busy
+            while console.is_busy() and time.time() < deadline:
+                _emit(console.read().get("data", ""), log)
+                time.sleep(1)
+            _emit(console.read().get("data", ""), log)
+    finally:
+        try:
+            console.destroy()
+        except Exception:
+            pass
+
+
 # --- scenarios --------------------------------------------------------------------------------------------------
 
 def port_scan(log):
@@ -282,6 +348,36 @@ def backdoor(log):
     log(f"lab-01 → {C2}:{C2_PORT}/gate.php: tre chiamate al server di controllo")
 
 
+def msf_web(log):
+    """Metasploit scans lab-01's web server: version, directories, robots. Suricata and ModSecurity see it."""
+    src = "203.0.113.9"
+    _msf(src, [
+        ("auxiliary/scanner/http/http_version", {}),
+        ("auxiliary/scanner/http/robots_txt", {}),
+        ("auxiliary/scanner/http/dir_scanner", {"THREADS": "4"}),
+    ], log)
+
+
+def msf_ssh(log):
+    """Metasploit brute-forces SSH on lab-01 until fail2ban bans the attacker. One password per run (no file needed
+    on the Metasploit host): seven attempts, so fail2ban (5 in a minute) bans before the last ones."""
+    src = "203.0.113.20"
+    passwords = ["123456", "password", "admin", "root", "toor", "ubuntu", "1234"]
+    modules = [("auxiliary/scanner/ssh/ssh_login",
+                {"USERNAME": "root", "PASSWORD": pw, "STOP_ON_SUCCESS": "false",
+                 "BLANK_PASSWORDS": "false", "ANONYMOUS_LOGIN": "false", "VERBOSE": "true"}) for pw in passwords]
+    _msf(src, modules, log)
+
+
+def msf_industrial(log):
+    """Metasploit probes Modbus on lab-01: a real SCADA module, not just a port scan (needs port 502 open)."""
+    src = "203.0.113.7"
+    _msf(src, [
+        ("auxiliary/scanner/scada/modbusdetect", {"RPORT": "502"}),
+        ("auxiliary/scanner/scada/modbus_findunitid", {"RPORT": "502"}),
+    ], log)
+
+
 def full_night(log):
     for title, fn in [("Scansione delle porte", port_scan), ("Protocolli industriali", industrial_probe),
                       ("Scansione del sito", web_scan), ("Exploit web", web_exploit), ("Attacco nascosto nel modulo", hidden_post),
@@ -317,13 +413,24 @@ SCENARIOS = [
      "expect": "nginx limita le richieste (429): RequestFlood, ban di nginx-limit-req."},
     {"id": "campaign", "title": "Campagna distribuita su un account", "source": "192.0.2.11–22", "run": campaign,
      "expect": "12 indirizzi, 2 tentativi ciascuno sull'account scada: nessun ban, una campagna DistributedSshBruteForce."},
+    {"msf": True, "id": "msf-web", "title": "Metasploit · scansione web", "source": "203.0.113.9", "run": msf_web,
+     "expect": "Moduli http di Metasploit contro lab-01 (versione, robots, cartelle): un attacco vero, non scritto a mano. "
+               "Suricata e ModSecurity lo vedono: WebVulnerabilityScan. Richiede il container Metasploit (make lab-up-msf)."},
+    {"msf": True, "id": "msf-ssh", "title": "Metasploit · forza bruta SSH", "source": "203.0.113.20", "run": msf_ssh,
+     "expect": "Il modulo ssh_login di Metasploit prova più password su lab-01: fail2ban banna l'attaccante. "
+               "Richiede il container Metasploit (make lab-up-msf)."},
+    {"msf": True, "id": "msf-industrial", "title": "Metasploit · sonda Modbus", "source": "203.0.113.7", "run": msf_industrial,
+     "expect": "Moduli SCADA Modbus di Metasploit verso la porta 502 di lab-01: IndustrialProtocolProbe. "
+               "Richiede il container Metasploit (make lab-up-msf) e la porta 502 aperta."},
     {"id": "full-night", "title": "La notte completa (in sequenza)", "source": "più indirizzi", "run": full_night,
      "expect": "Scansione, protocolli industriali, sito, exploit, modulo contatti, l'intrusione, cosa fa dentro e la backdoor: circa tre minuti."},
 ]
 
 
 def describe():
+    msf_ok = metasploit_available()
     return [{"id": s["id"], "title": s["title"], "source": s["source"], "web": s.get("web", False),
+             "msf": s.get("msf", False), "available": msf_ok or not s.get("msf", False),
              "place": PERSONAS.get(s["source"], "connessioni domestiche" if s["id"] == "campaign" else "più città"),
              "expect": s["expect"]} for s in SCENARIOS]
 
@@ -350,10 +457,12 @@ class Runner:
         if scenario is None:
             return None, "scenario sconosciuto"
         external = target is not None and target.get("mode") == "external"
-        # Against an external server only the web-layer scenarios run: SSH brute force and port scans use spoofed
-        # source addresses that work only inside the lab, and must not be aimed at an arbitrary host.
+        # Against an external server only the web-layer scenarios run: SSH brute force, port scans and the Metasploit
+        # modules use spoofed source addresses or a heavy real engine aimed at lab-01, never at an arbitrary host.
         if external and not scenario.get("web"):
             return None, "contro un server esterno sono disponibili solo gli attacchi web (scansione, exploit, modulo, login, flood)"
+        if scenario.get("msf") and not metasploit_available():
+            return None, "il container Metasploit non è in esecuzione: avvialo con  make lab-up-msf"
         with self._lock:
             if self.current is not None:
                 return None, f"è già in corso «{self.current['title']}»"

@@ -24,7 +24,8 @@ The `make` commands use the service names (`make lab-shell SVC=attacker`); plain
 | Service (container) | What | Notes |
 |---|---|---|
 | `lab-01` (`intrusion-lab-01`) | Ubuntu 24.04 with systemd: sshd (password login, user `operatore`, in the `sudo` group), nginx (site, `/admin/` with basic auth, the package's API under `/intrusion-mcp/`), fail2ban (`sshd`, `nginx-http-auth`, `nginx-botsearch`, `nginx-limit-req`, `recidive`, times shortened), a UFW-like firewall, **Suricata 8** with the ET Open rules (installed by the package's own `install.sh --with suricata` at build, the only moment lab-01 reaches the internet; it listens on all four interfaces with `--pcap=any -k none`), **Falco 0.45** with the modern eBPF probe (same `install.sh --with falco`; two container-only rules are turned off in `/etc/falco/rules.d/lab.yaml`, since lab-01 is itself a container), **ModSecurity 3 + OWASP CRS** in nginx (`install.sh --with modsecurity`, detection only; the toolkit's own API and the monitoring page are excluded), the package's read-only **monitoring page** (nginx on 8471, served inside the container), the package (`xrcopilotlab-intrusion-mcp.service`, logs mode) | privileged: systemd as PID 1, iptables. A lab container, never a pattern for production |
-| `attacker` (`intrusion-lab-attacker`) | nmap, ssh, Python: fixed scenarios against `lab-01`, the console, and a **"Server da testare"** field that runs the web scenarios against another server once its API key proves you can already read it | its lab networks are `internal`: no attack reaches the internet |
+| `attacker` (`intrusion-lab-attacker`) | nmap, ssh, Python: fixed scenarios against `lab-01`, the console, a **"Server da testare"** field that runs the web scenarios against another server once its API key proves you can already read it, and (when the Metasploit container is up) three opt-in **Metasploit** scenarios it drives over msfrpcd | its lab networks are `internal`: no attack reaches the internet |
+| `metasploit` (`intrusion-lab-metasploit`) | **opt-in**, official Metasploit image running `msfrpcd`; the console drives it. Started with `make lab-up-msf` (compose profile `metasploit`) | on the same `internal` networks as the attacker; reaches `lab-01` only, never the internet |
 | `tunnel` (`intrusion-lab-tunnel`) | Dev Tunnels CLI, socat, a small controller driven by the console | the only container that goes out to the internet, for the tunnel |
 
 UFW logs through the kernel LOG target, which a container cannot read: the lab's firewall uses NFLOG, ulogd2 and
@@ -70,6 +71,32 @@ address goes to DB-IP. So the map has cities, and no real address is ever involv
 | Campagna distribuita | 192.0.2.11–22 (12 cities) | DistributedSshBruteForce on `scada`, no ban |
 | L'intruso dentro il server | 198.51.100.213 (Chișinău) | Falco: Search Private Keys, Read sensitive file untrusted (`sudo cat /etc/shadow`), XRC SSH authorized keys changed, a "miner" (`xmrig` with a `stratum+tcp://` pool), Clear Log Activities (`wtmp`). All tied to 198.51.100.213 (`ssh-session`): SensitiveFileAccess, Persistence, CryptoMining, LogTampering, Critical |
 | Backdoor che chiama casa | 203.0.113.66 (Moscow) | lab-01 calls the attacker's controller: CommandAndControl, Critical (Suricata: the lab's own rule and ET Open's `ET MALWARE Generic Request to gate.php Dotted-Quad`) |
+
+### Metasploit scenarios (opt-in)
+
+To prove the guardians catch a **real** attack engine, not only our hand-written requests, the lab can run
+[Metasploit](https://docs.metasploit.com/docs/using-metasploit/getting-started/nightly-installers.html) in its **own
+container** (the official image, ~2 GB). It is **off by default** (a separate compose profile); start it alongside the
+lab with:
+
+```bash
+make lab-up-msf      # pulls the image on the first run; msfrpcd answers after ~30 s
+make lab-down-msf    # stops just the Metasploit container, leaves the rest running
+```
+
+The console drives the container over **msfrpcd** (the attacker image only carries the small `pymetasploit3` client).
+Three extra scenarios then appear in the console (greyed out until the Metasploit container answers):
+
+| Scenario | Metasploit module(s) | Expected detection |
+|---|---|---|
+| Metasploit · scansione web | `scanner/http/http_version`, `robots_txt`, `dir_scanner` | WebVulnerabilityScan (Suricata + ModSecurity) |
+| Metasploit · forza bruta SSH | `scanner/ssh/ssh_login`, seven passwords | SshBruteForce, banned by fail2ban |
+| Metasploit · sonda Modbus | `scanner/scada/modbusdetect`, `modbus_findunitid` | IndustrialProtocolProbe (needs port 502 open) |
+
+Metasploit does **not** spoof the source address, so these attacks arrive from the Metasploit container's own lab
+address (one city on the map), and lab-01's guardians attribute them to it — which is the point of the test. They are
+lab-only: the container sits on the lab's internal networks, it runs against lab-01, and the console refuses these
+scenarios against an external server under test.
 
 All verified on 2026-11-11 with `make lab-up`, one scenario after the other; the backdoor and Suricata on 2026-11-12;
 the intruder inside and Falco on 2026-11-12; ModSecurity, the monitoring page and the external-target flow on 2026-11-12 (full night: five Falco alerts, all tied to 198.51.100.213, none left

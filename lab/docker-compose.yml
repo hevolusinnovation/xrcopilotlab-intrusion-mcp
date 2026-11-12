@@ -46,6 +46,11 @@ services:
       TARGET_IT: 198.51.100.20
       TARGET_INTERNET: 203.0.113.250
       TARGET_HOMES: 192.0.2.250
+      # The optional Metasploit container (started with make lab-up-msf): the console drives it over msfrpcd. When it
+      # is not running the three "Metasploit · …" scenarios stay disabled.
+      MSF_RPC_HOST: metasploit
+      MSF_RPC_PORT: "55553"
+      MSF_RPC_PASSWORD: ${MSF_RPC_PASSWORD:-labmsf}
     ports:
       - "127.0.0.1:8090:8090"
     networks:
@@ -70,6 +75,24 @@ services:
     networks:
       tunnel:  { ipv4_address: 10.77.0.30 }
       console: {}
+    depends_on:
+      lab-01: { condition: service_healthy }
+
+  # Metasploit, a real attack engine, in its own container (official image, ~2 GB): optional, started only with the
+  # "metasploit" profile (make lab-up-msf). It exposes msfrpcd on the lab's internal networks; the console drives it
+  # over RPC. On the same it/internet/homes networks as the attacker, so it reaches lab-01 and the console reaches it.
+  # Nothing leaves the lab. When it is not running, the three "Metasploit · …" scenarios stay disabled in the console.
+  metasploit:
+    container_name: intrusion-lab-metasploit
+    image: metasploitframework/metasploit-framework:latest
+    profiles: ["metasploit"]
+    hostname: metasploit
+    entrypoint: ["./msfrpcd"]
+    command: ["-U", "msf", "-P", "${MSF_RPC_PASSWORD:-labmsf}", "-a", "0.0.0.0", "-p", "55553", "-S", "-f"]
+    networks:
+      it:       {}
+      internet: {}
+      homes:    {}
     depends_on:
       lab-01: { condition: service_healthy }
 

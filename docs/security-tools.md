@@ -36,6 +36,23 @@ The toolkit runs on **one internet-facing server**, so a network tool there sees
 - **"Did anybody get in?"** Today we answer with `LoginAfterFailures`. To say *what they did* after the login we need a
   host tool (Falco, auditd, AIDE, osquery). A network tool does not see it.
 
+### Defensive tools (read) vs. offensive tools (attack) — where Metasploit belongs
+
+Every tool in this note is **defensive**: the server runs it, it writes a log, and the toolkit reads that log. The
+toolkit is read-only and never attacks. **Metasploit** (and nmap, which the lab already uses) is the opposite: an
+**offensive** engine that *generates* attacks. It writes no defensive log to read, so it is **not a candidate for the
+installed package** — putting an exploitation framework on the customer's first, internet-facing host would be the
+opposite of making it a guardian. It does **not** belong in the comparison table below.
+
+Where it does belong is the **lab attacker**, whose job is to throw real attacks at lab-01 so we can prove the
+guardians above actually see them. Metasploit runs in its **own container** (the official image, ~2 GB), started on
+demand with `make lab-up-msf` (the `metasploit` compose profile); the console drives it over **msfrpcd** and adds three
+opt-in scenarios (`Metasploit · scansione web`, `· forza bruta SSH`, `· sonda Modbus`). They run against lab-01 only,
+on the lab's internal networks, and the console refuses them against any external server under test. The official image
+packages the same
+[nightly build](https://docs.metasploit.com/docs/using-metasploit/getting-started/nightly-installers.html) from Rapid7.
+See `lab/README.md`.
+
 ---
 
 ## 2. Tool by tool

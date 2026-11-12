@@ -273,7 +273,7 @@ let targetMode = "lab";
 async function loadScenarios() {
   scenarios = await fetch("/api/scenarios").then(r => r.json());
   $("scenarios").innerHTML = scenarios.map(s => `
-    <button class="scenario" data-id="${esc(s.id)}" data-web="${s.web ? 1 : 0}">
+    <button class="scenario" data-id="${esc(s.id)}" data-web="${s.web ? 1 : 0}" data-available="${s.available ? 1 : 0}">
       <b>${esc(s.title)}</b><span>da ${esc(s.source)} · ${esc(s.place)}</span>
       <span class="expect">${esc(s.expect)}</span>
     </button>`).join("");
@@ -322,8 +322,10 @@ async function refreshRuns() {
   const running = data.runs.find(r => r.id === data.current);
   $("scenarios").querySelectorAll("button").forEach(b => {
     const blocked = targetMode === "external" && b.dataset.web !== "1";
-    b.disabled = !!running || blocked;
-    b.title = blocked ? "Non disponibile contro un server esterno (solo attacchi web)" : "";
+    const unavailable = b.dataset.available === "0";
+    b.disabled = !!running || blocked || unavailable;
+    b.title = unavailable ? "Avvia il container Metasploit: make lab-up-msf"
+      : (blocked ? "Non disponibile contro un server esterno (solo attacchi web)" : "");
     b.classList.toggle("running", !!running && running.scenario === b.dataset.id);
   });
   const last = data.runs[0];
