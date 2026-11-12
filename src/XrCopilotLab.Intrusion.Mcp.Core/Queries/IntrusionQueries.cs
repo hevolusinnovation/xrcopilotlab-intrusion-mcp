@@ -101,7 +101,7 @@ public sealed class IntrusionQueries(ILogSource source, IGeoLocator geo, Intrusi
             .OrderByDescending(e => e.Time)
             .Take(MaxTimeline)
             .Select(e => new TimelineEntry(e.Time, e.Kind.ToString(), DetectorName(e.Origin), e.Jail, e.User, e.Port, e.Method,
-                e.TargetPort, e.Path, e.Status, e.Rule, e.Detail))
+                e.TargetPort, e.Path, e.Status, e.Rule, e.Detail, e.Outbound))
             .ToList();
         return new IpDetailResult(source.Hostname, source.Simulated, period, report,
             _analyzer.SuspiciousLogins(events).Where(s => s.Ip == ip && s.Time >= period.From).ToList(),
@@ -152,7 +152,8 @@ public sealed class IntrusionQueries(ILogSource source, IGeoLocator geo, Intrusi
             suspicious.Count,
             inPeriod.Count(e => e.Kind == LogEventKind.FirewallBlock),
             inPeriod.Count(e => e.Kind == LogEventKind.WebRequest),
-            inPeriod.Count(e => e.Kind == LogEventKind.CrowdsecAlert));
+            inPeriod.Count(e => e.Kind == LogEventKind.CrowdsecAlert),
+            inPeriod.Count(e => e.Kind == LogEventKind.IdsAlert));
 
         return new SummaryResult(source.Hostname, source.Simulated, period, totals, byType, byCountry, ThreatAnalyzer.TargetedPorts(inPeriod, 15),
             reports.Take(Math.Clamp(top, 1, MaxTop)).ToList(), campaigns, suspicious, points, geo.Attribution);
@@ -164,6 +165,7 @@ public sealed class IntrusionQueries(ILogSource source, IGeoLocator geo, Intrusi
         LogOrigin.Auth => "sshd",
         LogOrigin.Firewall => "ufw",
         LogOrigin.WebAccess => "nginx",
+        LogOrigin.Suricata => "suricata",
         _ => "crowdsec",
     };
 

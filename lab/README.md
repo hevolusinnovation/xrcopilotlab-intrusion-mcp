@@ -23,7 +23,7 @@ The `make` commands use the service names (`make lab-shell SVC=attacker`); plain
 
 | Service (container) | What | Notes |
 |---|---|---|
-| `lab-01` (`intrusion-lab-01`) | Ubuntu 24.04 with systemd: sshd (password login, user `operatore`), nginx (site, `/admin/` with basic auth, the package's API under `/intrusion-mcp/`), fail2ban (`sshd`, `nginx-http-auth`, `nginx-botsearch`, `nginx-limit-req`, `recidive`, times shortened), a UFW-like firewall, the package (`xrcopilotlab-intrusion-mcp.service`, logs mode) | privileged: systemd as PID 1, iptables. A lab container, never a pattern for production |
+| `lab-01` (`intrusion-lab-01`) | Ubuntu 24.04 with systemd: sshd (password login, user `operatore`), nginx (site, `/admin/` with basic auth, the package's API under `/intrusion-mcp/`), fail2ban (`sshd`, `nginx-http-auth`, `nginx-botsearch`, `nginx-limit-req`, `recidive`, times shortened), a UFW-like firewall, **Suricata 8** with the ET Open rules (installed by the package's own `install.sh --with suricata` at build, the only moment lab-01 reaches the internet; it listens on all four interfaces with `--pcap=any -k none`), the package (`xrcopilotlab-intrusion-mcp.service`, logs mode) | privileged: systemd as PID 1, iptables. A lab container, never a pattern for production |
 | `attacker` (`intrusion-lab-attacker`) | nmap, ssh, Python: fixed scenarios against `lab-01` only, and the console | its lab networks are `internal`: no attack reaches the internet |
 | `tunnel` (`intrusion-lab-tunnel`) | Dev Tunnels CLI, socat, a small controller driven by the console | the only container that goes out to the internet, for the tunnel |
 
@@ -67,12 +67,28 @@ address goes to DB-IP. So the map has cities, and no real address is ever involv
 | Forza bruta area riservata | 203.0.113.18 (São Paulo) | WebLoginBruteForce, banned by `nginx-http-auth` |
 | Flood | 203.0.113.15 (Dallas) | RequestFlood, banned by `nginx-limit-req` |
 | Campagna distribuita | 192.0.2.11–22 (12 cities) | DistributedSshBruteForce on `scada`, no ban |
+| Backdoor che chiama casa | 203.0.113.66 (Moscow) | lab-01 calls the attacker's controller: CommandAndControl, Critical (Suricata: the lab's own rule and ET Open's `ET MALWARE Generic Request to gate.php Dotted-Quad`) |
 
-All verified on 2026-11-11 with `make lab-up`, one scenario after the other.
+All verified on 2026-11-11 with `make lab-up`, one scenario after the other; the backdoor and Suricata on 2026-11-12.
+
+What Suricata adds to the other scenarios, with the real ET Open rules (2026-11-12): `ET SCAN Suspicious inbound to
+mySQL/MSSQL/Oracle/PostgreSQL port` on the port scans, `ET WEB_SERVER SELECT USER SQL Injection Attempt in URI` and
+`ET EXPLOIT Apache log4j RCE Attempt` on the web exploits. Nothing on the industrial probe: the ports are closed, so no
+Modbus or S7 conversation ever starts (see [docs/security-tools.md](../docs/security-tools.md)).
 
 ## What the lab found in the package
 
 - The single binary aborted at start on a host without ICU (`libicu`): `install.sh` now installs it when missing.
+- CrowdSec's local API listens on `127.0.0.1:8080`, the toolkit's old port: on any server with CrowdSec the toolkit did
+  not start. The toolkit now listens on `127.0.0.1:8470`.
+- CrowdSec writes `/var/log/crowdsec.log` as `0600 root`: unreadable. `--with crowdsec` gives it to the group `adm`
+  (`0640`); CrowdSec's rotation keeps the mode.
+- Suricata 8 runs as the user `suricata` and keeps its logs in a `0770` folder: the toolkit's service gets the group
+  `suricata` (systemd drop-in). Its configuration test (`suricata -T`), run as root, left `eve.json` owned by root, and
+  Suricata could no longer write it: the test now writes elsewhere.
+- The service's hardening (`RestrictAddressFamilies`) blocked netlink, so the toolkit could not list its own
+  addresses and took the server's call to the malware controller for an attack *from* the server's address. Netlink
+  is now allowed.
 - With the default settings every log was read twice (the configuration list is appended to the defaults), so every
   attempt was counted twice: the file list is now de-duplicated.
 

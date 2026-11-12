@@ -15,7 +15,7 @@ DIST="${OUT}/${NAME}"
 rm -rf "$DIST" && mkdir -p "$DIST"
 dotnet publish "$HERE/src/XrCopilotLab.Intrusion.Mcp.Server/XrCopilotLab.Intrusion.Mcp.Server.csproj" \
   -c Release -r "$RID" --self-contained true -p:PublishSingleFile=true -p:DebugType=none -p:Version="$VERSION" -o "$DIST/bin"
-cp "$HERE/deploy/linux/xrcopilotlab-intrusion-mcp.service" "$HERE/deploy/linux/install.sh" "$HERE/deploy/linux/appsettings.Production.json" "$DIST/"
+cp "$HERE/deploy/linux/xrcopilotlab-intrusion-mcp.service" "$HERE/deploy/linux/install.sh" "$HERE/deploy/linux/guardians.sh" "$HERE/deploy/linux/appsettings.Production.json" "$DIST/"
 chmod +x "$DIST/install.sh"
 printf '%s\n' "$VERSION" > "$DIST/VERSION"
 printf '%s\n' "$RID" > "$DIST/RID"

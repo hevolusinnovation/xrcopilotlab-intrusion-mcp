@@ -140,7 +140,9 @@ const TYPES = {
   SshBruteForce: "forza bruta SSH", DistributedSshBruteForce: "campagna distribuita", WebLoginBruteForce: "forza bruta web",
   WebVulnerabilityScan: "scansione del sito", WebExploitAttempt: "exploit web", RequestFlood: "flood di richieste",
   MailLoginBruteForce: "forza bruta posta", PortScan: "scansione porte", IndustrialProtocolProbe: "protocolli industriali",
-  RepeatOffender: "recidivo", LoginAfterFailures: "ACCESSO dopo tentativi", Other: "altro",
+  RepeatOffender: "recidivo", LoginAfterFailures: "ACCESSO dopo tentativi",
+  NetworkExploitAttempt: "exploit di rete", KnownMaliciousSource: "indirizzo in blacklist",
+  IndustrialProtocolCommand: "comandi industriali", CommandAndControl: "SERVER COMPROMESSO (C2)", Other: "altro",
 };
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -211,15 +213,21 @@ function drawStats(summary) {
   $("s-banned").textContent = t.currentlyBanned ?? 0;
   $("s-blocks").textContent = t.firewallBlocks ?? 0;
   const s = summary.suspiciousLogins || [];
+  // The host calling a malware controller (Suricata) comes first: it means the intrusion went further than a login.
+  const c2 = (summary.topAttackers || []).find(r => (r.attackTypes || []).includes("CommandAndControl"));
   const alert = $("alert");
+  const parts = [];
+  if (c2) {
+    parts.push(`<b>Server compromesso</b>: lab-01 sta chiamando ${esc(c2.ip)} (${esc(c2.location?.city || "")}, ` +
+      `${esc(c2.location?.country || "")}), un server di controllo di malware, l'ultima volta alle ${time(c2.lastSeen)}. Lo ha visto Suricata.`);
+  }
   if (s.length) {
     const last = s[s.length - 1];
-    alert.innerHTML = `<b>Accesso sospetto</b>: ${esc(last.user)} è entrato da ${esc(last.ip)} ` +
-      `(${esc(last.location?.city || "")}, ${esc(last.location?.country || "")}) alle ${time(last.time)}, dopo ${last.failuresBefore} tentativi falliti.`;
-    alert.classList.add("on");
-  } else {
-    alert.classList.remove("on");
+    parts.push(`<b>Accesso sospetto</b>: ${esc(last.user)} è entrato da ${esc(last.ip)} ` +
+      `(${esc(last.location?.city || "")}, ${esc(last.location?.country || "")}) alle ${time(last.time)}, dopo ${last.failuresBefore} tentativi falliti.`);
   }
+  alert.innerHTML = parts.join("<br><br>");
+  alert.classList.toggle("on", parts.length > 0);
 }
 
 async function refreshLab() {

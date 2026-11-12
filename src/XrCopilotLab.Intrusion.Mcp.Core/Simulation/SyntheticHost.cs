@@ -31,16 +31,17 @@ public sealed record SimulatedDay(
     IReadOnlyList<string> AuthLines,
     IReadOnlyList<string> FirewallLines,
     IReadOnlyList<string> WebAccessLines,
-    IReadOnlyList<string> CrowdsecLines)
+    IReadOnlyList<string> CrowdsecLines,
+    IReadOnlyList<string> SuricataLines)
 {
-    public LogSet ToLogSet() => new(Fail2banLines, AuthLines, FirewallLines, WebAccessLines, CrowdsecLines);
+    public LogSet ToLogSet() => new(Fail2banLines, AuthLines, FirewallLines, WebAccessLines, CrowdsecLines, SuricataLines);
 }
 
 /// <summary>
 /// A synthetic Linux host exposed on the internet with SSH and nginx, behind UFW, protected by fail2ban, with CrowdSec
 /// running in detection mode (alerts and decisions, no bouncer). For any day it generates the lines that day would
 /// have left in <c>auth.log</c>, <c>fail2ban.log</c>, <c>ufw.log</c>, the nginx <c>access.log</c> and
-/// <c>crowdsec.log</c>, and runs the fail2ban rules on them (maxretry, findtime, bantime, recidive), so bans follow
+/// <c>crowdsec.log</c> and Suricata's <c>eve.json</c>, and runs the fail2ban rules on them (maxretry, findtime, bantime, recidive), so bans follow
 /// from the attempts. Deterministic and pure: same seed and day, same lines; no clock, no I/O.
 /// <para>What a day contains:</para>
 /// <list type="bullet">
@@ -52,7 +53,11 @@ public sealed record SimulatedDay(
 /// <item>firewall noise on closed ports, 2-4 port scans, one probe of industrial control ports (Modbus, S7, IEC 104…);</item>
 /// <item>the intrusion: at 00:31 a port scan from 198.51.100.213; from 00:52 one SSH try every three minutes on
 /// <c>operatore</c>, slow enough that fail2ban never bans; around 01:25 CrowdSec raises <c>ssh-slow-bf</c>, which
-/// nothing enforces; around 02:50 the password is right;</item>
+/// nothing enforces; around 02:50 the password is right; 15-25 minutes later the host starts calling a malware
+/// controller every ten minutes, which Suricata reports as an outbound alert;</item>
+/// <item>Suricata alerts: SSH attackers on public reputation lists, a few attempts at an OpenSSH exploit, and
+/// low-priority engine events that must not be reported. Signature names follow ET Open's style; the signature ids are
+/// in a synthetic range (9 000 000+) and are not real rule ids;</item>
 /// <item>legitimate logins and ordinary web traffic, which must not be reported.</item>
 /// </list>
 /// </summary>
@@ -157,7 +162,7 @@ public sealed class SyntheticHost(SimulationOptions options)
         if (incident) Reconnaissance(rng, start, probes);
 
         var zone = TimeZoneInfo.FindSystemTimeZoneById(Options.TimeZone);
-        var w = new Writer(zone);
+        var w = new Writer(zone, start);
 
         foreach (var group in attempts.GroupBy(a => a.Service))
             RunJail(group.Key, group.OrderBy(a => a.At).ToList(), rng, w);
@@ -165,7 +170,10 @@ public sealed class SyntheticHost(SimulationOptions options)
         WriteFirewall(probes.OrderBy(p => p.At).ToList(), rng, w);
         OrdinaryTraffic(rng, start, w);
 
-        return new SimulatedDay(day, w.Fail2ban.Sorted(), w.Auth.Sorted(), w.Firewall.Sorted(), w.Web.Sorted(), w.Crowdsec.Sorted());
+        // Suricata draws from its own generator, so adding it left every other line of the day as it was.
+        Suricata(new Random(unchecked(Options.Seed * 17 + day.DayNumber * 104_729)), attempts, w);
+
+        return new SimulatedDay(day, w.Fail2ban.Sorted(), w.Auth.Sorted(), w.Firewall.Sorted(), w.Web.Sorted(), w.Crowdsec.Sorted(), w.Suricata.Sorted());
     }
 
     // ---- scenarios: attempts against the services ------------------------------------------------------------------
@@ -534,6 +542,57 @@ public sealed class SyntheticHost(SimulationOptions options)
             $"time=\"{Iso(decided, w.Zone, fraction: false)}\" level=info msg=\"({CrowdsecMachine}/crowdsec) {scenario} by ip {ip} ({location.CountryCode}/{asn}) : 4h ban on Ip {ip}\""));
     }
 
+    // ---- Suricata (eve.json alerts) ---------------------------------------------------------------------------------
+
+    /// <summary>The malware controller the intruder's backdoor calls (documentation address, invented city).</summary>
+    public const string ControllerIp = "203.0.113.66";
+
+    private void Suricata(Random rng, List<Attempt> attempts, Writer w)
+    {
+        // Some SSH attackers are on public reputation lists: Suricata flags their first connection.
+        foreach (var first in attempts.Where(a => a.Service == Service.Ssh && a.Ip.StartsWith("203.0.113.", StringComparison.Ordinal))
+                     .GroupBy(a => a.Ip).Select(g => g.MinBy(a => a.At)!))
+        {
+            if (rng.Next(3) != 0) continue;
+            var group = rng.Next(1, 100);
+            Eve(w, first.At.AddMilliseconds(-40), first.Ip, first.Port, HostAddress, 22, "ssh",
+                9_000_100 + group, $"ET CINS Active Threat Intelligence Poor Reputation IP group {group}", "Misc Attack", 2);
+        }
+
+        // An exploit for OpenSSH, from one or two addresses.
+        for (var i = rng.Next(1, 3); i > 0; i--)
+        {
+            var ip = $"203.0.113.{rng.Next(1, 240)}";
+            var at = w.Day.AddSeconds(rng.Next(0, 86_000));
+            for (var k = rng.Next(2, 6); k > 0; k--, at = at.AddSeconds(rng.Next(20, 90)))
+                Eve(w, at, ip, Port(rng), HostAddress, 22, "ssh",
+                    9_000_010, "ET EXPLOIT Possible OpenSSH regreSSHion Race Condition Attempt (CVE-2024-6387)", "Attempted Administrator Privilege Gain", 1);
+        }
+
+        // Engine events: priority 3, never reported.
+        for (var i = rng.Next(3, 9); i > 0; i--)
+            Eve(w, w.Day.AddSeconds(rng.Next(0, 86_000)), $"203.0.113.{rng.Next(1, 240)}", Port(rng), HostAddress, 443, "tls",
+                2_210_045, "SURICATA STREAM Packet with invalid ack", "Generic Protocol Command Decode", 3);
+
+        // The intrusion goes on: the backdoor calls its controller every ten minutes until morning.
+        var login = attempts.FirstOrDefault(a => a.Ip == IncidentIp && a.Success);
+        if (login is null) return;
+        var end = login.At.Date.AddHours(7);
+        for (var at = login.At.AddMinutes(rng.Next(15, 26)); at < end; at = at.AddMinutes(10).AddSeconds(rng.Next(-20, 21)))
+            Eve(w, at, HostAddress, Port(rng), ControllerIp, 80, "http",
+                9_000_001, "ET MALWARE Linux Backdoor CnC Checkin", "A Network Trojan was detected", 1);
+    }
+
+    private static void Eve(Writer w, DateTime local, string src, int srcPort, string dest, int destPort, string appProto,
+        int sid, string signature, string category, int severity)
+    {
+        var offset = w.Zone.GetUtcOffset(local);
+        var stamp = string.Create(CultureInfo.InvariantCulture,
+            $"{local:yyyy-MM-dd'T'HH:mm:ss.ffffff}{(offset < TimeSpan.Zero ? '-' : '+')}{Math.Abs(offset.Hours):00}{Math.Abs(offset.Minutes):00}");
+        w.Suricata.Add(local, string.Create(CultureInfo.InvariantCulture,
+            $"{{\"timestamp\":\"{stamp}\",\"flow_id\":{(long)sid * 7919 + local.Ticks % 1_000_000_007},\"in_iface\":\"eth0\",\"event_type\":\"alert\",\"src_ip\":\"{src}\",\"src_port\":{srcPort},\"dest_ip\":\"{dest}\",\"dest_port\":{destPort},\"proto\":\"TCP\",\"app_proto\":\"{appProto}\",\"alert\":{{\"action\":\"allowed\",\"gid\":1,\"signature_id\":{sid},\"rev\":1,\"signature\":\"{signature}\",\"category\":\"{category}\",\"severity\":{severity}}}}}"));
+    }
+
     private static string ExploitScenario(string rule) => rule switch
     {
         "sql-injection" => "crowdsecurity/http-sqli-probing",
@@ -602,9 +661,11 @@ public sealed class SyntheticHost(SimulationOptions options)
         public IReadOnlyList<string> Sorted() => _lines.OrderBy(l => l.At).Select(l => l.Line).ToList();
     }
 
-    private sealed class Writer(TimeZoneInfo zone)
+    private sealed class Writer(TimeZoneInfo zone, DateTime day)
     {
         public TimeZoneInfo Zone { get; } = zone;
+        public DateTime Day { get; } = day;
+        public Lines Suricata { get; } = new();
         public Lines Fail2ban { get; } = new();
         public Lines Auth { get; } = new();
         public Lines Firewall { get; } = new();

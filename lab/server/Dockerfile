@@ -17,7 +17,7 @@ FROM ubuntu:24.04
 ENV DEBIAN_FRONTEND=noninteractive TZ=Europe/Rome container=docker
 RUN apt-get update \
  && apt-get install -y --no-install-recommends systemd systemd-sysv dbus openssh-server nginx fail2ban rsyslog \
-      ulogd2 iptables tzdata curl ca-certificates openssl sudo \
+      ulogd2 iptables iproute2 tzdata curl ca-certificates openssl sudo \
  && rm -rf /var/lib/apt/lists/* \
  && ln -fs /usr/share/zoneinfo/Europe/Rome /etc/localtime
 
@@ -40,10 +40,14 @@ RUN useradd -m -s /bin/bash operatore && echo 'operatore:Alveo2026!' | chpasswd 
  && systemctl disable ssh.socket \
  && systemctl enable ssh.service nginx.service fail2ban.service rsyslog.service ulogd2.service lab-firewall.service
 
-# The package, installed as the customer installs it. The key arrives at start (lab-entrypoint), not in the image.
+# The package, installed as the customer installs it, with Suricata from its --with option (here, at build, the only
+# time lab-01 reaches the internet: the ET Open rules are fetched now). The key arrives at start (lab-entrypoint).
 COPY --from=package /out/package.tar.gz /tmp/package.tar.gz
 RUN mkdir /tmp/package && tar -xzf /tmp/package.tar.gz -C /tmp/package --strip-components=1 \
- && /tmp/package/install.sh --no-start && rm -rf /tmp/package /tmp/package.tar.gz
+ && /tmp/package/install.sh --no-start --with suricata \
+ && suricata-update -q --no-test --local /etc/suricata/rules/lab.rules \
+ && systemctl enable suricata.service \
+ && rm -rf /tmp/package /tmp/package.tar.gz /var/lib/apt/lists/*
 
 STOPSIGNAL SIGRTMIN+3
 ENTRYPOINT ["/usr/local/sbin/lab-entrypoint"]

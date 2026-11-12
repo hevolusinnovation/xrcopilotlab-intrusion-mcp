@@ -36,7 +36,19 @@ public enum AttackType
     /// <summary>A successful SSH login from an IP that had failed several times just before: possible compromise.</summary>
     LoginAfterFailures,
 
-    /// <summary>A fail2ban jail or CrowdSec scenario this server does not classify.</summary>
+    /// <summary>A network IDS signature on an attack against a service other than the web (SMB, SSH, a database, a known CVE).</summary>
+    NetworkExploitAttempt,
+
+    /// <summary>The source is on a public list of known malicious addresses (Suricata ET DROP / CINS / Dshield signatures).</summary>
+    KnownMaliciousSource,
+
+    /// <summary>Commands of an industrial protocol seen on the network (Modbus, DNP3, EtherNet/IP, S7): someone talking to a plant system.</summary>
+    IndustrialProtocolCommand,
+
+    /// <summary>The host itself connecting to a malware controller: the strongest sign that it has been compromised.</summary>
+    CommandAndControl,
+
+    /// <summary>A fail2ban jail, CrowdSec scenario or Suricata signature this server does not classify.</summary>
     Other,
 }
 

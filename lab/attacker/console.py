@@ -19,6 +19,7 @@ STATIC = Path(__file__).parent / "static"
 READ_ROUTES = {"status", "summary", "banned", "suspicious-logins", "attempts"}
 TUNNEL = os.environ.get("TUNNEL_CONTROLLER", "http://tunnel:8092")
 runner = scenarios.Runner()
+scenarios.start_c2()
 
 
 class Handler(BaseHTTPRequestHandler):

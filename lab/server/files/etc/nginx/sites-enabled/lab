@@ -18,7 +18,7 @@ server {
     location /intrusion-mcp/ {
         allow 198.51.100.240/28;
         deny  all;
-        proxy_pass http://127.0.0.1:8080/;
+        proxy_pass http://127.0.0.1:8470/;
         proxy_http_version 1.1;
         proxy_buffering off;
     }

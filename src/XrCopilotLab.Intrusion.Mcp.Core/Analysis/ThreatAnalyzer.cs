@@ -92,6 +92,7 @@ public sealed class ThreatAnalyzer(IntrusionPolicy policy, IGeoLocator geo)
             var web = events.Where(e => e.Kind == LogEventKind.WebRequest).ToList();
             var blocks = events.Where(e => e.Kind == LogEventKind.FirewallBlock).ToList();
             var alerts = events.Where(e => e.Kind == LogEventKind.CrowdsecAlert).ToList();
+            var ids = events.Where(e => e.Kind == LogEventKind.IdsAlert).ToList();
             var jails = events.Where(e => e.Jail is not null).Select(e => e.Jail!).Distinct().Order().ToList();
 
             // One attempt, one count: sshd from auth.log when it is there, web from whichever of fail2ban and nginx saw more.
@@ -113,6 +114,7 @@ public sealed class ThreatAnalyzer(IntrusionPolicy policy, IGeoLocator geo)
             if (sshBanned || failures.Count >= policy.FailuresBeforeLogin || (failures.Count > 0 && logins == 0)) types.Add(AttackType.SshBruteForce);
             foreach (var r in web) types.Add(WebProbeRules.TypeOf(r.Rule!));
             foreach (var a in alerts) types.Add(AttackCatalog.FromScenario(a.Rule!));
+            foreach (var a in ids) types.Add(AttackCatalog.FromIdsAlert(a));
 
             var ports = blocks.Where(b => b.TargetPort is not null).GroupBy(b => b.TargetPort!.Value).ToList();
             if (ports.Count >= policy.PortScanMinPorts) types.Add(AttackType.PortScan);
@@ -126,7 +128,7 @@ public sealed class ThreatAnalyzer(IntrusionPolicy policy, IGeoLocator geo)
             if (types.Count == 0 && !suspicious[ip].Any() && (attempts == 0 || logins > 0)) continue;
 
             var bans = events.Count(e => e.Kind == LogEventKind.Ban);
-            var severity = Grade(types, suspicious[ip].ToList(), bans, attempts, alerts.Count);
+            var severity = Grade(types, suspicious[ip].ToList(), bans, attempts, alerts.Count, ids);
 
             reports.Add(new IpReport(
                 ip,
@@ -147,6 +149,10 @@ public sealed class ThreatAnalyzer(IntrusionPolicy policy, IGeoLocator geo)
                 web.GroupBy(r => r.Rule!).Select(g => new WebProbe(g.Key, WebProbeRules.TypeOf(g.Key).ToString(), g.Count(), g.First().Path ?? ""))
                     .OrderByDescending(p => p.Requests).Take(5).ToList(),
                 alerts.Select(a => a.Rule!).Distinct().Order(StringComparer.Ordinal).ToList(),
+                ids.GroupBy(a => a.Rule!)
+                    .Select(g => new IdsSignature(g.Key, g.First().SignatureId, g.First().Detail, AttackCatalog.FromIdsAlert(g.First()).ToString(),
+                        g.Min(a => a.Priority ?? SuricataPriorityLow), g.Count(), g.First().Outbound))
+                    .OrderBy(x => x.Priority).ThenByDescending(x => x.Alerts).Take(10).ToList(),
                 events.Min(e => e.Time),
                 events.Max(e => e.Time)));
         }
@@ -183,13 +189,17 @@ public sealed class ThreatAnalyzer(IntrusionPolicy policy, IGeoLocator geo)
             .ToHashSet();
     }
 
-    private Severity Grade(HashSet<AttackType> types, List<SuspiciousLogin> suspicious, int bans, int attempts, int crowdsecAlerts)
+    private const int SuricataPriorityLow = 3;
+
+    private Severity Grade(HashSet<AttackType> types, List<SuspiciousLogin> suspicious, int bans, int attempts, int crowdsecAlerts, List<LogEvent> ids)
     {
-        if (types.Contains(AttackType.LoginAfterFailures)) return Severity.Critical;
+        if (types.Contains(AttackType.LoginAfterFailures) || types.Contains(AttackType.CommandAndControl)) return Severity.Critical;
         if (types.Contains(AttackType.RepeatOffender) || types.Contains(AttackType.IndustrialProtocolProbe)
-            || types.Contains(AttackType.WebExploitAttempt) || suspicious.Count > 0)
+            || types.Contains(AttackType.WebExploitAttempt) || types.Contains(AttackType.IndustrialProtocolCommand) || suspicious.Count > 0
+            // A high-priority IDS signature on an attack: Suricata saw the exploit itself, not a symptom of it.
+            || ids.Any(a => a.Priority == 1 && AttackCatalog.FromIdsAlert(a) == AttackType.NetworkExploitAttempt))
             return Severity.High;
-        if (bans > 0 || crowdsecAlerts > 0 || attempts >= policy.MediumAttempts || types.Contains(AttackType.DistributedSshBruteForce)
+        if (bans > 0 || crowdsecAlerts > 0 || ids.Count > 0 || attempts >= policy.MediumAttempts || types.Contains(AttackType.DistributedSshBruteForce)
             || types.Contains(AttackType.RequestFlood) || types.Contains(AttackType.WebLoginBruteForce) || types.Contains(AttackType.PortScan))
             return Severity.Medium;
         return Severity.Low;

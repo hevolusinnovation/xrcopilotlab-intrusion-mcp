@@ -47,13 +47,14 @@ write. Each one guards a different door; together they tell the whole story.
 | **UFW** | The firewall: closes every port that is not needed | `/var/log/ufw.log` | Knocks on closed doors: port scans, searches for industrial protocols (Modbus, S7…) |
 | **nginx** | The web server | `/var/log/nginx/access.log` | What a web attacker asked for: `.env`, WordPress, SQL injection, Log4Shell… |
 | **CrowdSec** | A community "neighbourhood watch": shared rules that spot attacks fail2ban misses, such as a very slow brute force | `/var/log/crowdsec.log` | Its alerts and decisions |
+| **Suricata** | A network "metal detector": checks **all** traffic, on every port, against tens of thousands of known attack signatures (free ET Open rules) | `/var/log/suricata/eve.json` | Exploits against any service, addresses on public blacklists, industrial protocol commands, and above all **the server itself calling a malware controller**: proof that an intrusion went further than a login |
 
 A detector the host does not have is simply absent from the answers.
 
 | Mode | Where it runs | What it reads | Use |
 |---|---|---|---|
 | `simulated` | Our Azure Container App `hev-intrusion-mcp` | A synthetic host generated in memory | Demos (ALVEO) |
-| `logs` | The customer's host, next to its detectors | The five logs above | Production |
+| `logs` | The customer's host, next to its detectors | The six logs above | Production |
 
 Two faces, same key, same answers: **MCP** on `/mcp` (for whoever registers the server in XRCopilotLab by hand) and
 **REST** on `/api` (for a blueprint, which provisions it as a `kind: builder` server with no manual step).
@@ -68,7 +69,7 @@ costs and sources, is in [docs/security-tools.md](docs/security-tools.md). In sh
 
 | Package | What it is for, in plain words | Verdict |
 |---|---|---|
-| **Suricata** | A network "metal detector": checks **all** traffic against thousands of known attack signatures (free ET Open rules), on every port, and sees a hacked server calling home (malware, C2). Knows Modbus, DNP3, ENIP | **Next, priority 1** (effort M) |
+| **Suricata** | A network "metal detector": checks **all** traffic against thousands of known attack signatures (free ET Open rules), on every port, and sees a hacked server calling home (malware, C2). Knows Modbus, DNP3, ENIP | **Done in 0.2.0**: read, and installed by `--with suricata` |
 | **Falco** | A CCTV inside the server: notices what happens **after** a break-in (nginx starting a shell, someone reading `/etc/shadow`, writes to `/etc`) | **Priority 2** (M) |
 | auditd | The Linux kernel's own register of who did what; Falco's alternative using only Ubuntu packages | Fallback for Falco (L: hard log format) |
 | **ModSecurity + OWASP CRS** | A web firewall in nginx that reads the **whole** request (also POST bodies), in detection-only mode | **Priority 3** (M) |
@@ -80,10 +81,10 @@ costs and sources, is in [docs/security-tools.md](docs/security-tools.md). In sh
 | Lynis, rkhunter, chkrootkit | Hardening check, rootkit search | Low priority: posture, not attacks; many false alarms |
 | Snort 3, Malcolm, GRASSMARLIN, WireGuard | — | No: rules need a commercial licence / too heavy / archived / writes no log |
 
-**Installing the guardians.** Today the package installs only the toolkit and reads the guardians the server already
-has. Next version: `sudo ./install.sh --with fail2ban,crowdsec,suricata` will also install and configure the
-guardians you name, idempotently and only when asked, Suricata and ModSecurity in detection-only mode. UFW is never
-switched on by the script: a firewall turned on by mistake can lock everyone out of SSH.
+**Installing the guardians.** The package reads the guardians the server already has. If some are missing,
+`sudo ./install.sh --with fail2ban,crowdsec,suricata` also installs and configures the ones you name, idempotently and
+only when asked (see [Install it](#2-install-it)). UFW is never switched on by the script: a firewall turned on by
+mistake can lock everyone out of SSH.
 
 ---
 
@@ -91,7 +92,7 @@ switched on by the script: a firewall turned on by mistake can lock everyone out
 
 To see the toolkit at work without a customer's server, `make up` starts a small lab on your computer, all in Docker:
 
-- **`lab-01`** (container `intrusion-lab-01`), a fake company server (Ubuntu, "Alveo Energia" in Turin) with SSH, a website, fail2ban and a firewall,
+- **`lab-01`** (container `intrusion-lab-01`), a fake company server (Ubuntu, "Alveo Energia" in Turin) with SSH, a website, fail2ban, a firewall and Suricata,
   and **the same toolkit package a customer installs**, installed by the same `install.sh`;
 - **`attacker`** (container `intrusion-lab-attacker`), which attacks `lab-01` when you press a button, and serves the console on
   **http://localhost:8090**;
@@ -113,8 +114,13 @@ toolkit on `lab-01`, exactly as XRCopilotLab would receive it.
 | **bannati ora** | Addresses blocked right now by fail2ban |
 | **blocchi firewall** | Connections the firewall refused on closed ports |
 
-Under the numbers, a red box appears when something serious happens: for example *"Accesso sospetto: operatore è
-entrato da 198.51.100.213 dopo 4 tentativi falliti"*, someone who got in after guessing the password.
+Under the numbers, a red box appears when something serious happens:
+
+![The red box: server compromised and suspicious login](docs/images/c2-alert.jpg)
+
+- **Server compromesso**: Suricata saw `lab-01` itself calling a malware controller. The intrusion went further than a
+  login: someone left a program that takes orders from outside.
+- **Accesso sospetto**: someone got in after guessing the password.
 
 ### The attacks
 
@@ -134,6 +140,7 @@ line by line, the commands the attacker runs (nmap, ssh, curl…) and what happe
 | Forza bruta sull'area riservata | 203.0.113.18 (São Paulo) | Wrong passwords on `/admin/`: banned |
 | Flood di richieste | 203.0.113.15 (Dallas) | Too many requests (429): banned |
 | Campagna distribuita su un account | 192.0.2.11–22 (12 cities) | 12 addresses, 2 tries each on one account: no ban, but a campaign |
+| Backdoor che chiama casa | 203.0.113.66 (Moscow) | The intruder logs in and leaves a backdoor; `lab-01` calls its controller three times. **Suricata** sees it: `CommandAndControl`, critical, and a red box "Server compromesso" in the console |
 | La notte completa | all of them | All the above in sequence, about three minutes: the best demo |
 
 ### The map
@@ -184,11 +191,11 @@ processor (`uname -m` on the server: `x86_64` → x64, `aarch64` → arm64):
 From the command line, and straight to the server:
 
 ```bash
-gh release download v0.1.0 -R hevolusinnovation/xrcopilotlab-intrusion-mcp -p '*linux-x64.tar.gz' -p SHA256SUMS
-scp xrcopilotlab-intrusion-mcp-0.1.0-linux-x64.tar.gz SHA256SUMS admin@<server>:/tmp/
+gh release download v0.2.0 -R hevolusinnovation/xrcopilotlab-intrusion-mcp -p '*linux-x64.tar.gz' -p SHA256SUMS
+scp xrcopilotlab-intrusion-mcp-0.2.0-linux-x64.tar.gz SHA256SUMS admin@<server>:/tmp/
 ```
 
-Or build it from this repository: `make package VERSION=0.1.0` (add `RID=linux-arm64` for ARM); the file lands in
+Or build it from this repository: `make package VERSION=0.2.0` (add `RID=linux-arm64` for ARM); the file lands in
 `out/`.
 
 ### 2. Install it
@@ -198,8 +205,8 @@ On the server (Debian or Ubuntu, with fail2ban already running):
 ```bash
 cd /tmp
 sha256sum -c SHA256SUMS --ignore-missing
-tar -xzf xrcopilotlab-intrusion-mcp-0.1.0-linux-x64.tar.gz
-cd xrcopilotlab-intrusion-mcp-0.1.0-linux-x64
+tar -xzf xrcopilotlab-intrusion-mcp-0.2.0-linux-x64.tar.gz
+cd xrcopilotlab-intrusion-mcp-0.2.0-linux-x64
 sudo ./install.sh
 ```
 
@@ -223,13 +230,30 @@ install and never asks twice:
 | The program and the service | replaced, then the service restarts with the new version (`upgrading 0.1.0 -> 0.2.0`) |
 | User, folders, `libicu` | created only if missing |
 
-Options: `--new-key` (replace the key), `--no-start` (install without starting, for images built ahead).
+Options: `--new-key` (replace the key), `--no-start` (install without starting, for images built ahead), and
+`--with` to install the security packages the server does not have yet:
+
+```bash
+sudo ./install.sh --with fail2ban,crowdsec,suricata   # any of the three, in any order
+```
+
+| Package | What `--with` does (and does again, the same way, on every run) |
+|---|---|
+| `fail2ban` | Installs it from the distribution, with the `sshd` jail on |
+| `crowdsec` | Installs it from CrowdSec's own repository (the distribution's is years old), **detection only**: no bouncer, it blocks nothing; makes its log readable by the group `adm` |
+| `suricata` | Installs Suricata 8 from the OISF repository (Ubuntu's 7.0 is out of support) as an **IDS**: it watches, it never drops traffic. Downloads the ET Open rules and updates them every night (timer `xrcopilotlab-suricata-update`); listens on the interface of the default route (`SURICATA_INTERFACE=…` to choose another); puts the server's own addresses in `HOME_NET`, without which most rules never fire on a public server; writes **only alerts** to `eve.json` (the package default logs every connection, DNS query and TLS handshake in the same file); rotates the logs every day for a week; lets the toolkit read them |
+
+**Suricata needs memory:** about 1.5 GB with all the ET Open rules (measured in the lab). Install it on servers with
+4 GB or more, or trim the rules first (`/etc/suricata/disable.conf`, then `suricata-update`).
+
+A package that is already there is configured, not reinstalled. Suricata's configuration is changed only if
+`install.sh` installed it: a Suricata the customer already runs is read as it is.
 
 ### 3. Where it answers
 
 | Address | Who uses it |
 |---|---|
-| `http://127.0.0.1:8080` | The toolkit itself, **only from inside the server**: nobody outside can reach it |
+| `http://127.0.0.1:8470` | The toolkit itself, **only from inside the server**: nobody outside can reach it. Not 8080: CrowdSec's local API is there |
 | `https://<server>/intrusion-mcp/api` | XRCopilotLab, from a blueprint (connection with HTTP tools) |
 | `https://<server>/intrusion-mcp/mcp` | XRCopilotLab, as an MCP server registered by hand |
 
@@ -240,7 +264,7 @@ prints the block to add, which also lets in only XRCopilotLab's addresses:
 location /intrusion-mcp/ {
     allow <XRCopilotLab address>;
     deny  all;
-    proxy_pass http://127.0.0.1:8080/;
+    proxy_pass http://127.0.0.1:8470/;
     proxy_http_version 1.1;
     proxy_buffering off;
 }
@@ -249,7 +273,7 @@ location /intrusion-mcp/ {
 ### 4. Check it
 
 ```bash
-curl -s http://127.0.0.1:8080/healthz                                      # on the server
+curl -s http://127.0.0.1:8470/healthz                                      # on the server
 curl -s https://<server>/intrusion-mcp/api/status -H "X-API-Key: <key>"     # from outside
 systemctl status xrcopilotlab-intrusion-mcp                                 # the service
 journalctl -u xrcopilotlab-intrusion-mcp -f                                 # its log
@@ -392,14 +416,24 @@ REST, same parameters as query strings: `GET /api/status`, `/api/banned?jail=`, 
 | `IndustrialProtocolProbe` | Any connection to Modbus 502, S7 102, IEC 104 2404, DNP3 20000, EtherNet/IP 44818, OPC UA 4840, BACnet 47808, Niagara Fox 1911 |
 | `RepeatOffender` | Banned by the `recidive` jail |
 | `LoginAfterFailures` | An `Accepted …` login after 3+ failures from the same address in the previous 24 h: possible compromise |
+| `NetworkExploitAttempt` | Suricata: `ET EXPLOIT …` and the other attack signatures on a service that is not the web (SSH, SMB, databases…) |
+| `KnownMaliciousSource` | Suricata: the address is on a public blacklist (`ET DROP`, `ET CINS`, `ET COMPROMISED`, `ET DSHIELD` signatures) |
+| `IndustrialProtocolCommand` | Suricata: Modbus, DNP3, EtherNet/IP, S7 traffic or `ET SCADA` signatures: someone talking to a plant system, not just knocking |
+| `CommandAndControl` | Suricata: a malware signature on a connection **the server opened**: it is calling a malware controller, it is probably compromised. The address reported is the controller's |
 
-Severity: `Critical` (login after failures), `High` (repeat offender, industrial probe, web exploit, login from an
-unexpected country), `Medium` (any ban, a CrowdSec alert, 10+ attempts, campaign, flood, web login brute force, port
+Suricata also adds `PortScan` (`ET SCAN …`), `WebExploitAttempt` (`ET WEB_…`, *Web Application Attack*) and
+`RequestFlood` (*Denial of Service*). Only its priority 1 and 2 alerts are read: engine events and information
+signatures (priority 3 and 4) say nothing about an attacker. Every answer lists the Suricata signatures of an address
+(`idsSignatures`: name, id, category, priority, alerts, `outbound`).
+
+Severity: `Critical` (login after failures, the server calling a malware controller), `High` (repeat offender,
+industrial probe or command, web exploit, a priority-1 network exploit, login from an unexpected country), `Medium`
+(any ban, a CrowdSec or Suricata alert, 10+ attempts, campaign, flood, web login brute force, port
 scan), `Low` (the rest). A user who mistypes once and then logs in is not reported, nor are ordinary web visitors or
 a few stray packets on the firewall.
 
 One attempt is counted once: sshd failures from `auth.log` (fail2ban's `Found` only when `auth.log` is missing), web
-requests from whichever of fail2ban and nginx saw more. Firewall blocks and CrowdSec alerts are reported apart.
+requests from whichever of fail2ban and nginx saw more. Firewall blocks, CrowdSec and Suricata alerts are reported apart.
 
 ---
 
@@ -407,7 +441,8 @@ requests from whichever of fail2ban and nginx saw more. Firewall blocks and Crow
 
 `bastion-01`, an SSH and nginx host in Europe/Rome behind UFW, protected by fail2ban with `sshd` (5 tries in 10 min,
 1 h ban), `nginx-http-auth`, `nginx-botsearch`, `nginx-limit-req` and `recidive` (3 bans in a day, 1 week), with
-**CrowdSec in detection mode** (it alerts and decides, but no bouncer enforces). Each day it has:
+**CrowdSec in detection mode** (it alerts and decides, but no bouncer enforces) and **Suricata** as an IDS. Each day it
+has:
 
 - SSH brute force from 25-45 addresses, most of them banned; web vulnerability scans; web login brute force; web
   exploit attempts (SQL injection, path traversal, Log4Shell, PHPUnit, command injection);
@@ -418,8 +453,12 @@ requests from whichever of fail2ban and nginx saw more. Firewall blocks and Crow
 - one address banned three times, then by `recidive` for a week;
 - **the intrusion**, from `198.51.100.213` (Chișinău): at 00:31 a port scan; from 00:52 one SSH try every 160-230 s on
   `operatore`, slow enough that fail2ban never bans it; around 01:25 CrowdSec raises `ssh-slow-bf`, which nothing
-  enforces; around 02:50 a successful password login. The agent sees the whole sequence, and could have acted at
-  00:31 or at 01:25;
+  enforces; around 02:50 a successful password login; 15-25 minutes later the server starts calling a malware
+  controller, `203.0.113.66`, every ten minutes until morning, and Suricata reports each call. The agent sees the
+  whole sequence, and could have acted at 00:31 or at 01:25;
+- **Suricata** alerts: about one SSH attacker in three is on a public blacklist (`ET CINS …`), one or two addresses try
+  an OpenSSH exploit, and a few engine events (priority 3) that must not be reported. The signature names follow ET
+  Open's style, the signature ids are synthetic (9 000 000+);
 - legitimate logins: the nightly `backup` key from the office (03:00), the `deploy` key in working hours, the
   administrator `m.ferri` who mistypes once at 09:xx; ordinary web visitors and a crawler.
 
@@ -453,6 +492,8 @@ configured; `/livez` answers when the process is up. 120 calls per minute per ke
 | `Logs:FirewallFiles` | `/var/log/ufw.log*` | UFW logs (`ufw logging low` or higher) |
 | `Logs:WebAccessFiles` | `/var/log/nginx/access.log*` | nginx access logs, `combined` format |
 | `Logs:CrowdsecFiles` | `/var/log/crowdsec.log*` | CrowdSec logs |
+| `Logs:SuricataFiles` | `/var/log/suricata/eve.json*` | Suricata EVE logs: only `event_type: alert`, priority 1 and 2 |
+| `Logs:LocalAddresses` | the interfaces' addresses | The server's own addresses, to tell an attack coming in from a connection the server opened |
 | `Logs:TimeZone` | system zone | IANA id; fail2ban writes local time |
 | `Logs:MaxDays` | 30 | how far back to read |
 | `Geo:DbIpCityLiteCsv` | — | DB-IP "IP to City Lite" CSV (`.csv` or `.csv.gz`); without it, no geolocation in the `logs` mode |
@@ -523,6 +564,6 @@ infra/                                   Container App of the demo
 ## Out of scope for now
 
 - Writing actions (ban, unban, whitelist): possible later, always with a person's confirmation.
-- Suricata, Falco, ModSecurity and the other guardians: analysed in [docs/security-tools.md](docs/security-tools.md), Suricata first.
+- Falco, ModSecurity and the other guardians: analysed in [docs/security-tools.md](docs/security-tools.md); Suricata is done.
 - Windows hosts (Event Log), Apache access logs, nginx in a custom log format.
 - Reputation data (AbuseIPDB, CrowdSec CTI): commercial plans needed.

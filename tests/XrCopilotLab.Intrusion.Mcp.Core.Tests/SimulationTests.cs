@@ -43,6 +43,9 @@ public class SimulationTests
         Assert.Equal(day.Fail2banLines.Count, events.Count(e => e.Origin == LogOrigin.Fail2ban));
         Assert.Equal(day.FirewallLines.Count, events.Count(e => e.Origin == LogOrigin.Firewall));
         Assert.Equal(day.CrowdsecLines.Count, events.Count(e => e.Origin == LogOrigin.Crowdsec));
+        // Suricata's engine events (priority 3) are in eve.json but are not events.
+        Assert.True(day.SuricataLines.Count > events.Count(e => e.Origin == LogOrigin.Suricata));
+        Assert.Contains(events, e => e.Origin == LogOrigin.Suricata);
         // Ordinary web traffic is in the log but is not an event.
         Assert.True(day.WebAccessLines.Count > events.Count(e => e.Origin == LogOrigin.WebAccess));
         Assert.Contains(events, e => e.Origin == LogOrigin.WebAccess);
@@ -114,6 +117,36 @@ public class SimulationTests
 
         Assert.All(source.Read(early.AddHours(-2), early), e => Assert.True(e.Time <= early));
         Assert.DoesNotContain(source.Read(early.AddHours(-2), early), e => e.Kind == LogEventKind.AcceptedLogin && e.SourceIp == SyntheticHost.IncidentIp);
+    }
+
+    [Fact]
+    public void After_the_login_the_host_calls_a_malware_controller_and_suricata_sees_it()
+    {
+        var q = Queries();
+        var period = q.Resolve(Now, 24, null, null);
+        var controller = q.IpDetail(Now, period, SyntheticHost.ControllerIp);
+        var report = controller.Report!;
+
+        Assert.Equal(nameof(Severity.Critical), report.Severity);
+        Assert.Contains(nameof(AttackType.CommandAndControl), report.AttackTypes);
+        var signature = Assert.Single(report.IdsSignatures);
+        Assert.True(signature.Outbound);
+
+        var login = q.IpDetail(Now, period, SyntheticHost.IncidentIp).Timeline.Single(t => t.Kind == nameof(LogEventKind.AcceptedLogin)).Time;
+        Assert.All(controller.Timeline, t => Assert.True(t.Time > login && t.Outbound));
+        Assert.Contains(q.Summary(Now, period, 10).ByAttackType, t => t.Type == nameof(AttackType.CommandAndControl));
+    }
+
+    [Fact]
+    public void Suricata_flags_reputation_and_exploits_and_drops_engine_noise()
+    {
+        var q = Queries();
+        var summary = q.Summary(Now, q.Resolve(Now, 24, null, null), 50);
+
+        Assert.True(summary.Totals.IdsAlerts > 0);
+        Assert.Contains(summary.ByAttackType, t => t.Type == nameof(AttackType.KnownMaliciousSource));
+        Assert.Contains(summary.ByAttackType, t => t.Type == nameof(AttackType.NetworkExploitAttempt));
+        Assert.DoesNotContain(summary.TopAttackers.SelectMany(r => r.IdsSignatures), s => s.Signature.StartsWith("SURICATA STREAM", StringComparison.Ordinal));
     }
 
     [Fact]

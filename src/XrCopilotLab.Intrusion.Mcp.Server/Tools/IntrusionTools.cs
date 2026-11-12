@@ -5,7 +5,7 @@ using XrCopilotLab.Intrusion.Mcp.Core.Queries;
 namespace XrCopilotLab.Intrusion.Mcp.Server.Tools;
 
 /// <summary>
-/// The tools the agent sees. All read-only: they read the host's fail2ban, sshd, UFW, nginx and CrowdSec logs (or the
+/// The tools the agent sees. All read-only: they read the host's fail2ban, sshd, UFW, nginx, CrowdSec and Suricata logs (or the
 /// simulated host) and never ban, unban or change anything. Every answer says whether the data is simulated.
 /// </summary>
 [McpServerToolType]
@@ -19,7 +19,7 @@ public sealed class IntrusionTools(IntrusionQueries queries, TimeProvider clock)
 
     [McpServerTool(Name = "intrusion_status", ReadOnly = true),
      Description(
-        "State of the protection on the host: which detectors are reporting (fail2ban, sshd, ufw, nginx, crowdsec), which fail2ban " +
+        "State of the protection on the host: which detectors are reporting (fail2ban, sshd, ufw, nginx, crowdsec, suricata), which fail2ban " +
         "jails are active and how many addresses each one is banning now, events in the last 24 hours. Call it first to know what the host watches.")]
     public StatusResult Status() => queries.Status(clock.GetUtcNow());
 
@@ -34,7 +34,7 @@ public sealed class IntrusionTools(IntrusionQueries queries, TimeProvider clock)
     [McpServerTool(Name = "intrusion_attempts", ReadOnly = true),
      Description(
         "Intrusion attempts in a period, one row per source address, most serious first: attempts, bans, accounts tried, " +
-        "attack types, severity (Low, Medium, High, Critical), location, closed ports probed, web attack patterns, CrowdSec scenarios. " +
+        "attack types, severity (Low, Medium, High, Critical), location, closed ports probed, web attack patterns, CrowdSec scenarios, Suricata signatures (outbound = the host itself connected: possible compromise). " +
         "Filter by jail, attack type or country.")]
     public AttemptsResult Attempts(
         [Description(PeriodHelp)] int? hours = null,
@@ -53,7 +53,7 @@ public sealed class IntrusionTools(IntrusionQueries queries, TimeProvider clock)
     [McpServerTool(Name = "intrusion_ip_detail", ReadOnly = true),
      Description(
         "Everything one address did in the period: the summary row, any suspicious login, and the timeline of its events " +
-        "(failed and successful logins, fail2ban matches and bans, blocked connections, web attacks, CrowdSec alerts), newest first, up to 200.")]
+        "(failed and successful logins, fail2ban matches and bans, blocked connections, web attacks, CrowdSec alerts, Suricata alerts), newest first, up to 200.")]
     public IpDetailResult IpDetail(
         [Description("The source address (IPv4 or IPv6).")] string ip,
         [Description(PeriodHelp)] int? hours = null,

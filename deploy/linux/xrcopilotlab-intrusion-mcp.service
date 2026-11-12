@@ -28,7 +28,8 @@ PrivateDevices=true
 ProtectKernelTunables=true
 ProtectKernelModules=true
 ProtectControlGroups=true
-RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+# AF_NETLINK: to list the host's own addresses (a Suricata alert from the host itself is a connection going out).
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
 RestrictSUIDSGID=true
 LockPersonality=true
 ReadOnlyPaths=/var/log

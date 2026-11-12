@@ -9,16 +9,22 @@
 # service. A second run with nothing changed changes nothing but the restart.
 #   --no-start   install and enable the service without starting it (an image build, where systemd is not running yet)
 #   --new-key    replace the stored key (asked again, or INTRUSION_MCP_API_KEY): the old key stops working
+#   --with fail2ban,crowdsec,suricata
+#                also install and configure these security packages (guardians.sh), idempotently, in detection mode
 set -euo pipefail
 
 START=1
 NEW_KEY=0
-for arg in "$@"; do
-  case "$arg" in
+WITH=()
+while [[ $# -gt 0 ]]; do
+  case "$1" in
     --no-start) START=0 ;;
     --new-key)  NEW_KEY=1 ;;
-    *) echo "unknown option: $arg" >&2; exit 2 ;;
+    --with)     [[ $# -ge 2 ]] || { echo "--with needs a list, e.g. --with fail2ban,suricata" >&2; exit 2; }; IFS=, read -ra WITH <<< "$2"; shift ;;
+    --with=*)   IFS=, read -ra WITH <<< "${1#--with=}" ;;
+    *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
+  shift
 done
 
 APP_DIR=/opt/xrcopilotlab-intrusion-mcp
@@ -32,7 +38,11 @@ OLD_VERSION="$(cat "$APP_DIR/VERSION" 2>/dev/null || true)"
 [[ -z "$OLD_VERSION" && -f "$APP_DIR/XrCopilotLab.Intrusion.Mcp.Server" ]] && OLD_VERSION="an earlier version"
 
 [[ $EUID -eq 0 ]] || { echo "run as root: sudo $0" >&2; exit 1; }
-command -v fail2ban-client >/dev/null || echo "warning: fail2ban is not installed; the server will only see sshd logins" >&2
+# shellcheck source=guardians.sh
+. "$HERE/guardians.sh"
+for g in "${WITH[@]}"; do
+  [[ " $GUARDIANS_SUPPORTED " == *" $g "* ]] || { echo "--with: unknown package '$g' (supported: $GUARDIANS_SUPPORTED)" >&2; exit 2; }
+done
 
 # A package for the wrong processor would replace a working install with one that cannot start: refuse it first.
 PKG_RID="$(cat "$HERE/RID" 2>/dev/null || true)"
@@ -49,6 +59,10 @@ if ! ldconfig -p | grep -q 'libicuuc\.so'; then
   [[ -n "$ICU_PKG" ]] || { echo "no libicu package found: install ICU, then run this script again" >&2; exit 1; }
   apt-get install -y -qq --no-install-recommends "$ICU_PKG"
 fi
+
+# The guardians first: the service below then starts with their logs (and groups) in place.
+for g in "${WITH[@]}"; do "guardian_$g"; done
+command -v fail2ban-client >/dev/null || echo "warning: fail2ban is not installed (--with fail2ban): the server will only see sshd logins" >&2
 
 id -u "$USER_NAME" >/dev/null 2>&1 || useradd --system --no-create-home --shell /usr/sbin/nologin "$USER_NAME"
 
@@ -83,15 +97,19 @@ fi
 
 install -m 0644 "$HERE/$SERVICE.service" "$UNIT"
 if [[ $START -eq 1 ]]; then
+  guardians_start "${WITH[@]}"
   systemctl daemon-reload
   systemctl enable "$SERVICE" >/dev/null 2>&1
   # restart, not start: on a second run the new program and unit must take over.
   systemctl restart "$SERVICE"
+  # The address the service listens on, from the settings in use (a customer may have changed it).
+  URL="$(grep -o '"Urls": *"[^"]*"' "$APP_DIR/appsettings.Production.json" | sed 's/.*"\(http[^"]*\)"$/\1/')"
+  URL="${URL:-http://127.0.0.1:8470}"
   for _ in $(seq 1 30); do
-    if curl -fsS http://127.0.0.1:8080/healthz >/dev/null 2>&1; then break; fi
+    if curl -fsS "$URL/healthz" >/dev/null 2>&1; then break; fi
     sleep 1
   done
-  curl -fsS http://127.0.0.1:8080/healthz && echo || { echo "the service does not answer: journalctl -u $SERVICE -n 50" >&2; exit 1; }
+  curl -fsS "$URL/healthz" && echo || { echo "the service does not answer: journalctl -u $SERVICE -n 50" >&2; exit 1; }
 else
   systemctl enable "$SERVICE"
   [[ -f "$ETC_DIR/env" ]] || echo "installed, not started: write $ETC_DIR/env (ApiKeys__Hash=<sha256 of the key>) before the first start"
@@ -100,13 +118,13 @@ fi
 [[ -n "$OLD_VERSION" ]] && { echo "upgraded to $NEW_VERSION"; exit 0; }
 cat <<'EOF'
 
-Installed. The server listens on 127.0.0.1:8080 only: publish it through the nginx already on the host, with TLS,
+Installed. The server listens on 127.0.0.1:8470 only (not 8080: CrowdSec's local API is there): publish it through the nginx already on the host, with TLS,
 and allow only XRCopilotLab's outbound addresses, for example:
 
   location /intrusion-mcp/ {
       allow <XRCopilotLab address>;
       deny  all;
-      proxy_pass http://127.0.0.1:8080/;
+      proxy_pass http://127.0.0.1:8470/;
       proxy_http_version 1.1;
       proxy_buffering off;
   }

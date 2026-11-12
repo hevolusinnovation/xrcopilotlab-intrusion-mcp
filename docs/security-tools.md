@@ -6,6 +6,10 @@ Research note for `xrcopilotlab-intrusion-mcp`, November 2026: which open-source
 unprivileged user in group `adm`, reads only, and never blocks. Its catalogue has 11 attack types (`SshBruteForce` …
 `LoginAfterFailures`), see README "Attack types" and `Core/Analysis/AttackCatalog.cs`.
 
+> **Update, 12 November 2026: Suricata is done** (version 0.2.0): the toolkit reads `eve.json`, `install.sh --with
+> suricata` installs it, and the Docker lab runs it with the ET Open rules. What the real install showed, and this note
+> had not verified, is at the end of the Suricata section. Falco and ModSecurity are next.
+
 **Short answer:** read **Suricata** next (EVE JSON). Add **Falco** (or auditd if we want only Ubuntu packages) for
 "what happened after the login". Then add **ModSecurity + OWASP CRS** on nginx for deeper web attacks. Before any of
 these there are some cheap wins that need no new software: Apache logs, `mail.log`, `sudo` lines in `auth.log`, and sshguard.
@@ -60,6 +64,15 @@ format and new attack types (about 1–2 weeks), L = a new kind of data or a new
   already do for fail2ban and nginx.
 - **Effort:** **M**. JSON is easy (`System.Text.Json`), but we need new types, dedup rules, and size limits for a big
   file (read from the end, filter `event_type`).
+
+- **Verified on Ubuntu 24.04 (12 November 2026):** the OISF PPA installs **8.0.8**. It runs as the user `suricata`
+  (`--user suricata --group suricata`), keeps its logs in `/var/log/suricata` with mode `0770 suricata:suricata`, and
+  ships **no logrotate** file. The default `eve.json` logs every flow, DNS query, TLS handshake and HTTP request.
+  `suricata-update` loads about 53 000 ET Open rules (69 000 lines). **Memory, measured in the lab: about 1.5 GB
+  resident** with all of them (14 worker threads), more than the rule of thumb above. On a server with 2 GB or less,
+  disable rule families with `suricata-update`'s `disable.conf` before installing it. Inside containers (loopback, veth) checksum offload makes every packet look invalid: `-k none` is needed there,
+  or Suricata does not reassemble TCP and HTTP rules never fire. `testmynids.org`, the usual test page, is a parked
+  domain now: the GPL `id check returned root` rule fires on any page that returns `uid=0(root)`.
 
 ### Zeek (network monitor) + CISA ICSNPP parsers
 - **Detects:** Zeek is less a signature IDS and more a full record of network activity (`conn.log`, `http.log`,

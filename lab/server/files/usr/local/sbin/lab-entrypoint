@@ -7,4 +7,9 @@ if [[ -n "${LAB_API_KEY:-}" ]]; then
   printf 'ApiKeys__Hash=%s\n' "$(printf '%s' "$LAB_API_KEY" | sha256sum | cut -d' ' -f1)" > /etc/xrcopilotlab-intrusion-mcp/env
   chgrp xrcopilot-intrusion /etc/xrcopilotlab-intrusion-mcp/env && chmod 0640 /etc/xrcopilotlab-intrusion-mcp/env
 fi
+# Suricata's HOME_NET: lab-01's addresses of this run (install.sh wrote the ones of the image build).
+if [[ -f /etc/suricata/suricata.yaml ]]; then
+  home="$(hostname -I | tr ' ' '\n' | grep -v '^$' | grep -v ':' | sed 's|$|/32|' | paste -sd, -)"
+  sed -i "0,/^    HOME_NET:.*/s##    HOME_NET: \"[$home]\"#" /etc/suricata/suricata.yaml
+fi
 exec /sbin/init

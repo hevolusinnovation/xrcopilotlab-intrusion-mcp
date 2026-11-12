@@ -1,4 +1,5 @@
 using System.IO.Compression;
+using System.Net.NetworkInformation;
 using XrCopilotLab.Intrusion.Mcp.Core.Models;
 using XrCopilotLab.Intrusion.Mcp.Core.Sources;
 
@@ -30,6 +31,15 @@ public sealed class LogFileOptions
     /// <summary>CrowdSec logs: alerts and decisions.</summary>
     public List<string> CrowdsecFiles { get; set; } = ["/var/log/crowdsec.log*"];
 
+    /// <summary>Suricata EVE logs: only its alerts are read (<c>event_type: alert</c>, severity 1 and 2).</summary>
+    public List<string> SuricataFiles { get; set; } = ["/var/log/suricata/eve.json*"];
+
+    /// <summary>
+    /// The host's own addresses, to tell an attack coming in from a connection the host opened (a Suricata alert on
+    /// malware calling home). Empty = the addresses of the host's network interfaces.
+    /// </summary>
+    public List<string> LocalAddresses { get; set; } = [];
+
     /// <summary>How many days back to read.</summary>
     public int MaxDays { get; set; } = 30;
 }
@@ -54,7 +64,32 @@ public sealed class FileLogSource(LogFileOptions options, ILogger<FileLogSource>
         AllPatterns().SelectMany(Expand).DefaultIfEmpty("no log file found: check the Logs:*Files settings").ToList();
 
     private IEnumerable<List<string>> AllPatterns() =>
-        [options.Fail2banFiles, options.AuthFiles, options.FirewallFiles, options.WebAccessFiles, options.CrowdsecFiles];
+        [options.Fail2banFiles, options.AuthFiles, options.FirewallFiles, options.WebAccessFiles, options.CrowdsecFiles, options.SuricataFiles];
+
+    private IReadOnlySet<string>? _local;
+
+    // Read once: the host's addresses do not change while the service runs.
+    private IReadOnlySet<string> Local => _local ??= options.LocalAddresses.Count > 0
+        ? options.LocalAddresses.ToHashSet(StringComparer.Ordinal)
+        : InterfaceAddresses();
+
+    private HashSet<string> InterfaceAddresses()
+    {
+        try
+        {
+            var addresses = NetworkInterface.GetAllNetworkInterfaces()
+                .SelectMany(n => n.GetIPProperties().UnicastAddresses)
+                .Select(a => a.Address.ToString())
+                .ToHashSet(StringComparer.Ordinal);
+            if (addresses.Count == 0) logger.LogWarning("No address found on the host's interfaces: set Logs:LocalAddresses");
+            return addresses;
+        }
+        catch (Exception ex) when (ex is NetworkInformationException or PlatformNotSupportedException or IOException)
+        {
+            logger.LogWarning("Cannot list the host's addresses ({Error}): set Logs:LocalAddresses", ex.Message);
+            return [];
+        }
+    }
 
     public IReadOnlyList<LogEvent> Read(DateTimeOffset since, DateTimeOffset now)
     {
@@ -66,8 +101,9 @@ public sealed class FileLogSource(LogFileOptions options, ILogger<FileLogSource>
             Lines(options.AuthFiles, since),
             Lines(options.FirewallFiles, since),
             Lines(options.WebAccessFiles, since),
-            Lines(options.CrowdsecFiles, since));
-        var events = LogLines.Parse(logs, _zone, now)
+            Lines(options.CrowdsecFiles, since),
+            Lines(options.SuricataFiles, since));
+        var events = LogLines.Parse(logs, _zone, now, Local)
             .Where(e => e.Time >= since && e.Time <= now)
             .ToList();
         events.Sort((a, b) => a.Time.CompareTo(b.Time));

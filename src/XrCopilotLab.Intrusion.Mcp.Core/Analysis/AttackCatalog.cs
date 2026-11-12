@@ -68,6 +68,43 @@ public static class AttackCatalog
         return AttackType.Other;
     }
 
+    // Signature families of the ET Open rules (https://rules.emergingthreats.net): the prefix says what the rule is about.
+    private static readonly string[] ReputationPrefixes = ["ET DROP", "ET CINS", "ET COMPROMISED", "ET DSHIELD", "ET 3CORESEC", "ET TOR"];
+    private static readonly string[] MalwarePrefixes = ["ET MALWARE", "ET TROJAN", "ET CNC", "ET C2", "ET COINMINER", "ET MOBILE_MALWARE"];
+    private static readonly string[] IndustrialWords = ["MODBUS", "DNP3", "ENIP", "ETHERNET/IP", "CIP ", "S7", "IEC 104", "IEC-104", "BACNET", "SCADA", "ICS "];
+    private static readonly string[] IndustrialProtocols = ["modbus", "dnp3", "enip", "cip", "s7comm", "iec104", "bacnet"];
+
+    /// <summary>
+    /// The attack type of a Suricata alert, from its signature (ET Open naming), its category and its direction. A
+    /// malware signature on a connection the host opened is <see cref="AttackType.CommandAndControl"/>; the same
+    /// signature coming in is an exploit attempt.
+    /// </summary>
+    public static AttackType FromIdsAlert(LogEvent alert)
+    {
+        var signature = (alert.Rule ?? "").ToUpperInvariant();
+        var category = (alert.Detail ?? "").ToLowerInvariant();
+        var protocol = (alert.Protocol ?? "").ToLowerInvariant();
+        bool Starts(string[] prefixes) => prefixes.Any(p => signature.StartsWith(p, StringComparison.Ordinal));
+
+        if (alert.Outbound && (Starts(MalwarePrefixes) || category.Contains("trojan", StringComparison.Ordinal)
+                || category.Contains("command and control", StringComparison.Ordinal) || category.Contains("malware", StringComparison.Ordinal)))
+            return AttackType.CommandAndControl;
+        if (Starts(ReputationPrefixes)) return AttackType.KnownMaliciousSource;
+        if (IndustrialProtocols.Contains(protocol) || IndustrialWords.Any(w => signature.Contains(w, StringComparison.Ordinal)))
+            return AttackType.IndustrialProtocolCommand;
+        if (signature.StartsWith("ET SCAN", StringComparison.Ordinal) || category.Contains("network scan", StringComparison.Ordinal))
+            return AttackType.PortScan;
+        if (signature.StartsWith("ET WEB_", StringComparison.Ordinal) || category.Contains("web application attack", StringComparison.Ordinal))
+            return AttackType.WebExploitAttempt;
+        if (category.Contains("denial of service", StringComparison.Ordinal)) return AttackType.RequestFlood;
+        if (Starts(MalwarePrefixes) || category.Contains("trojan", StringComparison.Ordinal)) return AttackType.NetworkExploitAttempt;
+        if (signature.StartsWith("ET EXPLOIT", StringComparison.Ordinal) || category.Contains("privilege gain", StringComparison.Ordinal)
+            || category.Contains("executable code", StringComparison.Ordinal) || category.Contains("attack", StringComparison.Ordinal))
+            // The same exploit carried by a web request (Log4Shell in a header) is a web exploit.
+            return protocol is "http" or "http2" ? AttackType.WebExploitAttempt : AttackType.NetworkExploitAttempt;
+        return AttackType.Other;
+    }
+
     /// <summary>Whether the jail's <c>Found</c> lines are attempts against a service (the recidive jail counts bans, not attempts).</summary>
     public static bool CountsAttempts(string jail) => !string.Equals(jail, RecidiveJail, StringComparison.OrdinalIgnoreCase);
 
@@ -88,6 +125,10 @@ public static class AttackCatalog
         AttackType.IndustrialProtocolProbe => "Connections to industrial control ports (Modbus, S7, IEC 104, DNP3, OPC UA…): looking for plant systems.",
         AttackType.RepeatOffender => "An address banned several times that keeps coming back.",
         AttackType.LoginAfterFailures => "A successful SSH login right after repeated failures from the same address: possible compromise.",
+        AttackType.NetworkExploitAttempt => "Network traffic carrying a known attack against a service (seen by the network IDS, Suricata).",
+        AttackType.KnownMaliciousSource => "An address on a public list of known attackers (Suricata reputation signatures).",
+        AttackType.IndustrialProtocolCommand => "Industrial protocol commands on the network (Modbus, DNP3, EtherNet/IP, S7): someone talking to a plant system.",
+        AttackType.CommandAndControl => "The host itself connecting to a malware controller: it is probably compromised.",
         _ => "A detector rule this server does not classify.",
     };
 }
