@@ -24,7 +24,7 @@ public sealed class SimulationOptions
     public int IncidentEveryDays { get; set; } = 1;
 }
 
-/// <summary>The lines one simulated day wrote to the five logs.</summary>
+/// <summary>The lines one simulated day wrote to the logs.</summary>
 public sealed record SimulatedDay(
     DateOnly Day,
     IReadOnlyList<string> Fail2banLines,
@@ -32,16 +32,17 @@ public sealed record SimulatedDay(
     IReadOnlyList<string> FirewallLines,
     IReadOnlyList<string> WebAccessLines,
     IReadOnlyList<string> CrowdsecLines,
-    IReadOnlyList<string> SuricataLines)
+    IReadOnlyList<string> SuricataLines,
+    IReadOnlyList<string> FalcoLines)
 {
-    public LogSet ToLogSet() => new(Fail2banLines, AuthLines, FirewallLines, WebAccessLines, CrowdsecLines, SuricataLines);
+    public LogSet ToLogSet() => new(Fail2banLines, AuthLines, FirewallLines, WebAccessLines, CrowdsecLines, SuricataLines, FalcoLines);
 }
 
 /// <summary>
 /// A synthetic Linux host exposed on the internet with SSH and nginx, behind UFW, protected by fail2ban, with CrowdSec
 /// running in detection mode (alerts and decisions, no bouncer). For any day it generates the lines that day would
 /// have left in <c>auth.log</c>, <c>fail2ban.log</c>, <c>ufw.log</c>, the nginx <c>access.log</c> and
-/// <c>crowdsec.log</c> and Suricata's <c>eve.json</c>, and runs the fail2ban rules on them (maxretry, findtime, bantime, recidive), so bans follow
+/// <c>crowdsec.log</c>, Suricata's <c>eve.json</c> and Falco's <c>events.json</c>, and runs the fail2ban rules on them (maxretry, findtime, bantime, recidive), so bans follow
 /// from the attempts. Deterministic and pure: same seed and day, same lines; no clock, no I/O.
 /// <para>What a day contains:</para>
 /// <list type="bullet">
@@ -58,6 +59,10 @@ public sealed record SimulatedDay(
 /// <item>Suricata alerts: SSH attackers on public reputation lists, a few attempts at an OpenSSH exploit, and
 /// low-priority engine events that must not be reported. Signature names follow ET Open's style; the signature ids are
 /// in a synthetic range (9 000 000+) and are not real rule ids;</item>
+/// <item>Falco alerts: what the intruder does once in (looks for keys, reads <c>/etc/shadow</c> through sudo, adds an SSH
+/// key, starts the backdoor and a miner from <c>/dev/shm</c>, clears <c>wtmp</c>); on some days a command injection that
+/// works, and the web server starts a shell; every day an inventory agent reading <c>/etc/shadow</c> as root, which no
+/// login explains;</item>
 /// <item>legitimate logins and ordinary web traffic, which must not be reported.</item>
 /// </list>
 /// </summary>
@@ -172,8 +177,11 @@ public sealed class SyntheticHost(SimulationOptions options)
 
         // Suricata draws from its own generator, so adding it left every other line of the day as it was.
         Suricata(new Random(unchecked(Options.Seed * 17 + day.DayNumber * 104_729)), attempts, w);
+        // And Falco from another, for the same reason.
+        Falco(new Random(unchecked(Options.Seed * 13 + day.DayNumber * 15_485_863)), attempts, w);
 
-        return new SimulatedDay(day, w.Fail2ban.Sorted(), w.Auth.Sorted(), w.Firewall.Sorted(), w.Web.Sorted(), w.Crowdsec.Sorted(), w.Suricata.Sorted());
+        return new SimulatedDay(day, w.Fail2ban.Sorted(), w.Auth.Sorted(), w.Firewall.Sorted(), w.Web.Sorted(), w.Crowdsec.Sorted(), w.Suricata.Sorted(),
+            w.Falco.Sorted());
     }
 
     // ---- scenarios: attempts against the services ------------------------------------------------------------------
@@ -593,6 +601,52 @@ public sealed class SyntheticHost(SimulationOptions options)
             $"{{\"timestamp\":\"{stamp}\",\"flow_id\":{(long)sid * 7919 + local.Ticks % 1_000_000_007},\"in_iface\":\"eth0\",\"event_type\":\"alert\",\"src_ip\":\"{src}\",\"src_port\":{srcPort},\"dest_ip\":\"{dest}\",\"dest_port\":{destPort},\"proto\":\"TCP\",\"app_proto\":\"{appProto}\",\"alert\":{{\"action\":\"allowed\",\"gid\":1,\"signature_id\":{sid},\"rev\":1,\"signature\":\"{signature}\",\"category\":\"{category}\",\"severity\":{severity}}}}}"));
     }
 
+    // ---- Falco (events.json) ---------------------------------------------------------------------------------------
+
+    private void Falco(Random rng, List<Attempt> attempts, Writer w)
+    {
+        // An inventory agent reads /etc/shadow every night as root, from cron: no login explains it, it stays the host's.
+        FalcoAlert(w, w.Day.AddHours(4).AddMinutes(12).AddSeconds(rng.Next(0, 50)), "Warning", "Read sensitive file untrusted",
+            ["T1555", "filesystem", "host", "mitre_credential_access"], "root", "root", "/usr/bin/python3 /opt/inventory/agent.py --collect",
+            ["cron"], "/etc/shadow");
+
+        // On some days one command injection works: php-fpm, below nginx, starts a shell for the address that sent it.
+        var injection = attempts.Where(a => a.Service == Service.WebExploit && a.Rule == "command-injection").OrderBy(a => a.At).FirstOrDefault();
+        if (injection is not null && rng.Next(3) == 0)
+            FalcoAlert(w, injection.At.AddSeconds(rng.Next(1, 4)), "Notice", "Run shell untrusted",
+                ["T1059.004", "host", "mitre_execution", "process", "shell"], "www-data", null, "sh -c id;uname -a", ["php-fpm8.3", "nginx"], null);
+
+        // The intruder, once in: keys, passwords, a way back, the backdoor, a miner, the traces.
+        var login = attempts.FirstOrDefault(a => a.Ip == IncidentIp && a.Success);
+        if (login is null) return;
+        var at = login.At.AddMinutes(rng.Next(2, 5));
+        string[] session = ["bash", "sshd"];
+        // A process of the session carries the client's address (SSH_CLIENT); below sudo only SUDO_USER is left.
+        var client = $"{IncidentIp} {login.Port} 22";
+        FalcoAlert(w, at, "Warning", "Search Private Keys or Passwords", ["T1552.001", "filesystem", "host", "mitre_credential_access", "process"],
+            IncidentUser, IncidentUser, "find / -name id_rsa -o -name *.pem", session, null, client);
+        FalcoAlert(w, at = at.AddSeconds(rng.Next(40, 120)), "Warning", "Read sensitive file untrusted", ["T1555", "filesystem", "host", "mitre_credential_access"],
+            "root", IncidentUser, "cat /etc/shadow", ["sudo", .. session], "/etc/shadow", sudoUser: IncidentUser);
+        FalcoAlert(w, at = at.AddSeconds(rng.Next(60, 180)), "Warning", "XRC SSH authorized keys changed", ["T1098.004", "filesystem", "host", "mitre_persistence"],
+            IncidentUser, IncidentUser, $"tee -a /home/{IncidentUser}/.ssh/authorized_keys", session, $"/home/{IncidentUser}/.ssh/authorized_keys", client);
+        FalcoAlert(w, at = at.AddMinutes(rng.Next(8, 15)), "Warning", "Execution from /dev/shm", ["T1059.004", "host", "mitre_execution"],
+            IncidentUser, IncidentUser, "/dev/shm/.k/kworker -d", session, null, client);
+        FalcoAlert(w, at = at.AddSeconds(rng.Next(30, 90)), "Critical", "XRC Crypto miner started", ["T1496", "host", "mitre_impact", "process"],
+            IncidentUser, IncidentUser, "/dev/shm/.k/xmrig -o stratum+tcp://203.0.113.66:3333 --background", session, null, client);
+        FalcoAlert(w, at.AddSeconds(rng.Next(30, 90)), "Warning", "Clear Log Activities", ["NIST_800-53_AU-10", "T1070", "filesystem", "host", "mitre_defense_evasion"],
+            "root", IncidentUser, "sh -c : > /var/log/wtmp", ["sudo", .. session], "/var/log/wtmp", sudoUser: IncidentUser);
+    }
+
+    private void FalcoAlert(Writer w, DateTime local, string priority, string rule, string[] tags, string user, string? loginName,
+        string command, string[] ancestors, string? file, string? sshClient = null, string? sudoUser = null)
+    {
+        var utc = TimeZoneInfo.ConvertTimeToUtc(DateTime.SpecifyKind(local, DateTimeKind.Unspecified), w.Zone);
+        static string Json(string? v) => v is null ? "null" : "\"" + v.Replace("\\", "\\\\", StringComparison.Ordinal).Replace("\"", "\\\"", StringComparison.Ordinal) + "\"";
+        string Ancestor(int i) => Json(i < ancestors.Length ? ancestors[i] : null);
+        w.Falco.Add(local, string.Create(CultureInfo.InvariantCulture,
+            $"{{\"hostname\":\"{Options.Hostname}\",\"output\":{Json($"{utc:HH:mm:ss.fffffff}00: {priority} {rule} | user={user} command={command}")},\"output_fields\":{{\"container.id\":\"host\",\"fd.name\":{Json(file)},\"proc.aname[2]\":{Ancestor(1)},\"proc.aname[3]\":{Ancestor(2)},\"proc.aname[4]\":{Ancestor(3)},\"proc.cmdline\":{Json(command)},\"proc.env[SSH_CLIENT]\":{Json(sshClient ?? "")},\"proc.env[SUDO_USER]\":{Json(sudoUser ?? "")},\"proc.pname\":{Ancestor(0)},\"user.loginname\":{Json(loginName ?? "<NA>")},\"user.name\":{Json(user)}}},\"priority\":\"{priority}\",\"rule\":\"{rule}\",\"source\":\"syscall\",\"tags\":[{string.Join(",", tags.Select(t => Json(t)))}],\"time\":\"{utc:yyyy-MM-dd'T'HH:mm:ss.fffffff}00Z\"}}"));
+    }
+
     private static string ExploitScenario(string rule) => rule switch
     {
         "sql-injection" => "crowdsecurity/http-sqli-probing",
@@ -666,6 +720,7 @@ public sealed class SyntheticHost(SimulationOptions options)
         public TimeZoneInfo Zone { get; } = zone;
         public DateTime Day { get; } = day;
         public Lines Suricata { get; } = new();
+        public Lines Falco { get; } = new();
         public Lines Fail2ban { get; } = new();
         public Lines Auth { get; } = new();
         public Lines Firewall { get; } = new();

@@ -34,6 +34,9 @@ public sealed class LogFileOptions
     /// <summary>Suricata EVE logs: only its alerts are read (<c>event_type: alert</c>, severity 1 and 2).</summary>
     public List<string> SuricataFiles { get; set; } = ["/var/log/suricata/eve.json*"];
 
+    /// <summary>Falco JSON file output (<c>json_output: true</c>): what processes did on the host. <c>install.sh --with falco</c> writes it here.</summary>
+    public List<string> FalcoFiles { get; set; } = ["/var/log/falco/events.json*"];
+
     /// <summary>
     /// The host's own addresses, to tell an attack coming in from a connection the host opened (a Suricata alert on
     /// malware calling home). Empty = the addresses of the host's network interfaces.
@@ -64,7 +67,7 @@ public sealed class FileLogSource(LogFileOptions options, ILogger<FileLogSource>
         AllPatterns().SelectMany(Expand).DefaultIfEmpty("no log file found: check the Logs:*Files settings").ToList();
 
     private IEnumerable<List<string>> AllPatterns() =>
-        [options.Fail2banFiles, options.AuthFiles, options.FirewallFiles, options.WebAccessFiles, options.CrowdsecFiles, options.SuricataFiles];
+        [options.Fail2banFiles, options.AuthFiles, options.FirewallFiles, options.WebAccessFiles, options.CrowdsecFiles, options.SuricataFiles, options.FalcoFiles];
 
     private IReadOnlySet<string>? _local;
 
@@ -102,7 +105,8 @@ public sealed class FileLogSource(LogFileOptions options, ILogger<FileLogSource>
             Lines(options.FirewallFiles, since),
             Lines(options.WebAccessFiles, since),
             Lines(options.CrowdsecFiles, since),
-            Lines(options.SuricataFiles, since));
+            Lines(options.SuricataFiles, since),
+            Lines(options.FalcoFiles, since));
         var events = LogLines.Parse(logs, _zone, now, Local)
             .Where(e => e.Time >= since && e.Time <= now)
             .ToList();

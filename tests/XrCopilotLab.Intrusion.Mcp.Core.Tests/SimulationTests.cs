@@ -49,8 +49,12 @@ public class SimulationTests
         // Ordinary web traffic is in the log but is not an event.
         Assert.True(day.WebAccessLines.Count > events.Count(e => e.Origin == LogOrigin.WebAccess));
         Assert.Contains(events, e => e.Origin == LogOrigin.WebAccess);
+        // Falco's lines are all events; only those of an SSH session carry an address (SSH_CLIENT).
+        Assert.Equal(day.FalcoLines.Count, events.Count(e => e.Origin == LogOrigin.Falco));
+        Assert.All(events.Where(e => e.Origin == LogOrigin.Falco && e.HasAddress), e => Assert.Equal("ssh-session", e.LinkedBy));
+        Assert.Contains(events, e => e.Origin == LogOrigin.Falco && !e.HasAddress);
         Assert.NotEmpty(events);
-        Assert.All(events, e => Assert.True(IpScope.IsDocumentation(e.SourceIp), $"{e.SourceIp} is not a documentation address"));
+        Assert.All(events.Where(e => e.HasAddress), e => Assert.True(IpScope.IsDocumentation(e.SourceIp), $"{e.SourceIp} is not a documentation address"));
     }
 
     [Fact]
@@ -135,6 +139,37 @@ public class SimulationTests
         var login = q.IpDetail(Now, period, SyntheticHost.IncidentIp).Timeline.Single(t => t.Kind == nameof(LogEventKind.AcceptedLogin)).Time;
         Assert.All(controller.Timeline, t => Assert.True(t.Time > login && t.Outbound));
         Assert.Contains(q.Summary(Now, period, 10).ByAttackType, t => t.Type == nameof(AttackType.CommandAndControl));
+    }
+
+    [Fact]
+    public void What_the_intruder_did_once_in_is_tied_to_the_address_that_got_in()
+    {
+        var q = Queries();
+        var period = q.Resolve(Now, 24, null, null);
+        var intruder = q.IpDetail(Now, period, SyntheticHost.IncidentIp);
+
+        var activity = intruder.Report!.HostActivity;
+        Assert.Equal(["Clear Log Activities", "Execution from /dev/shm", "Read sensitive file untrusted", "Search Private Keys or Passwords",
+            "XRC Crypto miner started", "XRC SSH authorized keys changed"], activity.Select(a => a.Rule).Order(StringComparer.Ordinal));
+        Assert.All(activity, a => Assert.Equal("ssh-session", a.LinkedBy));
+        foreach (var type in new[] { AttackType.SensitiveFileAccess, AttackType.Persistence, AttackType.SuspiciousExecution, AttackType.CryptoMining, AttackType.LogTampering })
+            Assert.Contains(type.ToString(), intruder.Report.AttackTypes);
+
+        var login = intruder.Timeline.Single(t => t.Kind == nameof(LogEventKind.AcceptedLogin)).Time;
+        Assert.All(intruder.Timeline.Where(t => t.Kind == nameof(LogEventKind.HostAlert)), t => Assert.True(t.Time > login && t.LinkedBy == "ssh-session"));
+    }
+
+    [Fact]
+    public void The_inventory_agent_stays_the_hosts_and_is_not_an_attacker()
+    {
+        var q = Queries();
+        var host = q.HostActivity(Now, q.Resolve(Now, 24, null, null), null, unlinkedOnly: true);
+
+        var agent = Assert.Single(host.Timeline, a => a.Command!.Contains("/opt/inventory/agent.py", StringComparison.Ordinal));
+        Assert.Null(agent.Ip);
+        Assert.Equal(nameof(Severity.High), agent.Severity);
+        Assert.True(host.Unlinked >= 1);
+        Assert.True(q.Summary(Now, q.Resolve(Now, 24, null, null), 10).Totals.HostAlerts >= 7);
     }
 
     [Fact]

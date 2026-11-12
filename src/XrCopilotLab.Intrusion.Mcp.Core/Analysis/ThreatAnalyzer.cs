@@ -83,7 +83,8 @@ public sealed class ThreatAnalyzer(IntrusionPolicy policy, IGeoLocator geo)
         var authAvailable = period.Any(e => e.Origin == LogOrigin.Auth);
 
         var reports = new List<IpReport>();
-        foreach (var byIp in period.GroupBy(e => e.SourceIp))
+        // A host alert not tied to any address is the host's: it is in HostAlerts, not in an attacker's row.
+        foreach (var byIp in period.Where(e => e.HasAddress).GroupBy(e => e.SourceIp))
         {
             var ip = byIp.Key;
             var events = byIp.ToList();
@@ -93,6 +94,7 @@ public sealed class ThreatAnalyzer(IntrusionPolicy policy, IGeoLocator geo)
             var blocks = events.Where(e => e.Kind == LogEventKind.FirewallBlock).ToList();
             var alerts = events.Where(e => e.Kind == LogEventKind.CrowdsecAlert).ToList();
             var ids = events.Where(e => e.Kind == LogEventKind.IdsAlert).ToList();
+            var host = events.Where(e => e.Kind == LogEventKind.HostAlert).ToList();
             var jails = events.Where(e => e.Jail is not null).Select(e => e.Jail!).Distinct().Order().ToList();
 
             // One attempt, one count: sshd from auth.log when it is there, web from whichever of fail2ban and nginx saw more.
@@ -115,6 +117,7 @@ public sealed class ThreatAnalyzer(IntrusionPolicy policy, IGeoLocator geo)
             foreach (var r in web) types.Add(WebProbeRules.TypeOf(r.Rule!));
             foreach (var a in alerts) types.Add(AttackCatalog.FromScenario(a.Rule!));
             foreach (var a in ids) types.Add(AttackCatalog.FromIdsAlert(a));
+            foreach (var a in host) types.Add(AttackCatalog.FromHostAlert(a));
 
             var ports = blocks.Where(b => b.TargetPort is not null).GroupBy(b => b.TargetPort!.Value).ToList();
             if (ports.Count >= policy.PortScanMinPorts) types.Add(AttackType.PortScan);
@@ -128,7 +131,7 @@ public sealed class ThreatAnalyzer(IntrusionPolicy policy, IGeoLocator geo)
             if (types.Count == 0 && !suspicious[ip].Any() && (attempts == 0 || logins > 0)) continue;
 
             var bans = events.Count(e => e.Kind == LogEventKind.Ban);
-            var severity = Grade(types, suspicious[ip].ToList(), bans, attempts, alerts.Count, ids);
+            var severity = Grade(types, suspicious[ip].ToList(), bans, attempts, alerts.Count, ids, host);
 
             reports.Add(new IpReport(
                 ip,
@@ -153,6 +156,10 @@ public sealed class ThreatAnalyzer(IntrusionPolicy policy, IGeoLocator geo)
                     .Select(g => new IdsSignature(g.Key, g.First().SignatureId, g.First().Detail, AttackCatalog.FromIdsAlert(g.First()).ToString(),
                         g.Min(a => a.Priority ?? SuricataPriorityLow), g.Count(), g.First().Outbound))
                     .OrderBy(x => x.Priority).ThenByDescending(x => x.Alerts).Take(10).ToList(),
+                host.GroupBy(a => a.Rule!)
+                    .Select(g => new HostActivity(g.Key, AttackCatalog.FromHostAlert(g.First()).ToString(), g.Min(a => a.Priority ?? FalcoParser.MaxPriority),
+                        g.Count(), g.First().User, g.First().Command, g.First().Path, g.First().LinkedBy ?? ""))
+                    .OrderBy(x => x.Priority).ThenByDescending(x => x.Alerts).Take(10).ToList(),
                 events.Min(e => e.Time),
                 events.Max(e => e.Time)));
         }
@@ -163,6 +170,22 @@ public sealed class ThreatAnalyzer(IntrusionPolicy policy, IGeoLocator geo)
             .ThenBy(r => r.Ip, StringComparer.Ordinal)
             .ToList();
     }
+
+    /// <summary>
+    /// How urgent one host alert is on its own: Critical for Falco's critical rules, a miner, cleared logs, or anything
+    /// done below the web server after an exploit; High for the rest of what Falco warns about; Medium for a notice
+    /// nobody can be tied to.
+    /// </summary>
+    public static Severity HostAlertSeverity(LogEvent alert)
+    {
+        var type = AttackCatalog.FromHostAlert(alert);
+        if (alert.Priority == 1 || type is AttackType.CryptoMining or AttackType.LogTampering || alert.LinkedBy == "web-exploit") return Severity.Critical;
+        return alert.Priority <= 2 || alert.HasAddress ? Severity.High : Severity.Medium;
+    }
+
+    public static HostAlert ToHostAlert(LogEvent e) =>
+        new(e.Time, e.Rule!, AttackCatalog.FromHostAlert(e).ToString(), HostAlertSeverity(e).ToString(), e.Priority ?? FalcoParser.MaxPriority,
+            e.User, e.Command, e.Parent, e.Path, e.HasAddress ? e.SourceIp : null, e.LinkedBy, e.Detail);
 
     /// <summary>The closed ports the whole period's traffic went for, industrial ports first.</summary>
     public static IReadOnlyList<PortCount> TargetedPorts(IReadOnlyList<LogEvent> period, int top) =>
@@ -191,9 +214,19 @@ public sealed class ThreatAnalyzer(IntrusionPolicy policy, IGeoLocator geo)
 
     private const int SuricataPriorityLow = 3;
 
-    private Severity Grade(HashSet<AttackType> types, List<SuspiciousLogin> suspicious, int bans, int attempts, int crowdsecAlerts, List<LogEvent> ids)
+    private Severity Grade(HashSet<AttackType> types, List<SuspiciousLogin> suspicious, int bans, int attempts, int crowdsecAlerts, List<LogEvent> ids,
+        List<LogEvent> host)
     {
         if (types.Contains(AttackType.LoginAfterFailures) || types.Contains(AttackType.CommandAndControl)) return Severity.Critical;
+        // What someone did once inside: critical on its own (a miner, cleared logs, a web shell), or from an address that
+        // was attacking too. From an ordinary login (an administrator reading /etc/shadow) it is for a person to check.
+        if (host.Count > 0)
+        {
+            if (host.Any(a => HostAlertSeverity(a) == Severity.Critical) || types.Any(t => !AttackCatalog.IsHostActivity(t) && t != AttackType.Other)
+                || suspicious.Count > 0)
+                return Severity.Critical;
+            return Severity.High;
+        }
         if (types.Contains(AttackType.RepeatOffender) || types.Contains(AttackType.IndustrialProtocolProbe)
             || types.Contains(AttackType.WebExploitAttempt) || types.Contains(AttackType.IndustrialProtocolCommand) || suspicious.Count > 0
             // A high-priority IDS signature on an attack: Suricata saw the exploit itself, not a symptom of it.

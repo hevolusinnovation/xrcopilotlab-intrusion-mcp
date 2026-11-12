@@ -142,7 +142,9 @@ const TYPES = {
   MailLoginBruteForce: "forza bruta posta", PortScan: "scansione porte", IndustrialProtocolProbe: "protocolli industriali",
   RepeatOffender: "recidivo", LoginAfterFailures: "ACCESSO dopo tentativi",
   NetworkExploitAttempt: "exploit di rete", KnownMaliciousSource: "indirizzo in blacklist",
-  IndustrialProtocolCommand: "comandi industriali", CommandAndControl: "SERVER COMPROMESSO (C2)", Other: "altro",
+  IndustrialProtocolCommand: "comandi industriali", CommandAndControl: "SERVER COMPROMESSO (C2)",
+  SensitiveFileAccess: "file riservati letti", SuspiciousExecution: "programma sospetto", Persistence: "porta sul retro (chiave/account)",
+  PrivilegeEscalation: "scalata dei privilegi", LogTampering: "log cancellati", CryptoMining: "MINER di criptovalute", Other: "altro",
 };
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -220,6 +222,13 @@ function drawStats(summary) {
   if (c2) {
     parts.push(`<b>Server compromesso</b>: lab-01 sta chiamando ${esc(c2.ip)} (${esc(c2.location?.city || "")}, ` +
       `${esc(c2.location?.country || "")}), un server di controllo di malware, l'ultima volta alle ${time(c2.lastSeen)}. Lo ha visto Suricata.`);
+  }
+  // What the intruder did once in (Falco), tied to the address that got in.
+  const inside = (summary.hostAlerts || []).filter(a => a.ip);
+  if (inside.length) {
+    const what = [...new Set(inside.map(a => TYPES[a.attackType] || a.attackType))].join(", ");
+    parts.push(`<b>Dentro il server</b>: da ${esc(inside[0].ip)} (utente ${esc(inside[0].user || "")}) Falco ha visto ${esc(what)}, ` +
+      `l'ultima volta alle ${time(inside[0].time)}.`);
   }
   if (s.length) {
     const last = s[s.length - 1];

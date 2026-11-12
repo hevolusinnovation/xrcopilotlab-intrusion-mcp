@@ -29,7 +29,7 @@
 .DEFAULT_GOAL := help
 
 TAG     ?= dev
-VERSION ?= 0.2.0
+VERSION ?= 0.3.0
 RG      ?= rg-xrcopilotlab-ai
 ACR     ?= crhevoluscoi.azurecr.io
 APP     ?= hev-intrusion-mcp

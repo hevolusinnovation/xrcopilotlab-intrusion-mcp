@@ -18,6 +18,17 @@ public sealed record WebProbe(string Rule, string AttackType, int Requests, stri
 /// connection (a compromised host calling its controller). <c>Priority</c>: 1 high, 2 medium.</summary>
 public sealed record IdsSignature(string Signature, int? SignatureId, string? Category, string AttackType, int Priority, int Alerts, bool Outbound);
 
+/// <summary>A Falco rule that matched on the host after this address got in: what it did there, with one example.
+/// <c>LinkedBy</c>: <c>ssh-session</c> (the account it logged in with) or <c>web-exploit</c> (below the web server,
+/// after its exploit).</summary>
+public sealed record HostActivity(string Rule, string AttackType, int Priority, int Alerts, string? User, string? Command, string? File, string LinkedBy);
+
+/// <summary>One Falco alert on the host. <c>Ip</c> is the address it was tied to, or null: then it is the host's alone
+/// (a cron job, an administrator, or an intruder who came in a way the logs do not show). <c>Priority</c>: 1 critical,
+/// 2 warning, 3 notice.</summary>
+public sealed record HostAlert(DateTimeOffset Time, string Rule, string AttackType, string Severity, int Priority, string? User,
+    string? Command, string? Parent, string? File, string? Ip, string? LinkedBy, string? Tags);
+
 /// <summary>Everything one source address did in the period.</summary>
 public sealed record IpReport(
     string Ip,
@@ -35,6 +46,7 @@ public sealed record IpReport(
     IReadOnlyList<WebProbe> WebProbes,
     IReadOnlyList<string> CrowdsecScenarios,
     IReadOnlyList<IdsSignature> IdsSignatures,
+    IReadOnlyList<HostActivity> HostActivity,
     DateTimeOffset FirstSeen,
     DateTimeOffset LastSeen);
 
@@ -74,7 +86,7 @@ public sealed record CountryCount(string? CountryCode, string? Country, int Addr
 
 public sealed record JailStatus(string Jail, string AttackType, int CurrentlyBanned, int BansLast24h, int AttemptsLast24h);
 
-/// <summary>One log the server reads: fail2ban, sshd, ufw, nginx, crowdsec, suricata.</summary>
+/// <summary>One log the server reads: fail2ban, sshd, ufw, nginx, crowdsec, suricata, falco.</summary>
 public sealed record DetectorStatus(string Detector, int EventsLast24h, DateTimeOffset? LatestEvent);
 
 public sealed record StatusResult(
@@ -97,9 +109,10 @@ public sealed record BannedResult(string Host, bool Simulated, DateTimeOffset No
 public sealed record AttemptsResult(string Host, bool Simulated, Period Period, int Addresses, IReadOnlyList<IpReport> Top, string? GeoAttribution);
 
 /// <summary>One event of an address: <c>Port</c> is its source port on SSH, <c>TargetPort</c> the closed port it tried,
-/// <c>Rule</c> the web pattern, CrowdSec scenario or Suricata signature; <c>Outbound</c> a connection the host opened.</summary>
+/// <c>Rule</c> the web pattern, CrowdSec scenario, Suricata signature or Falco rule; <c>Outbound</c> a connection the host
+/// opened; <c>Command</c> the process of a Falco alert, <c>LinkedBy</c> how that alert was tied to this address.</summary>
 public sealed record TimelineEntry(DateTimeOffset Time, string Kind, string Origin, string? Jail, string? User, int? Port, string? Method,
-    int? TargetPort, string? Path, int? Status, string? Rule, string? Detail, bool Outbound = false);
+    int? TargetPort, string? Path, int? Status, string? Rule, string? Detail, bool Outbound = false, string? Command = null, string? LinkedBy = null);
 
 public sealed record IpDetailResult(string Host, bool Simulated, Period Period, IpReport? Report, IReadOnlyList<SuspiciousLogin> SuspiciousLogins,
     int TimelineCount, IReadOnlyList<TimelineEntry> Timeline, string? GeoAttribution);
@@ -107,7 +120,7 @@ public sealed record IpDetailResult(string Host, bool Simulated, Period Period, 
 public sealed record SuspiciousLoginsResult(string Host, bool Simulated, Period Period, int SuccessfulLogins, IReadOnlyList<SuspiciousLogin> Suspicious, string? GeoAttribution);
 
 public sealed record SummaryTotals(int Attempts, int Addresses, int Bans, int CurrentlyBanned, int SuccessfulLogins, int SuspiciousLogins,
-    int FirewallBlocks, int WebAttackRequests, int CrowdsecAlerts, int IdsAlerts);
+    int FirewallBlocks, int WebAttackRequests, int CrowdsecAlerts, int IdsAlerts, int HostAlerts);
 
 public sealed record SummaryResult(
     string Host,
@@ -121,4 +134,9 @@ public sealed record SummaryResult(
     IReadOnlyList<Campaign> Campaigns,
     IReadOnlyList<SuspiciousLogin> SuspiciousLogins,
     IReadOnlyList<MapPoint> MapPoints,
+    IReadOnlyList<HostAlert> HostAlerts,
     string? GeoAttribution);
+
+/// <summary>What Falco saw on the host in the period, newest first, with the address each alert was tied to.</summary>
+public sealed record HostActivityResult(string Host, bool Simulated, Period Period, int Alerts, int Unlinked,
+    IReadOnlyList<AttackTypeCount> ByAttackType, IReadOnlyList<HostAlert> Timeline, string? GeoAttribution);

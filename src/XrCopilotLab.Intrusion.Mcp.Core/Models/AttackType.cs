@@ -48,7 +48,25 @@ public enum AttackType
     /// <summary>The host itself connecting to a malware controller: the strongest sign that it has been compromised.</summary>
     CommandAndControl,
 
-    /// <summary>A fail2ban jail, CrowdSec scenario or Suricata signature this server does not classify.</summary>
+    /// <summary>Sensitive files read on the host: <c>/etc/shadow</c>, private keys, credentials (Falco).</summary>
+    SensitiveFileAccess,
+
+    /// <summary>A program run where it should not be: a shell started by the web server, a binary from <c>/dev/shm</c>, a reverse shell (Falco).</summary>
+    SuspiciousExecution,
+
+    /// <summary>A way back in left on the host: an SSH key added, an account created (Falco).</summary>
+    Persistence,
+
+    /// <summary>An attempt to get more rights: ptrace on another process, a kernel module loaded, a container escape (Falco).</summary>
+    PrivilegeEscalation,
+
+    /// <summary>Logs cleared or bulk data removed: covering tracks (Falco).</summary>
+    LogTampering,
+
+    /// <summary>A crypto-currency miner running on the host (Falco).</summary>
+    CryptoMining,
+
+    /// <summary>A fail2ban jail, CrowdSec scenario, Suricata signature or Falco rule this server does not classify.</summary>
     Other,
 }
 

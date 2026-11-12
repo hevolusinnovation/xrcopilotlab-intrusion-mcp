@@ -1,10 +1,10 @@
-# The security packages ("guardians") the toolkit reads, installed on request: install.sh --with fail2ban,crowdsec,suricata
+# The security packages ("guardians") the toolkit reads, installed on request: install.sh --with fail2ban,crowdsec,suricata,falco
 # Sourced by install.sh, as root. Every function is idempotent: a package already there is configured, not reinstalled,
 # and a configuration this script did not write is left alone. Everything runs in detection mode: nothing here blocks
 # traffic that fail2ban would not already block. UFW is never switched on: a firewall turned on by a script can lock
 # everyone out of SSH.
 
-GUARDIANS_SUPPORTED="fail2ban crowdsec suricata"
+GUARDIANS_SUPPORTED="fail2ban crowdsec suricata falco"
 SERVICE_DROPIN_DIR=/etc/systemd/system/xrcopilotlab-intrusion-mcp.service.d
 
 installed() { dpkg-query -W -f='${Status}' "$1" 2>/dev/null | grep -q "install ok installed"; }
@@ -55,10 +55,7 @@ guardian_suricata() {
   else
     echo "suricata: installing (IDS mode, ET Open rules)"
     . /etc/os-release
-    if [[ "$ID" == "ubuntu" ]]; then
-      apt_install software-properties-common gpg-agent
-      grep -rqs "oisf/suricata-stable" /etc/apt/sources.list.d/ || add-apt-repository -y ppa:oisf/suricata-stable >/dev/null
-    fi
+    if [[ "$ID" == "ubuntu" ]]; then suricata_ppa || return 1; fi
     apt_install suricata
     touch "$SURICATA_MARKER"
   fi
@@ -71,6 +68,27 @@ guardian_suricata() {
     printf '# Written by install.sh --with suricata: read /var/log/suricata.\n[Service]\nSupplementaryGroups=suricata\n' \
       > "$SERVICE_DROPIN_DIR/suricata.conf"
   fi
+}
+
+# The OISF PPA, added by hand: add-apt-repository goes through Launchpad's API, which answers 500 for hours at a time.
+# The keys are fetched by their full fingerprint from Ubuntu's keyserver and checked: InRelease is signed by both.
+SURICATA_PPA_KEYS="121504ADE276E141AD704A75AC10378CF205C960 9F6FC9DDB1324714B78062CBD7F87B2966EB736F"
+suricata_ppa() {
+  # Already there, by this script or by add-apt-repository: a second entry with another key would break apt.
+  grep -rqs "oisf/suricata-stable" /etc/apt/sources.list.d/ && return 0
+  apt_install ca-certificates curl gnupg
+  install -d -m 0755 /etc/apt/keyrings
+  local fp tmp; tmp="$(mktemp -d)"
+  for fp in $SURICATA_PPA_KEYS; do
+    curl -fsSL --retry 3 "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x$fp" -o "$tmp/$fp.asc"
+    gpg --show-keys --with-colons "$tmp/$fp.asc" 2>/dev/null | grep -q "^fpr:::::::::$fp:" \
+      || { echo "suricata: the key from keyserver.ubuntu.com is not $fp" >&2; rm -rf "$tmp"; return 1; }
+  done
+  cat "$tmp"/*.asc | gpg --dearmor > /etc/apt/keyrings/oisf-suricata.gpg
+  rm -rf "$tmp"
+  . /etc/os-release
+  printf 'deb [signed-by=/etc/apt/keyrings/oisf-suricata.gpg] https://ppa.launchpadcontent.net/oisf/suricata-stable/ubuntu %s main\n' "$VERSION_CODENAME" \
+    > /etc/apt/sources.list.d/oisf-suricata-stable.list
 }
 
 suricata_configure() {
@@ -151,6 +169,116 @@ UNIT
 ROTATE
 }
 
+# Falco from its own repository, with the modern eBPF probe (no kernel module, no DKMS, no compiler): it watches what
+# processes do on the host and blocks nothing. As for Suricata, its configuration is written only when this script
+# installed it; a Falco already there is read if it writes JSON to FALCO_LOG.
+FALCO_MARKER=/etc/falco/.xrcopilotlab-managed
+FALCO_LOG=/var/log/falco/events.json
+FALCO_SERVICE=falco-modern-bpf
+
+guardian_falco() {
+  if installed falco; then
+    echo "falco: already installed"
+  else
+    echo "falco: installing from download.falco.org (modern eBPF, detection only)"
+    [[ -r /sys/kernel/btf/vmlinux ]] || echo "falco: this kernel has no BTF (/sys/kernel/btf/vmlinux): the modern eBPF probe needs it (kernel 5.8+)" >&2
+    apt_install ca-certificates curl gnupg
+    install -d -m 0755 /etc/apt/keyrings
+    [[ -f /etc/apt/keyrings/falco.gpg ]] || curl -fsSL https://falco.org/repo/falcosecurity-packages.asc | gpg --dearmor -o /etc/apt/keyrings/falco.gpg
+    printf 'deb [signed-by=/etc/apt/keyrings/falco.gpg] https://download.falco.org/packages/deb stable main\n' > /etc/apt/sources.list.d/falcosecurity.list
+    # The package asks which driver to use and starts it: no question, the modern eBPF probe; started by guardians_start.
+    FALCO_FRONTEND=noninteractive FALCO_DRIVER_CHOICE=modern_ebpf apt_install falco
+    touch "$FALCO_MARKER"
+  fi
+  if [[ -f "$FALCO_MARKER" ]]; then falco_configure; else echo "falco: configuration not written by this script: set json_output and file_output to $FALCO_LOG for the toolkit"; fi
+}
+
+falco_configure() {
+  # One file of our own in config.d: falco.yaml stays the package's, so its upgrades apply cleanly.
+  cat > /etc/falco/config.d/xrcopilotlab.yaml <<'YAML'
+# Written by xrcopilotlab-intrusion-mcp (install.sh --with falco): JSON alerts in a file the toolkit reads.
+json_output: true
+json_include_output_property: true
+json_include_tags_property: true
+# Notice and above: informational rules say nothing about an attack.
+priority: notice
+file_output:
+  enabled: true
+  # Opened at every alert: a rotated file is replaced without signalling Falco.
+  keep_alive: false
+  filename: /var/log/falco/events.json
+append_output:
+  # Where the session came from and who logged in, and the process tree: the toolkit ties an alert to the SSH session
+  # (SSH_CLIENT is the client's address; sudo clears it and sets SUDO_USER) or to the web server it came from.
+  - match:
+      source: syscall
+    extra_fields:
+      - user.loginname
+      - proc.env[SSH_CLIENT]
+      - proc.env[SUDO_USER]
+      - proc.aname[2]
+      - proc.aname[3]
+      - proc.aname[4]
+YAML
+  # Three rules Falco's default set has not got on a host without containers. Self-contained: they use no macro of
+  # the default set, so an upgrade of it cannot break them.
+  cat > /etc/falco/rules.d/xrcopilotlab.yaml <<'YAML'
+# Written by xrcopilotlab-intrusion-mcp (install.sh --with falco).
+- list: xrc_account_binaries
+  items: [useradd, adduser, usermod, chpasswd, gpasswd, newusers]
+
+- list: xrc_miner_binaries
+  items: [xmrig, xmr-stak, minerd, cpuminer, ethminer, nbminer, t-rex, kdevtmpfsi, kinsing]
+
+- rule: XRC SSH authorized keys changed
+  desc: A process wrote an SSH authorized_keys file. A key added there lets its owner back in without a password.
+  condition: >
+    evt.type in (open, openat, openat2) and evt.is_open_write=true and fd.typechar='f' and fd.num>=0
+    and (fd.name endswith "/.ssh/authorized_keys" or fd.name endswith "/.ssh/authorized_keys2")
+  output: SSH authorized_keys written | file=%fd.name user=%user.name login=%user.loginname command=%proc.cmdline parent=%proc.pname
+  priority: WARNING
+  tags: [host, filesystem, mitre_persistence, T1098.004]
+
+- rule: XRC Account created or changed
+  desc: An account was created or changed (useradd, usermod, chpasswd…). Expected from an administrator, not at 3 am.
+  # useradd starts helpers under its own name: the first one only.
+  condition: evt.type in (execve, execveat) and proc.name in (xrc_account_binaries) and not proc.pname in (xrc_account_binaries)
+  output: Account created or changed | user=%user.name login=%user.loginname command=%proc.cmdline parent=%proc.pname
+  priority: WARNING
+  tags: [host, process, mitre_persistence, T1136]
+
+- rule: XRC Crypto miner started
+  desc: A crypto-currency miner started, by its name or by a mining pool address on its command line.
+  condition: >
+    evt.type in (execve, execveat) and not proc.pname in (xrc_miner_binaries)
+    and (proc.name in (xrc_miner_binaries) or proc.cmdline contains "stratum+tcp://" or proc.cmdline contains "stratum+ssl://")
+  output: Crypto miner started | user=%user.name login=%user.loginname command=%proc.cmdline parent=%proc.pname
+  priority: CRITICAL
+  tags: [host, process, mitre_impact, T1496]
+YAML
+  # Falco creates the file 0600: created first, 0640 group adm, for the toolkit; opening it in append keeps the mode.
+  install -d -m 0750 -g adm /var/log/falco
+  [[ -f "$FALCO_LOG" ]] || install -m 0640 -g adm /dev/null "$FALCO_LOG"
+  chgrp adm "$FALCO_LOG" && chmod 0640 "$FALCO_LOG"
+  cat > /etc/logrotate.d/xrcopilotlab-falco <<'ROTATE'
+/var/log/falco/events.json {
+    daily
+    rotate 7
+    compress
+    delaycompress
+    missingok
+    notifempty
+    create 0640 root adm
+}
+ROTATE
+  # Rules that do not load would stop Falco: checked now, not at the next restart.
+  if ! falco -V /etc/falco/rules.d/xrcopilotlab.yaml >/dev/null 2>&1; then
+    echo "falco: the rules do not validate: removed /etc/falco/rules.d/xrcopilotlab.yaml" >&2
+    rm -f /etc/falco/rules.d/xrcopilotlab.yaml
+  fi
+  echo "falco: alerts in $FALCO_LOG (notice and above)"
+}
+
 # The start of whatever was configured; called by install.sh once systemd is up (not with --no-start).
 guardians_start() {
   local g
@@ -161,6 +289,10 @@ guardians_start() {
         systemctl enable --now xrcopilotlab-suricata-update.timer >/dev/null 2>&1 || true
         systemctl enable suricata >/dev/null 2>&1 || true
         systemctl restart suricata ;;
+      falco)
+        systemctl daemon-reload
+        systemctl enable "$FALCO_SERVICE" >/dev/null 2>&1 || true
+        systemctl restart "$FALCO_SERVICE" ;;
       *) ;;
     esac
   done

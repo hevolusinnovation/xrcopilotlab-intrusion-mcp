@@ -8,7 +8,11 @@ unprivileged user in group `adm`, reads only, and never blocks. Its catalogue ha
 
 > **Update, 12 November 2026: Suricata is done** (version 0.2.0): the toolkit reads `eve.json`, `install.sh --with
 > suricata` installs it, and the Docker lab runs it with the ET Open rules. What the real install showed, and this note
-> had not verified, is at the end of the Suricata section. Falco and ModSecurity are next.
+> had not verified, is at the end of the Suricata section.
+>
+> **Update, 12 November 2026: Falco is done** (version 0.3.0): the toolkit reads `/var/log/falco/events.json`, ties
+> each alert to the attacker's address, `install.sh --with falco` installs it, and the lab runs it. What the real
+> install showed is at the end of the Falco section. ModSecurity is next.
 
 **Short answer:** read **Suricata** next (EVE JSON). Add **Falco** (or auditd if we want only Ubuntu packages) for
 "what happened after the login". Then add **ModSecurity + OWASP CRS** on nginx for deeper web attacks. Before any of
@@ -152,6 +156,22 @@ format and new attack types (about 1–2 weeks), L = a new kind of data or a new
 - **Overlap:** none with what we read today.
 - **Effort:** **M**. The JSON is easy. New: events without an IP and with no map point, and a "host compromise"
   section in the answers.
+- **Verified on install (Falco 0.45.2, Ubuntu 24.04, 12 Nov 2026):**
+  - `FALCO_FRONTEND=noninteractive FALCO_DRIVER_CHOICE=modern_ebpf apt-get install falco` is non-interactive and
+    enables `falco-modern-bpf.service`. It also runs on Docker Desktop's kernel (7.0, BTF present).
+  - The file output is created `0600 root`: pre-create it `0640 root:adm`; with `keep_alive: false` Falco reopens it
+    at every alert and keeps the mode, and logrotate's `create 0640 root adm` is enough (no signal).
+  - Memory: about **225 MB RSS**, CPU under 1% on the idle lab.
+  - `user.loginname` is empty on a kernel without audit. `proc.env[SSH_CLIENT]` (the client's exact address) and
+    `proc.env[SUDO_USER]` in `append_output.extra_fields` tie alerts to their SSH session reliably.
+  - The stable rule set (25 rules) is mostly about containers; on a plain host the useful ones are *Read sensitive
+    file untrusted*, *Search Private Keys or Passwords*, *Run shell untrusted*, *Clear Log Activities*, *Execution from
+    /dev/shm*, *PTRACE*, *Linux Kernel Module Injection*. We add three of our own: SSH `authorized_keys` written, account
+    created or changed, crypto miner started.
+  - Falco's default `rule_matching: first`: one event fires one rule, the first loaded. A miner dropped in a container
+    fires the default *Drop and execute new binary in container*, not ours; the toolkit classifies both as
+    `CryptoMining` from the `stratum+tcp://` on the command line.
+  - On a Docker host Falco sees every container (one kernel): their alerts are the server's too.
 
 ### auditd (Linux audit)
 - **Detects:** whatever the rules ask for: commands run (`execve`), changes to `/etc/passwd`, `sudoers`, SSH keys,

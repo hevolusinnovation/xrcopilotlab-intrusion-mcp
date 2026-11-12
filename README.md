@@ -5,8 +5,9 @@ trying to break into that server. The agent can then answer questions like *"Is 
 *"Where do the attacks come from?"*, *"Did anybody actually get in?"*.
 
 It only **reads** and never changes anything. The server already has its own guards (fail2ban, the UFW firewall,
-nginx, CrowdSec): they block the attackers and write what they did in their logs. This program reads those logs,
-understands what kind of attack each line is, finds the city each address comes from, and answers the agent.
+nginx, CrowdSec, Suricata, Falco): they block or watch the attackers and write what they saw in their logs. This
+program reads those logs, understands what kind of attack each line is, finds the city each address comes from, ties
+what an intruder did *inside* the server to the address they came from, and answers the agent.
 
 ![The test console: numbers, map and table of the attacks](docs/images/console.jpg)
 
@@ -16,13 +17,14 @@ attack buttons; on the right the map of the attackers and the table of what the 
 ```mermaid
 flowchart LR
   A[Attackers] -->|try to get in| S[Customer's server]
-  S -->|fail2ban, sshd, UFW,<br/>nginx, CrowdSec logs| T[Intrusion toolkit<br/>reads the logs]
+  S -->|fail2ban, sshd, UFW, nginx,<br/>CrowdSec, Suricata, Falco logs| T[Intrusion toolkit<br/>reads the logs]
   T -->|/api or /mcp<br/>X-API-Key| X[XRCopilotLab agent]
   X -->|answers| P[The person asking]
 ```
 
 ## Contents
 
+- [How it works (architecture)](#how-it-works-architecture)
 - [What it reads: the security packages](#what-it-reads-the-security-packages)
   ([what could come next](#more-guardians-what-could-come-next), [full analysis](docs/security-tools.md))
 - [The test console (Docker lab)](#the-test-console-docker-lab)
@@ -32,6 +34,66 @@ flowchart LR
 - [Tools](#tools), [Attack types](#attack-types), [The simulated host](#the-simulated-host),
   [Authentication](#authentication), [Configuration](#configuration)
 - [Register it in XRCopilotLab](#register-it-in-xrcopilotlab)
+
+---
+
+## How it works (architecture)
+
+```mermaid
+flowchart TB
+  subgraph NET[From the internet]
+    ATK[Attacker]
+  end
+  subgraph HOST[Customer's Linux server]
+    direction TB
+    subgraph DOORS[The doors]
+      SSHD[sshd]
+      NGINX[nginx]
+      FW[UFW firewall]
+    end
+    subgraph GUARDS[The guardians: block or watch]
+      F2B[fail2ban<br/>bans after wrong passwords]
+      CS[CrowdSec<br/>community rules, detection]
+      SUR[Suricata<br/>network IDS, all ports]
+      FAL[Falco<br/>what processes do inside]
+    end
+    LOGS[(Logs<br/>auth.log · fail2ban.log · ufw.log · access.log<br/>crowdsec.log · suricata/eve.json · falco/events.json)]
+    subgraph TK[Intrusion toolkit, read-only, 127.0.0.1:8470]
+      P[Parsers<br/>one per log]
+      L[Linker<br/>Falco alert → the SSH session<br/>or web exploit it came from]
+      AN[Analyzer<br/>attack type · severity · campaigns]
+      GEO[Geolocation<br/>DB-IP Lite, offline]
+      API[REST /api · MCP /mcp<br/>X-API-Key]
+    end
+  end
+  XRC[XRCopilotLab agent]
+
+  ATK --> SSHD & NGINX & FW
+  SSHD & NGINX & FW --> F2B & CS
+  ATK -. traffic .-> SUR
+  SSHD -. session processes .-> FAL
+  SSHD & NGINX & FW & F2B & CS & SUR & FAL --> LOGS
+  LOGS --> P --> L --> AN --> API
+  GEO --> AN
+  API -->|HTTPS through the host's nginx| XRC
+```
+
+In order:
+
+1. **The doors** (SSH, the website, the firewall) write every attempt in their logs.
+2. **The guardians** react or watch: fail2ban bans, CrowdSec spots slow attacks, **Suricata** checks all the network
+   traffic against known attacks, **Falco** watches what programs do inside the server. Each writes its own log.
+3. **The toolkit** reads those logs at every question (it keeps nothing and writes nothing):
+   - a **parser** per log turns each line into an event;
+   - the **linker** ties a Falco alert, which has no address, to the attacker: the address of the SSH session the
+     program was started in (`SSH_CLIENT`), the account that logged in (also through `sudo`), or the address that sent
+     a web exploit just before a shell appeared under nginx;
+   - the **analyzer** groups the events by address, names the attack type and grades the severity;
+   - the **geolocation** puts each address on a city, from a file on the server (no outside service is called).
+4. **XRCopilotLab** asks over HTTPS, with a key, and the agent answers the person in plain words.
+
+Nothing is installed on the server unless asked (`install.sh --with …`), and nothing ever blocks traffic on the
+toolkit's initiative.
 
 ---
 
@@ -48,13 +110,14 @@ write. Each one guards a different door; together they tell the whole story.
 | **nginx** | The web server | `/var/log/nginx/access.log` | What a web attacker asked for: `.env`, WordPress, SQL injection, Log4Shell… |
 | **CrowdSec** | A community "neighbourhood watch": shared rules that spot attacks fail2ban misses, such as a very slow brute force | `/var/log/crowdsec.log` | Its alerts and decisions |
 | **Suricata** | A network "metal detector": checks **all** traffic, on every port, against tens of thousands of known attack signatures (free ET Open rules) | `/var/log/suricata/eve.json` | Exploits against any service, addresses on public blacklists, industrial protocol commands, and above all **the server itself calling a malware controller**: proof that an intrusion went further than a login |
+| **Falco** | A CCTV camera **inside** the server: watches what programs do, through the kernel (eBPF) | `/var/log/falco/events.json` | What an intruder did **after** getting in: read `/etc/shadow` or private keys, added an SSH key or an account, started a crypto miner, cleared the logs, a shell started by the web server. Tied to the address that got in |
 
 A detector the host does not have is simply absent from the answers.
 
 | Mode | Where it runs | What it reads | Use |
 |---|---|---|---|
 | `simulated` | Our Azure Container App `hev-intrusion-mcp` | A synthetic host generated in memory | Demos (ALVEO) |
-| `logs` | The customer's host, next to its detectors | The six logs above | Production |
+| `logs` | The customer's host, next to its detectors | The seven logs above | Production |
 
 Two faces, same key, same answers: **MCP** on `/mcp` (for whoever registers the server in XRCopilotLab by hand) and
 **REST** on `/api` (for a blueprint, which provisions it as a `kind: builder` server with no manual step).
@@ -70,9 +133,9 @@ costs and sources, is in [docs/security-tools.md](docs/security-tools.md). In sh
 | Package | What it is for, in plain words | Verdict |
 |---|---|---|
 | **Suricata** | A network "metal detector": checks **all** traffic against thousands of known attack signatures (free ET Open rules), on every port, and sees a hacked server calling home (malware, C2). Knows Modbus, DNP3, ENIP | **Done in 0.2.0**: read, and installed by `--with suricata` |
-| **Falco** | A CCTV inside the server: notices what happens **after** a break-in (nginx starting a shell, someone reading `/etc/shadow`, writes to `/etc`) | **Priority 2** (M) |
+| **Falco** | A CCTV inside the server: notices what happens **after** a break-in (nginx starting a shell, someone reading `/etc/shadow`, an SSH key added, a miner) | **Done in 0.3.0**: read, tied to the attacker's address, and installed by `--with falco` |
 | auditd | The Linux kernel's own register of who did what; Falco's alternative using only Ubuntu packages | Fallback for Falco (L: hard log format) |
-| **ModSecurity + OWASP CRS** | A web firewall in nginx that reads the **whole** request (also POST bodies), in detection-only mode | **Priority 3** (M) |
+| **ModSecurity + OWASP CRS** | A web firewall in nginx that reads the **whole** request (also POST bodies), in detection-only mode | **Next** (M) |
 | Apache, Postfix/Dovecot, OpenVPN, sshguard, `sudo` lines | More doors many servers have: other web server, mail, VPN, another SSH bouncer, administrator commands | Quick wins, no new software (S) |
 | Zeek + CISA ICSNPP | Deep view of industrial protocols (S7, Modbus, DNP3, BACnet) | Only on a separate sensor in the **plant network**, not on a public server (L) |
 | Wazuh / OSSEC | A complete security platform (SIEM) | Read it only where the customer already has it; never installed by us |
@@ -82,7 +145,7 @@ costs and sources, is in [docs/security-tools.md](docs/security-tools.md). In sh
 | Snort 3, Malcolm, GRASSMARLIN, WireGuard | — | No: rules need a commercial licence / too heavy / archived / writes no log |
 
 **Installing the guardians.** The package reads the guardians the server already has. If some are missing,
-`sudo ./install.sh --with fail2ban,crowdsec,suricata` also installs and configures the ones you name, idempotently and
+`sudo ./install.sh --with fail2ban,crowdsec,suricata,falco` also installs and configures the ones you name, idempotently and
 only when asked (see [Install it](#2-install-it)). UFW is never switched on by the script: a firewall turned on by
 mistake can lock everyone out of SSH.
 
@@ -92,7 +155,7 @@ mistake can lock everyone out of SSH.
 
 To see the toolkit at work without a customer's server, `make up` starts a small lab on your computer, all in Docker:
 
-- **`lab-01`** (container `intrusion-lab-01`), a fake company server (Ubuntu, "Alveo Energia" in Turin) with SSH, a website, fail2ban, a firewall and Suricata,
+- **`lab-01`** (container `intrusion-lab-01`), a fake company server (Ubuntu, "Alveo Energia" in Turin) with SSH, a website, fail2ban, a firewall, Suricata and Falco,
   and **the same toolkit package a customer installs**, installed by the same `install.sh`;
 - **`attacker`** (container `intrusion-lab-attacker`), which attacks `lab-01` when you press a button, and serves the console on
   **http://localhost:8090**;
@@ -116,10 +179,12 @@ toolkit on `lab-01`, exactly as XRCopilotLab would receive it.
 
 Under the numbers, a red box appears when something serious happens:
 
-![The red box: server compromised and suspicious login](docs/images/c2-alert.jpg)
+![The red box: server compromised, what the intruder did inside, suspicious login](docs/images/inside-alert.jpg)
 
 - **Server compromesso**: Suricata saw `lab-01` itself calling a malware controller. The intrusion went further than a
   login: someone left a program that takes orders from outside.
+- **Dentro il server**: Falco saw what the intruder did once in (here: read the passwords file, added an SSH key to
+  come back, started a crypto miner, cleared the login records), and the toolkit tied it to the address that got in.
 - **Accesso sospetto**: someone got in after guessing the password.
 
 ### The attacks
@@ -140,6 +205,7 @@ line by line, the commands the attacker runs (nmap, ssh, curl…) and what happe
 | Forza bruta sull'area riservata | 203.0.113.18 (São Paulo) | Wrong passwords on `/admin/`: banned |
 | Flood di richieste | 203.0.113.15 (Dallas) | Too many requests (429): banned |
 | Campagna distribuita su un account | 192.0.2.11–22 (12 cities) | 12 addresses, 2 tries each on one account: no ban, but a campaign |
+| L'intruso dentro il server | 198.51.100.213 (Chișinău) | Once in, the intruder looks for private keys, reads `/etc/shadow` with `sudo`, adds an SSH key, starts a "miner", empties `wtmp`. **Falco** sees each step; the toolkit ties them to 198.51.100.213: `SensitiveFileAccess`, `Persistence`, `CryptoMining`, `LogTampering`, and the box "Dentro il server" |
 | Backdoor che chiama casa | 203.0.113.66 (Moscow) | The intruder logs in and leaves a backdoor; `lab-01` calls its controller three times. **Suricata** sees it: `CommandAndControl`, critical, and a red box "Server compromesso" in the console |
 | La notte completa | all of them | All the above in sequence, about three minutes: the best demo |
 
@@ -191,11 +257,11 @@ processor (`uname -m` on the server: `x86_64` → x64, `aarch64` → arm64):
 From the command line, and straight to the server:
 
 ```bash
-gh release download v0.2.0 -R hevolusinnovation/xrcopilotlab-intrusion-mcp -p '*linux-x64.tar.gz' -p SHA256SUMS
-scp xrcopilotlab-intrusion-mcp-0.2.0-linux-x64.tar.gz SHA256SUMS admin@<server>:/tmp/
+gh release download v0.3.0 -R hevolusinnovation/xrcopilotlab-intrusion-mcp -p '*linux-x64.tar.gz' -p SHA256SUMS
+scp xrcopilotlab-intrusion-mcp-0.3.0-linux-x64.tar.gz SHA256SUMS admin@<server>:/tmp/
 ```
 
-Or build it from this repository: `make package VERSION=0.2.0` (add `RID=linux-arm64` for ARM); the file lands in
+Or build it from this repository: `make package VERSION=0.3.0` (add `RID=linux-arm64` for ARM); the file lands in
 `out/`.
 
 ### 2. Install it
@@ -205,8 +271,8 @@ On the server (Debian or Ubuntu, with fail2ban already running):
 ```bash
 cd /tmp
 sha256sum -c SHA256SUMS --ignore-missing
-tar -xzf xrcopilotlab-intrusion-mcp-0.2.0-linux-x64.tar.gz
-cd xrcopilotlab-intrusion-mcp-0.2.0-linux-x64
+tar -xzf xrcopilotlab-intrusion-mcp-0.3.0-linux-x64.tar.gz
+cd xrcopilotlab-intrusion-mcp-0.3.0-linux-x64
 sudo ./install.sh
 ```
 
@@ -227,27 +293,32 @@ install and never asks twice:
 | The key | **kept**; `sudo ./install.sh --new-key` replaces it (the old one stops working) |
 | `appsettings.Production.json` | **kept** if you changed it; the new defaults go next to it as `appsettings.Production.json.new` |
 | The DB-IP file in `geo/` | kept |
-| The program and the service | replaced, then the service restarts with the new version (`upgrading 0.1.0 -> 0.2.0`) |
+| The program and the service | replaced, then the service restarts with the new version (`upgrading 0.2.0 -> 0.3.0`) |
 | User, folders, `libicu` | created only if missing |
 
 Options: `--new-key` (replace the key), `--no-start` (install without starting, for images built ahead), and
 `--with` to install the security packages the server does not have yet:
 
 ```bash
-sudo ./install.sh --with fail2ban,crowdsec,suricata   # any of the three, in any order
+sudo ./install.sh --with fail2ban,crowdsec,suricata,falco   # any of them, in any order
 ```
 
 | Package | What `--with` does (and does again, the same way, on every run) |
 |---|---|
 | `fail2ban` | Installs it from the distribution, with the `sshd` jail on |
 | `crowdsec` | Installs it from CrowdSec's own repository (the distribution's is years old), **detection only**: no bouncer, it blocks nothing; makes its log readable by the group `adm` |
-| `suricata` | Installs Suricata 8 from the OISF repository (Ubuntu's 7.0 is out of support) as an **IDS**: it watches, it never drops traffic. Downloads the ET Open rules and updates them every night (timer `xrcopilotlab-suricata-update`); listens on the interface of the default route (`SURICATA_INTERFACE=…` to choose another); puts the server's own addresses in `HOME_NET`, without which most rules never fire on a public server; writes **only alerts** to `eve.json` (the package default logs every connection, DNS query and TLS handshake in the same file); rotates the logs every day for a week; lets the toolkit read them |
+| `suricata` | Installs Suricata 8 from the OISF repository (Ubuntu's 7.0 is out of support) as an **IDS**: it watches, it never drops traffic. Downloads the ET Open rules and updates them every night (timer `xrcopilotlab-suricata-update`); listens on the interface of the default route (`SURICATA_INTERFACE=…` to choose another); puts the server's own addresses in `HOME_NET`, without which most rules never fire on a public server; writes **only alerts** to `eve.json` (the package default logs every connection, DNS query and TLS handshake in the same file); rotates the logs every day for a week; lets the toolkit read them. The OISF repository is added by hand, with its keys checked by fingerprint: `add-apt-repository` depends on Launchpad's API, which can fail for hours |
+| `falco` | Installs Falco from its own repository with the **modern eBPF probe** (no kernel module, no compiler, nothing to rebuild at a kernel upgrade). Writes alerts as JSON to `/var/log/falco/events.json` (readable by the group `adm`, rotated daily for a week), adds to each alert the SSH client address, the `sudo` user and the process tree (so the toolkit can tie it to the attacker), and adds three rules Falco has not got for a plain server: **SSH key added**, **account created or changed**, **crypto miner started**. It watches; it never kills a process |
 
 **Suricata needs memory:** about 1.5 GB with all the ET Open rules (measured in the lab). Install it on servers with
 4 GB or more, or trim the rules first (`/etc/suricata/disable.conf`, then `suricata-update`).
 
-A package that is already there is configured, not reinstalled. Suricata's configuration is changed only if
-`install.sh` installed it: a Suricata the customer already runs is read as it is.
+**Falco needs** a kernel with BTF (`ls /sys/kernel/btf/vmlinux`: Ubuntu 22.04 and later have it) and about 230 MB of
+RAM (measured in the lab).
+
+A package that is already there is configured, not reinstalled. Suricata's and Falco's configuration is changed only
+if `install.sh` installed them: a Suricata or Falco the customer already runs is read as it is (for Falco, turn on
+`json_output` and a `file_output` to `/var/log/falco/events.json`).
 
 ### 3. Where it answers
 
@@ -393,13 +464,14 @@ The period is the last 24 hours by default (`hours`, max 720), or `since`/`until
 |---|---|
 | `intrusion_status` | Active jails, addresses banned now per jail, bans and attempts in the last 24 h, latest event. |
 | `intrusion_banned_ips` | Addresses banned now: jail, attack type, since when, location. Filter by `jail`. |
-| `intrusion_attempts` | One row per source address, most serious first: attempts, bans, accounts tried, attack types, severity, location. Filters: `jail`, `attackType`, `country`, `top`. |
-| `intrusion_ip_detail` | Everything one address did: summary, suspicious logins, timeline (up to 200 events). |
+| `intrusion_attempts` | One row per source address, most serious first: attempts, bans, accounts tried, attack types, severity, location, Suricata signatures, and what Falco saw it do inside (`hostActivity`). Filters: `jail`, `attackType`, `country`, `top`. |
+| `intrusion_ip_detail` | Everything one address did: summary, suspicious logins, timeline (up to 200 events), including the Falco alerts of the session it opened. |
 | `intrusion_suspicious_logins` | Successful SSH logins after repeated failures (Critical) or from an unexpected country (High). |
-| `intrusion_summary` | Totals, by attack type, by country, most targeted closed ports, top attackers, distributed campaigns, suspicious logins, map points (lat/lon/severity) for a map. |
+| `intrusion_summary` | Totals, by attack type, by country, most targeted closed ports, top attackers, distributed campaigns, suspicious logins, map points (lat/lon/severity) for a map, the latest Falco alerts on the host. |
+| `intrusion_host_activity` | What happened **inside** the server (Falco): each alert with its rule, attack type, severity, account, command, file, and the address it was tied to (`ssh-session` or `web-exploit`) or none. Filters: `attackType`, `unlinkedOnly`. |
 
 REST, same parameters as query strings: `GET /api/status`, `/api/banned?jail=`, `/api/attempts?hours=&jail=&attackType=&country=&top=`,
-`/api/ips/{ip}?hours=`, `/api/suspicious-logins?hours=`, `/api/summary?hours=&top=`.
+`/api/ips/{ip}?hours=`, `/api/suspicious-logins?hours=`, `/api/summary?hours=&top=`, `/api/host-activity?hours=&attackType=&unlinkedOnly=`.
 
 ### Attack types
 
@@ -420,20 +492,41 @@ REST, same parameters as query strings: `GET /api/status`, `/api/banned?jail=`, 
 | `KnownMaliciousSource` | Suricata: the address is on a public blacklist (`ET DROP`, `ET CINS`, `ET COMPROMISED`, `ET DSHIELD` signatures) |
 | `IndustrialProtocolCommand` | Suricata: Modbus, DNP3, EtherNet/IP, S7 traffic or `ET SCADA` signatures: someone talking to a plant system, not just knocking |
 | `CommandAndControl` | Suricata: a malware signature on a connection **the server opened**: it is calling a malware controller, it is probably compromised. The address reported is the controller's |
+| `SensitiveFileAccess` | Falco: `/etc/shadow` or other password and key files read by a program that has no reason to (*Read sensitive file untrusted*), a search for private keys (*Search Private Keys or Passwords*) |
+| `SuspiciousExecution` | Falco: a shell started by the web server (*Run shell untrusted*: a web shell or command injection that worked), a program run from `/dev/shm`, a binary run from memory |
+| `Persistence` | Falco: an SSH key written to `authorized_keys`, an account created or changed (rules added by `install.sh --with falco`) |
+| `PrivilegeEscalation` | Falco: `ptrace` on another process, a kernel module loaded, a container escape |
+| `LogTampering` | Falco: logs emptied or deleted (*Clear Log Activities*, *Remove Bulk Data from Disk*): someone covering their tracks |
+| `CryptoMining` | Falco: a miner started (`xmrig` and the like, or a `stratum+tcp://` pool address on the command line) |
 
 Suricata also adds `PortScan` (`ET SCAN …`), `WebExploitAttempt` (`ET WEB_…`, *Web Application Attack*) and
 `RequestFlood` (*Denial of Service*). Only its priority 1 and 2 alerts are read: engine events and information
 signatures (priority 3 and 4) say nothing about an attacker. Every answer lists the Suricata signatures of an address
 (`idsSignatures`: name, id, category, priority, alerts, `outbound`).
 
-Severity: `Critical` (login after failures, the server calling a malware controller), `High` (repeat offender,
+**Falco alerts have no address of their own.** The toolkit ties each one to the attacker, in this order:
+
+| How | When | `linkedBy` |
+|---|---|---|
+| The process's `SSH_CLIENT` | A program started in an SSH session: the client's address is in its environment. Exact | `ssh-session` |
+| The web exploit just before | A program below nginx, php-fpm, Apache… (or run as `www-data`): the address that sent a web exploit in the hour before | `web-exploit` |
+| The account's last login | Below `sudo` (which clears `SSH_CLIENT`) or without it: the last SSH login, in the 12 hours before, of the account that logged in (`user.loginname`, or `SUDO_USER`) | `ssh-session` |
+
+An alert none of these explains (a cron job, a backup agent, an administrator at the console) stays **the host's**: it
+is in `intrusion_host_activity` and in the summary, not in an attacker's row. Falco's informational rules, a terminal
+opened in a container (an administrator's `docker exec`) and what the guardians do themselves (Suricata's capture
+socket) are not read.
+
+Severity: `Critical` (login after failures, the server calling a malware controller, an address that attacked **and**
+then did something Falco reports, a miner, cleared logs, a web shell), `High` (anything else Falco reports for an
+address, such as an ordinary login reading `/etc/shadow`; repeat offender,
 industrial probe or command, web exploit, a priority-1 network exploit, login from an unexpected country), `Medium`
 (any ban, a CrowdSec or Suricata alert, 10+ attempts, campaign, flood, web login brute force, port
 scan), `Low` (the rest). A user who mistypes once and then logs in is not reported, nor are ordinary web visitors or
 a few stray packets on the firewall.
 
 One attempt is counted once: sshd failures from `auth.log` (fail2ban's `Found` only when `auth.log` is missing), web
-requests from whichever of fail2ban and nginx saw more. Firewall blocks, CrowdSec and Suricata alerts are reported apart.
+requests from whichever of fail2ban and nginx saw more. Firewall blocks, CrowdSec, Suricata and Falco alerts are reported apart.
 
 ---
 
@@ -441,7 +534,8 @@ requests from whichever of fail2ban and nginx saw more. Firewall blocks, CrowdSe
 
 `bastion-01`, an SSH and nginx host in Europe/Rome behind UFW, protected by fail2ban with `sshd` (5 tries in 10 min,
 1 h ban), `nginx-http-auth`, `nginx-botsearch`, `nginx-limit-req` and `recidive` (3 bans in a day, 1 week), with
-**CrowdSec in detection mode** (it alerts and decides, but no bouncer enforces) and **Suricata** as an IDS. Each day it
+**CrowdSec in detection mode** (it alerts and decides, but no bouncer enforces), **Suricata** as an IDS and **Falco**
+inside. Each day it
 has:
 
 - SSH brute force from 25-45 addresses, most of them banned; web vulnerability scans; web login brute force; web
@@ -454,11 +548,16 @@ has:
 - **the intrusion**, from `198.51.100.213` (Chișinău): at 00:31 a port scan; from 00:52 one SSH try every 160-230 s on
   `operatore`, slow enough that fail2ban never bans it; around 01:25 CrowdSec raises `ssh-slow-bf`, which nothing
   enforces; around 02:50 a successful password login; 15-25 minutes later the server starts calling a malware
-  controller, `203.0.113.66`, every ten minutes until morning, and Suricata reports each call. The agent sees the
+  controller, `203.0.113.66`, every ten minutes until morning, and Suricata reports each call. In between, **Falco**
+  sees what the intruder does: looks for private keys, reads `/etc/shadow` through `sudo`, adds an SSH key, starts a
+  backdoor and a miner from `/dev/shm`, empties `wtmp`; each step is tied to `198.51.100.213`. The agent sees the
   whole sequence, and could have acted at 00:31 or at 01:25;
 - **Suricata** alerts: about one SSH attacker in three is on a public blacklist (`ET CINS …`), one or two addresses try
   an OpenSSH exploit, and a few engine events (priority 3) that must not be reported. The signature names follow ET
   Open's style, the signature ids are synthetic (9 000 000+);
+- **Falco** also reports, every night at 04:12, an inventory agent run by cron that reads `/etc/shadow` as root: no
+  login explains it, so it stays the host's (to tune, not an attacker); on some days a command injection works and
+  nginx's php-fpm starts a shell, tied to the address that sent it (`web-exploit`);
 - legitimate logins: the nightly `backup` key from the office (03:00), the `deploy` key in working hours, the
   administrator `m.ferri` who mistypes once at 09:xx; ordinary web visitors and a crawler.
 
@@ -493,6 +592,7 @@ configured; `/livez` answers when the process is up. 120 calls per minute per ke
 | `Logs:WebAccessFiles` | `/var/log/nginx/access.log*` | nginx access logs, `combined` format |
 | `Logs:CrowdsecFiles` | `/var/log/crowdsec.log*` | CrowdSec logs |
 | `Logs:SuricataFiles` | `/var/log/suricata/eve.json*` | Suricata EVE logs: only `event_type: alert`, priority 1 and 2 |
+| `Logs:FalcoFiles` | `/var/log/falco/events.json*` | Falco JSON file output: alerts of priority Notice and above |
 | `Logs:LocalAddresses` | the interfaces' addresses | The server's own addresses, to tell an attack coming in from a connection the server opened |
 | `Logs:TimeZone` | system zone | IANA id; fail2ban writes local time |
 | `Logs:MaxDays` | 30 | how far back to read |
@@ -549,21 +649,21 @@ for the lab, the Container App's address for the demo. Below it is `<base>`.
 
 ```
 src/XrCopilotLab.Intrusion.Mcp.Core/     pure logic, no I/O
-  Parsing/      fail2ban, auth.log, ufw.log, nginx access.log, crowdsec.log parsers; web attack patterns
-  Analysis/     attack catalogue, threat analyzer, policy
+  Parsing/      fail2ban, auth.log, ufw.log, nginx access.log, crowdsec.log, Suricata eve.json, Falco parsers; web attack patterns
+  Analysis/     attack catalogue, threat analyzer, Falco alert linker, policy
   Geo/          reserved ranges, range table (DB-IP), locator interface
   Simulation/   synthetic host and its invented geography
   Sources/      log source interface, simulated source
   Queries/      the answers behind the tools
 src/XrCopilotLab.Intrusion.Mcp.Server/   ASP.NET host: MCP tools, REST face, API key, file source, DB-IP loader
 tests/                                   parsers, analyzer, geo, the simulated story
-deploy/linux/                            systemd unit, install script, production settings
+deploy/linux/                            systemd unit, install script, guardians (--with), production settings
 infra/                                   Container App of the demo
 ```
 
 ## Out of scope for now
 
 - Writing actions (ban, unban, whitelist): possible later, always with a person's confirmation.
-- Falco, ModSecurity and the other guardians: analysed in [docs/security-tools.md](docs/security-tools.md); Suricata is done.
+- ModSecurity and the other guardians: analysed in [docs/security-tools.md](docs/security-tools.md); Suricata and Falco are done.
 - Windows hosts (Event Log), Apache access logs, nginx in a custom log format.
 - Reputation data (AbuseIPDB, CrowdSec CTI): commercial plans needed.

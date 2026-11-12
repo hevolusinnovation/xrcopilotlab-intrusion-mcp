@@ -38,6 +38,13 @@ public enum LogEventKind
 
     /// <summary>A Suricata signature matched traffic to or from this IP (<c>eve.json</c>, <c>event_type: alert</c>).</summary>
     IdsAlert,
+
+    /// <summary>
+    /// A Falco rule matched something a process did on the host (<c>events.json</c>): a sensitive file read, a shell
+    /// from a web server, a log cleared. It has no address of its own: <see cref="LogEvent.SourceIp"/> is empty until
+    /// the event is tied to the address that opened the session (<see cref="LogEvent.LinkedBy"/>).
+    /// </summary>
+    HostAlert,
 }
 
 /// <summary>Which log the event comes from.</summary>
@@ -49,6 +56,7 @@ public enum LogOrigin
     WebAccess,
     Crowdsec,
     Suricata,
+    Falco,
 }
 
 /// <summary>
@@ -56,7 +64,10 @@ public enum LogOrigin
 /// <see cref="TargetPort"/> the port a blocked connection was aimed at. <see cref="Rule"/> is the web attack pattern
 /// or the CrowdSec scenario or the Suricata signature; <see cref="Detail"/> the CrowdSec remedy duration or the
 /// Suricata category. A Suricata alert also carries its <see cref="SignatureId"/>, its <see cref="Priority"/> (1 high,
-/// 2 medium) and whether the host itself opened the connection (<see cref="Outbound"/>).
+/// 2 medium) and whether the host itself opened the connection (<see cref="Outbound"/>). A Falco alert carries the
+/// rule in <see cref="Rule"/>, its tags in <see cref="Detail"/>, the file in <see cref="Path"/>, the process in
+/// <see cref="Command"/> and <see cref="Parent"/>, the account that logged in in <see cref="User"/>, and how it was tied
+/// to an address in <see cref="LinkedBy"/> (<c>ssh-session</c>, <c>web-exploit</c>).
 /// </summary>
 public sealed record LogEvent(
     DateTimeOffset Time,
@@ -75,7 +86,13 @@ public sealed record LogEvent(
     string? Detail = null,
     int? SignatureId = null,
     int? Priority = null,
-    bool Outbound = false)
+    bool Outbound = false,
+    string? Command = null,
+    string? Parent = null,
+    string? LinkedBy = null)
 {
     public bool IsBanStart => Kind is LogEventKind.Ban or LogEventKind.RestoreBan;
+
+    /// <summary>A host event not tied to any address yet.</summary>
+    public bool HasAddress => SourceIp.Length > 0;
 }

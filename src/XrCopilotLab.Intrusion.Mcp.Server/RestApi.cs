@@ -43,6 +43,13 @@ public static class RestApi
             var now = clock.GetUtcNow();
             return q.Summary(now, q.Resolve(now, hours, since, until, slotMinutes), top ?? 10);
         });
+
+        api.MapGet("/host-activity", (IntrusionQueries q, TimeProvider clock, int? hours, DateTimeOffset? since, DateTimeOffset? until, int? slotMinutes,
+            string? attackType, bool? unlinkedOnly) =>
+        {
+            var now = clock.GetUtcNow();
+            return q.HostActivity(now, q.Resolve(now, hours, since, until, slotMinutes), Blank(attackType), unlinkedOnly ?? false);
+        });
     }
 
     // A builder tool sends an empty value for an argument the model left out: treat it as no filter.

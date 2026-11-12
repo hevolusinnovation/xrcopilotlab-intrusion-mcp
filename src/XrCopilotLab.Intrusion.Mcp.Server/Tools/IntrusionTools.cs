@@ -5,7 +5,7 @@ using XrCopilotLab.Intrusion.Mcp.Core.Queries;
 namespace XrCopilotLab.Intrusion.Mcp.Server.Tools;
 
 /// <summary>
-/// The tools the agent sees. All read-only: they read the host's fail2ban, sshd, UFW, nginx, CrowdSec and Suricata logs (or the
+/// The tools the agent sees. All read-only: they read the host's fail2ban, sshd, UFW, nginx, CrowdSec, Suricata and Falco logs (or the
 /// simulated host) and never ban, unban or change anything. Every answer says whether the data is simulated.
 /// </summary>
 [McpServerToolType]
@@ -19,7 +19,7 @@ public sealed class IntrusionTools(IntrusionQueries queries, TimeProvider clock)
 
     [McpServerTool(Name = "intrusion_status", ReadOnly = true),
      Description(
-        "State of the protection on the host: which detectors are reporting (fail2ban, sshd, ufw, nginx, crowdsec, suricata), which fail2ban " +
+        "State of the protection on the host: which detectors are reporting (fail2ban, sshd, ufw, nginx, crowdsec, suricata, falco), which fail2ban " +
         "jails are active and how many addresses each one is banning now, events in the last 24 hours. Call it first to know what the host watches.")]
     public StatusResult Status() => queries.Status(clock.GetUtcNow());
 
@@ -34,7 +34,7 @@ public sealed class IntrusionTools(IntrusionQueries queries, TimeProvider clock)
     [McpServerTool(Name = "intrusion_attempts", ReadOnly = true),
      Description(
         "Intrusion attempts in a period, one row per source address, most serious first: attempts, bans, accounts tried, " +
-        "attack types, severity (Low, Medium, High, Critical), location, closed ports probed, web attack patterns, CrowdSec scenarios, Suricata signatures (outbound = the host itself connected: possible compromise). " +
+        "attack types, severity (Low, Medium, High, Critical), location, closed ports probed, web attack patterns, CrowdSec scenarios, Suricata signatures (outbound = the host itself connected: possible compromise), host activity (what Falco saw it do once inside). " +
         "Filter by jail, attack type or country.")]
     public AttemptsResult Attempts(
         [Description(PeriodHelp)] int? hours = null,
@@ -42,7 +42,7 @@ public sealed class IntrusionTools(IntrusionQueries queries, TimeProvider clock)
         [Description("End of the period (ISO 8601). Null = now.")] DateTimeOffset? until = null,
         [Description(SlotHelp)] int? slotMinutes = null,
         [Description("Only addresses seen by this fail2ban jail. Null = all.")] string? jail = null,
-        [Description("Only this attack type: SshBruteForce, DistributedSshBruteForce, WebLoginBruteForce, WebVulnerabilityScan, WebExploitAttempt, RequestFlood, MailLoginBruteForce, PortScan, IndustrialProtocolProbe, RepeatOffender, LoginAfterFailures. Null = all.")] string? attackType = null,
+        [Description("Only this attack type: SshBruteForce, DistributedSshBruteForce, WebLoginBruteForce, WebVulnerabilityScan, WebExploitAttempt, RequestFlood, MailLoginBruteForce, PortScan, IndustrialProtocolProbe, RepeatOffender, LoginAfterFailures, NetworkExploitAttempt, KnownMaliciousSource, IndustrialProtocolCommand, CommandAndControl, SensitiveFileAccess, SuspiciousExecution, Persistence, PrivilegeEscalation, LogTampering, CryptoMining. Null = all.")] string? attackType = null,
         [Description("Only addresses in this country (ISO code, e.g. CN). Null = all.")] string? country = null,
         [Description("Max rows. Default 20, max 100.")] int top = 20)
     {
@@ -53,7 +53,7 @@ public sealed class IntrusionTools(IntrusionQueries queries, TimeProvider clock)
     [McpServerTool(Name = "intrusion_ip_detail", ReadOnly = true),
      Description(
         "Everything one address did in the period: the summary row, any suspicious login, and the timeline of its events " +
-        "(failed and successful logins, fail2ban matches and bans, blocked connections, web attacks, CrowdSec alerts, Suricata alerts), newest first, up to 200.")]
+        "(failed and successful logins, fail2ban matches and bans, blocked connections, web attacks, CrowdSec alerts, Suricata alerts, and the Falco alerts of the session it opened), newest first, up to 200.")]
     public IpDetailResult IpDetail(
         [Description("The source address (IPv4 or IPv6).")] string ip,
         [Description(PeriodHelp)] int? hours = null,
@@ -81,8 +81,8 @@ public sealed class IntrusionTools(IntrusionQueries queries, TimeProvider clock)
     [McpServerTool(Name = "intrusion_summary", ReadOnly = true),
      Description(
         "The picture of a period in one call: totals, attempts by attack type and by country, the most targeted closed ports, the top attackers, distributed " +
-        "campaigns (one account tried from many addresses, each under the ban threshold), suspicious logins, and map points " +
-        "(latitude, longitude, severity) ready for a map. Use it for a report or a dashboard.")]
+        "campaigns (one account tried from many addresses, each under the ban threshold), suspicious logins, map points " +
+        "(latitude, longitude, severity) ready for a map, and the latest Falco alerts on the host. Use it for a report or a dashboard.")]
     public SummaryResult Summary(
         [Description(PeriodHelp)] int? hours = null,
         [Description("Start of the period (ISO 8601). Null = now minus hours.")] DateTimeOffset? since = null,
@@ -92,5 +92,23 @@ public sealed class IntrusionTools(IntrusionQueries queries, TimeProvider clock)
     {
         var now = clock.GetUtcNow();
         return queries.Summary(now, queries.Resolve(now, hours, since, until, slotMinutes), top);
+    }
+
+    [McpServerTool(Name = "intrusion_host_activity", ReadOnly = true),
+     Description(
+        "What happened inside the host, as Falco saw it: sensitive files read (/etc/shadow, keys), shells started by the web server, " +
+        "SSH keys or accounts added, logs cleared, crypto miners. Each alert is tied, when possible, to the address that opened the SSH " +
+        "session (ssh-session) or sent the web exploit (web-exploit) just before; unlinked ones are the host's alone and worth a look. " +
+        "Empty if Falco is not installed (install.sh --with falco).")]
+    public HostActivityResult HostActivity(
+        [Description(PeriodHelp)] int? hours = null,
+        [Description("Start of the period (ISO 8601). Null = now minus hours.")] DateTimeOffset? since = null,
+        [Description("End of the period (ISO 8601). Null = now.")] DateTimeOffset? until = null,
+        [Description(SlotHelp)] int? slotMinutes = null,
+        [Description("Only this type: SensitiveFileAccess, SuspiciousExecution, Persistence, PrivilegeEscalation, LogTampering, CryptoMining. Null = all.")] string? attackType = null,
+        [Description("Only the alerts not tied to any address.")] bool unlinkedOnly = false)
+    {
+        var now = clock.GetUtcNow();
+        return queries.HostActivity(now, queries.Resolve(now, hours, since, until, slotMinutes), attackType, unlinkedOnly);
     }
 }

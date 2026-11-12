@@ -105,6 +105,36 @@ public static class AttackCatalog
         return AttackType.Other;
     }
 
+    private static readonly string[] MinerNames = ["xmrig", "xmr-stak", "minerd", "cpuminer", "ethminer", "nbminer", "t-rex", "kdevtmpfsi", "kinsing"];
+
+    /// <summary>
+    /// The attack type of a Falco alert, from its rule name and its MITRE ATT&amp;CK tags (<c>mitre_credential_access</c>…).
+    /// The rules of Falco's default set and the three of <c>install.sh --with falco</c> each land on one type.
+    /// </summary>
+    public static AttackType FromHostAlert(LogEvent alert)
+    {
+        var rule = (alert.Rule ?? "").ToLowerInvariant();
+        var tags = (alert.Detail ?? "").ToLowerInvariant();
+        var command = (alert.Command ?? "").ToLowerInvariant();
+        bool Rule(params string[] words) => words.Any(w => rule.Contains(w, StringComparison.Ordinal));
+        bool Tag(string tag) => tags.Split(',').Contains(tag, StringComparer.Ordinal);
+
+        if (Rule("miner", "mining") || command.Contains("stratum+", StringComparison.Ordinal)
+            || MinerNames.Any(m => command.StartsWith(m, StringComparison.Ordinal) || command.Contains("/" + m, StringComparison.Ordinal)))
+            return AttackType.CryptoMining;
+        if (Rule("clear log", "log files", "remove bulk data")) return AttackType.LogTampering;
+        if (Tag("mitre_credential_access") || Rule("sensitive file", "private keys", "credentials", "shadow")) return AttackType.SensitiveFileAccess;
+        if (Tag("mitre_persistence") || Rule("authorized keys", "authorized_keys", "account")) return AttackType.Persistence;
+        if (Tag("mitre_privilege_escalation") || Rule("ptrace", "kernel module", "escape", "release_agent", "debugfs"))
+            return AttackType.PrivilegeEscalation;
+        return AttackType.SuspiciousExecution;
+    }
+
+    /// <summary>The types a host alert can have: what someone did once inside, not an attempt to get in.</summary>
+    public static bool IsHostActivity(AttackType type) =>
+        type is AttackType.SensitiveFileAccess or AttackType.SuspiciousExecution or AttackType.Persistence
+            or AttackType.PrivilegeEscalation or AttackType.LogTampering or AttackType.CryptoMining;
+
     /// <summary>Whether the jail's <c>Found</c> lines are attempts against a service (the recidive jail counts bans, not attempts).</summary>
     public static bool CountsAttempts(string jail) => !string.Equals(jail, RecidiveJail, StringComparison.OrdinalIgnoreCase);
 
@@ -129,6 +159,12 @@ public static class AttackCatalog
         AttackType.KnownMaliciousSource => "An address on a public list of known attackers (Suricata reputation signatures).",
         AttackType.IndustrialProtocolCommand => "Industrial protocol commands on the network (Modbus, DNP3, EtherNet/IP, S7): someone talking to a plant system.",
         AttackType.CommandAndControl => "The host itself connecting to a malware controller: it is probably compromised.",
+        AttackType.SensitiveFileAccess => "Sensitive files read on the host: /etc/shadow, private keys, credentials (Falco).",
+        AttackType.SuspiciousExecution => "A program run where it should not be: a shell started by the web server, a binary from /dev/shm, a reverse shell (Falco).",
+        AttackType.Persistence => "A way back in left on the host: an SSH key added, an account created (Falco).",
+        AttackType.PrivilegeEscalation => "An attempt to get more rights on the host: ptrace, a kernel module, a container escape (Falco).",
+        AttackType.LogTampering => "Logs cleared or data removed on the host: someone covering their tracks (Falco).",
+        AttackType.CryptoMining => "A crypto-currency miner running on the host (Falco).",
         _ => "A detector rule this server does not classify.",
     };
 }

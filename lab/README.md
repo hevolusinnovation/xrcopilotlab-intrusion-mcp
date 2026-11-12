@@ -23,7 +23,7 @@ The `make` commands use the service names (`make lab-shell SVC=attacker`); plain
 
 | Service (container) | What | Notes |
 |---|---|---|
-| `lab-01` (`intrusion-lab-01`) | Ubuntu 24.04 with systemd: sshd (password login, user `operatore`), nginx (site, `/admin/` with basic auth, the package's API under `/intrusion-mcp/`), fail2ban (`sshd`, `nginx-http-auth`, `nginx-botsearch`, `nginx-limit-req`, `recidive`, times shortened), a UFW-like firewall, **Suricata 8** with the ET Open rules (installed by the package's own `install.sh --with suricata` at build, the only moment lab-01 reaches the internet; it listens on all four interfaces with `--pcap=any -k none`), the package (`xrcopilotlab-intrusion-mcp.service`, logs mode) | privileged: systemd as PID 1, iptables. A lab container, never a pattern for production |
+| `lab-01` (`intrusion-lab-01`) | Ubuntu 24.04 with systemd: sshd (password login, user `operatore`, in the `sudo` group), nginx (site, `/admin/` with basic auth, the package's API under `/intrusion-mcp/`), fail2ban (`sshd`, `nginx-http-auth`, `nginx-botsearch`, `nginx-limit-req`, `recidive`, times shortened), a UFW-like firewall, **Suricata 8** with the ET Open rules (installed by the package's own `install.sh --with suricata` at build, the only moment lab-01 reaches the internet; it listens on all four interfaces with `--pcap=any -k none`), **Falco 0.45** with the modern eBPF probe (same `install.sh --with falco`; two container-only rules are turned off in `/etc/falco/rules.d/lab.yaml`, since lab-01 is itself a container), the package (`xrcopilotlab-intrusion-mcp.service`, logs mode) | privileged: systemd as PID 1, iptables. A lab container, never a pattern for production |
 | `attacker` (`intrusion-lab-attacker`) | nmap, ssh, Python: fixed scenarios against `lab-01` only, and the console | its lab networks are `internal`: no attack reaches the internet |
 | `tunnel` (`intrusion-lab-tunnel`) | Dev Tunnels CLI, socat, a small controller driven by the console | the only container that goes out to the internet, for the tunnel |
 
@@ -67,9 +67,16 @@ address goes to DB-IP. So the map has cities, and no real address is ever involv
 | Forza bruta area riservata | 203.0.113.18 (São Paulo) | WebLoginBruteForce, banned by `nginx-http-auth` |
 | Flood | 203.0.113.15 (Dallas) | RequestFlood, banned by `nginx-limit-req` |
 | Campagna distribuita | 192.0.2.11–22 (12 cities) | DistributedSshBruteForce on `scada`, no ban |
+| L'intruso dentro il server | 198.51.100.213 (Chișinău) | Falco: Search Private Keys, Read sensitive file untrusted (`sudo cat /etc/shadow`), XRC SSH authorized keys changed, a "miner" (`xmrig` with a `stratum+tcp://` pool), Clear Log Activities (`wtmp`). All tied to 198.51.100.213 (`ssh-session`): SensitiveFileAccess, Persistence, CryptoMining, LogTampering, Critical |
 | Backdoor che chiama casa | 203.0.113.66 (Moscow) | lab-01 calls the attacker's controller: CommandAndControl, Critical (Suricata: the lab's own rule and ET Open's `ET MALWARE Generic Request to gate.php Dotted-Quad`) |
 
-All verified on 2026-11-11 with `make lab-up`, one scenario after the other; the backdoor and Suricata on 2026-11-12.
+All verified on 2026-11-11 with `make lab-up`, one scenario after the other; the backdoor and Suricata on 2026-11-12;
+the intruder inside and Falco on 2026-11-12 (full night: five Falco alerts, all tied to 198.51.100.213, none left
+without an address).
+
+**Falco sees every container on the Docker machine**, not only lab-01: Docker Desktop runs them all on one kernel. The
+attacker's commands go on `ssh`'s standard input for this reason; on its command line they would have shown up as a
+miner started in the attacker's container.
 
 What Suricata adds to the other scenarios, with the real ET Open rules (2026-11-12): `ET SCAN Suspicious inbound to
 mySQL/MSSQL/Oracle/PostgreSQL port` on the port scans, `ET WEB_SERVER SELECT USER SQL Injection Attempt in URI` and
@@ -89,6 +96,17 @@ Modbus or S7 conversation ever starts (see [docs/security-tools.md](../docs/secu
 - The service's hardening (`RestrictAddressFamilies`) blocked netlink, so the toolkit could not list its own
   addresses and took the server's call to the malware controller for an attack *from* the server's address. Netlink
   is now allowed.
+- Falco creates its file output `0600 root`: `--with falco` creates `/var/log/falco/events.json` first, `0640` group
+  `adm`, and logrotate recreates it the same way. Falco opens it at every alert (`keep_alive: false`), so a rotation
+  needs no signal.
+- Falco's `user.loginname` is empty when the kernel has no audit (Docker Desktop's, some cloud kernels): an alert could
+  not be tied to its SSH session. `--with falco` now appends `SSH_CLIENT` (the client's exact address) and `SUDO_USER`
+  (who ran `sudo`) to every alert.
+- A rule of ours fired seven times for one `useradd`, which starts helpers under its own name: the rules now skip a
+  process whose parent has the same name.
+- Launchpad's API failed for over an hour (`GPGKeyTemporarilyNotFoundError`) and `add-apt-repository` with it, so
+  `--with suricata` could not install. The OISF repository is now added by hand, with its two signing keys fetched by
+  fingerprint from keyserver.ubuntu.com and checked.
 - With the default settings every log was read twice (the configuration list is appended to the defaults), so every
   attempt was counted twice: the file list is now de-duplicated.
 
