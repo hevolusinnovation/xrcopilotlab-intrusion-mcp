@@ -18,6 +18,8 @@ Environment=DOTNET_gcServer=0
 EnvironmentFile=/etc/xrcopilotlab-intrusion-mcp/env
 # The monitoring page's own key (ApiKeys__Keys__0__*): written by install.sh, absent with --no-dashboard.
 EnvironmentFile=-/etc/xrcopilotlab-intrusion-mcp/dashboard.env
+# The site's name, place on the map and public address (SITE_*, PUBLIC_URL at install): optional.
+EnvironmentFile=-/etc/xrcopilotlab-intrusion-mcp/site.env
 Restart=on-failure
 RestartSec=5
 

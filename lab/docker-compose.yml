@@ -27,6 +27,10 @@ services:
       LAB_API_KEY: ${LAB_API_KEY:?run make lab-up, which creates lab/.env}
       # Set: the package says https://<domain> is XRCopilotLab's address (Connection:PublicUrl).
       PUBLIC_DOMAIN: ${PUBLIC_DOMAIN:-}
+      # The site on the monitoring page (lab/.env): its name and its place on the map. Empty: the host name only.
+      SITE_NAME: ${SITE_NAME:-}
+      SITE_LATITUDE: ${SITE_LATITUDE:-}
+      SITE_LONGITUDE: ${SITE_LONGITUDE:-}
     networks:
       it:       { ipv4_address: 198.51.100.20 }
       internet: { ipv4_address: 203.0.113.250 }

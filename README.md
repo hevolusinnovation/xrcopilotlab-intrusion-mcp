@@ -10,10 +10,11 @@ program reads those logs, understands what kind of attack each line is, finds th
 what an intruder did *inside* the server to the address they came from, and answers the agent. It also comes with a
 read-only **monitoring page** and, for the agent, the server's security **configuration and a list of what to fix**.
 
-![The test console: numbers, map and table of the attacks](docs/images/console.jpg)
+![The monitoring page: numbers, map and table of the attacks](docs/images/monitoring.jpg)
 
-*The test console of the Docker lab (`make lab-up`): on the left the numbers, the XRCopilotLab connection and the
-attack buttons; on the right the map of the attackers and the table of what the toolkit saw.*
+*The monitoring page (here on the Docker lab's server, after `make lab-up` and a round of attacks): on the left the
+numbers, what went wrong, how XRCopilotLab reaches the server and the guardians; on the right the map of the attackers
+and the table of what the toolkit saw. Addresses in this picture are examples.*
 
 ```mermaid
 flowchart LR
@@ -178,6 +179,8 @@ To see the toolkit at work without a customer's server, `make up` starts a small
 - **`tunnel`** (container `intrusion-lab-tunnel`), which gives `lab-01` a public HTTPS address, so XRCopilotLab can call it (see
   [below](#a-public-test-address-for-xrcopilotlab-dynamic-url)).
 
+![The attack console: XRCopilotLab connection, server to test, attack buttons and what the attacker is doing](docs/images/console.jpg)
+
 The attacks never leave the lab: all addresses are "documentation" addresses (RFC 5737) that no real computer uses,
 and each one gets an invented city so that the map has something to show.
 
@@ -189,13 +192,15 @@ password of its own.
 
 ### The numbers
 
-![The four numbers at the top of the console](docs/images/stats.png)
+![The six numbers at the top of the monitoring page](docs/images/stats.png)
 
 | Number | What it means |
 |---|---|
 | **tentativi** | Attempts in the period: wrong passwords, suspicious web requests, … |
 | **indirizzi** | How many different addresses attacked |
 | **bannati ora** | Addresses blocked right now by fail2ban |
+| **attacchi web visti dal WAF** | Requests ModSecurity (OWASP CRS) recognised as attacks, bodies included |
+| **azioni dentro il server** | What Falco saw happen inside the server (files read, accounts or keys added, miners, logs wiped) |
 | **blocchi firewall** | Connections the firewall refused on closed ports |
 
 Under the numbers, a red box appears when something serious happens:
@@ -317,6 +322,23 @@ install and never asks twice:
 | The program and the service | replaced, then the service restarts with the new version (`upgrading 0.2.0 -> 0.3.0`) |
 | User, folders, `libicu` | created only if missing |
 
+**The server's name, place and public address** (optional) are given the same way, as variables:
+
+```bash
+sudo SITE_NAME="Officina Rossi (Bari)" SITE_LATITUDE=41.117 SITE_LONGITUDE=16.871 \
+     PUBLIC_URL=https://guardiano.cliente.it/intrusion-mcp ./install.sh
+```
+
+| Variable | What it does |
+|---|---|
+| `SITE_NAME` | The name at the top of the monitoring page and on the map; without it, the host name only |
+| `SITE_LATITUDE`, `SITE_LONGITUDE` | The server's place on the map, decimal degrees (both or neither) |
+| `PUBLIC_URL` | The address XRCopilotLab uses, on the customer's domain (`https://…`): the DNS name, nginx with TLS and the firewall must already be in place (see [Where it answers](#3-where-it-answers)) |
+
+They go to `/etc/xrcopilotlab-intrusion-mcp/site.env`, checked first (a wrong value stops the script before the
+file is written). A later run that gives none of them keeps the file; one that gives any of them rewrites it whole, so
+give them all again. Remove the file to forget them.
+
 Options: `--new-key` (replace the key), `--no-start` (install without starting, for images built ahead), and
 `--with` to install the security packages the server does not have yet:
 
@@ -367,8 +389,9 @@ location /intrusion-mcp/ {
 }
 ```
 
-For production, set the customer's own address in `appsettings.Production.json` so the agent (and the monitoring page)
-show it: `"Connection": { "PublicUrl": "https://guardiano.cliente.it/intrusion-mcp" }`. Without it, the agent uses a
+For production, give the customer's own address to `install.sh` (`PUBLIC_URL=…`, see [Install it](#2-install-it)) so
+the agent (and the monitoring page) show it; it can also be set in `appsettings.Production.json` as
+`"Connection": { "PublicUrl": "https://guardiano.cliente.it/intrusion-mcp" }`. Without it, the agent uses a
 temporary test tunnel if one is open, and the page says so.
 
 ### 4. Check it
@@ -381,6 +404,8 @@ journalctl -u xrcopilotlab-intrusion-mcp -f                                 # it
 ```
 
 ### 5. The monitoring page
+
+![The monitoring page](docs/images/monitoring.jpg)
 
 `install.sh` also publishes a **read-only monitoring page** (unless you pass `--no-dashboard`): nginx serves it on
 **`https://<server>:8471`**, with a password (user `admin`, a password printed once at install; change it by removing
@@ -407,6 +432,9 @@ can use that name instead of a Dev Tunnel. It is set in **`lab/.env`** (example:
 PUBLIC_DOMAIN=intrusion-lab.example.com   # empty: no domain, the console opens a Dev Tunnel (next section)
 PUBLIC_PAGE_PORT=8443                      # the public port of the monitoring page
 ```
+
+In the same file, `SITE_NAME`, `SITE_LATITUDE` and `SITE_LONGITUDE` set the name and the place the page shows (the
+lab's company, *Alveo Energia (Torino)*, is invented; on a real server the same variables go to `install.sh`).
 
 then `make lab-up` (or `make lab-restart` if it was running). The console then shows **● Dominio** with the addresses
 to copy into XRCopilotLab, and no Dev Tunnel is opened.
@@ -666,8 +694,8 @@ configured; `/livez` answers when the process is up. 120 calls per minute per ke
 | `Logs:SuricataFiles` | `/var/log/suricata/eve.json*` | Suricata EVE logs: only `event_type: alert`, priority 1 and 2 |
 | `Logs:FalcoFiles` | `/var/log/falco/events.json*` | Falco JSON file output: alerts of priority Notice and above |
 | `Logs:ModSecurityFiles` | `/var/log/modsecurity/audit.json*` | ModSecurity JSON audit log: web attacks the CRS would block |
-| `Site:Name` / `Site:Latitude` / `Site:Longitude` | — | The server's place on the monitoring page's map (optional) |
-| `Connection:PublicUrl` | — | The customer's own public address for XRCopilotLab (`https://guardiano.cliente.it/intrusion-mcp`). When set, it is the address; without it a test tunnel gives a temporary one |
+| `Site:Name` / `Site:Latitude` / `Site:Longitude` | — | The server's name and place on the monitoring page's map (optional; `SITE_NAME`, `SITE_LATITUDE`, `SITE_LONGITUDE` at install) |
+| `Connection:PublicUrl` | — | The customer's own public address for XRCopilotLab (`https://guardiano.cliente.it/intrusion-mcp`; `PUBLIC_URL` at install). When set, it is the address; without it a test tunnel gives a temporary one |
 | `Connection:TunnelUrlFile` | `/var/lib/.../tunnel/url` | Where a test tunnel writes its temporary public address |
 | `Logs:LocalAddresses` | the interfaces' addresses | The server's own addresses, to tell an attack coming in from a connection the server opened |
 | `Logs:TimeZone` | system zone | IANA id; fail2ban writes local time |

@@ -21,9 +21,10 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/* \
  && ln -fs /usr/share/zoneinfo/Europe/Rome /etc/localtime
 
-# A container runs only the services the lab needs: no getty, no udev, no timers.
+# A container runs only the services the lab needs: no getty, no udev, no timers. D-Bus stays: without it the toolkit
+# (not root) cannot ask systemd which guardians run, and the page would show them all stopped.
 RUN find /etc/systemd/system /lib/systemd/system -path '*.wants/*' \
-      -not -name '*journald*' -not -name '*systemd-tmpfiles*' -not -name '*systemd-user-sessions*' -delete \
+      -not -name '*journald*' -not -name '*systemd-tmpfiles*' -not -name '*systemd-user-sessions*' -not -name 'dbus.socket' -delete \
  && systemctl mask systemd-udevd.service systemd-udevd-kernel.socket systemd-udevd-control.socket \
       systemd-modules-load.service sys-kernel-config.mount sys-kernel-debug.mount getty.target \
  && systemctl set-default multi-user.target
