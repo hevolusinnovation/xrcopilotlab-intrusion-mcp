@@ -173,8 +173,8 @@ mistake can lock everyone out of SSH.
 To see the toolkit at work without a customer's server, `make up` starts a small lab on your computer, all in Docker:
 
 - **`server`** (container `intrusion-lab-server`, host `lab-01`), a fake company server (Ubuntu, "Alveo Energia" in Turin) with SSH, a website, fail2ban, a firewall, Suricata, Falco and ModSecurity,
-  and **the same toolkit package a customer installs**, installed by the same `install.sh`; its API is also on
-  **http://localhost:8091** (`/api`, `/mcp`, with the `X-API-Key` in `lab/.env`), to try a client from the Mac;
+  and **the same toolkit package a customer installs**, installed by the same `install.sh`. It is reached only through
+  the `tunnel` container (the Dev Tunnel, or the customer's domain): its own networks never leave the lab;
 - **`metasploit`** (container `intrusion-lab-metasploit`), a real attack engine the console drives for three of the attacks;
 - **`attacker`** (container `intrusion-lab-attacker`), which attacks `lab-01` when you press a button, and serves the console on
   **http://localhost:8090**: only the attacks, the tunnel and the server to test;
@@ -187,13 +187,11 @@ The attacks never leave the lab: all addresses are "documentation" addresses (RF
 and each one gets an invented city so that the map has something to show.
 
 What the toolkit sees (the numbers, the red box, the map and the table below) is on `lab-01`'s own **monitoring page**,
-the same a customer gets (see [The monitoring page](#5-the-monitoring-page)), with the Hevolus logo at the top:
-
-- on your computer, **http://localhost:8089** (the server's link in Docker Desktop, or the console's button *Mappa
-  degli attacchi*) opens its **map view**: the map and the list of the attacks received, nothing else. Published on
-  `127.0.0.1` only, so it asks for nothing;
-- from elsewhere, the whole page (numbers, guardians, what to fix) opens **only through the Dev Tunnel**, with your
-  Microsoft account (see [below](#a-public-test-address-for-xrcopilotlab-dynamic-url)). No password of its own.
+the same a customer gets (see [The monitoring page](#5-the-monitoring-page)), with the Hevolus logo at the top. The
+server is not published on a local port: the page opens **through the Dev Tunnel**, with your Microsoft account (the
+console shows its address once the tunnel is online), or on the **customer's domain** when `PUBLIC_DOMAIN` is set (see
+[below](#a-public-test-address-for-xrcopilotlab-dynamic-url)). No password of its own. `…/?view=map` shows the map
+alone, for a wall screen.
 
 ### The numbers
 

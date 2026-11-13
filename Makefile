@@ -42,7 +42,7 @@ SVC     ?= server
 # lab/.env (see lab/.env.example): with PUBLIC_DOMAIN set, the lab publishes its API and page for that domain instead
 # of opening a Dev Tunnel.
 -include lab/.env
-LAB     := SERVER_API_BIND=$(if $(strip $(PUBLIC_DOMAIN)),0.0.0.0,127.0.0.1) docker compose -f lab/docker-compose.yml $(if $(strip $(PUBLIC_DOMAIN)),-f lab/docker-compose.domain.yml) --env-file lab/.env
+LAB     := docker compose -f lab/docker-compose.yml $(if $(strip $(PUBLIC_DOMAIN)),-f lab/docker-compose.domain.yml) --env-file lab/.env
 
 .PHONY: help build test run docker-build docker-push deploy smoke package key up down \
         lab-build lab-up lab-down lab-restart lab-rebuild lab-ps lab-logs lab-shell lab-open lab-reset \
@@ -101,7 +101,7 @@ lab-build: lab/.env
 
 lab-up: lab/.env
 	$(LAB) up -d --build
-	@echo "console: http://localhost:8090 · map: http://localhost:8089 · API: http://localhost:8091/api (X-API-Key) · $(if $(strip $(PUBLIC_DOMAIN)),domain: https://$(PUBLIC_DOMAIN),full page: through the Dev Tunnel (Microsoft login))"
+	@echo "console: http://localhost:8090 · $(if $(strip $(PUBLIC_DOMAIN)),monitoring page: https://$(PUBLIC_DOMAIN),monitoring page: open the Dev Tunnel from the console (Microsoft login))"
 
 # Keeps the Dev Tunnels login and the tunnel id (volume tunnel-login): the public address stays the same.
 lab-down: lab/.env

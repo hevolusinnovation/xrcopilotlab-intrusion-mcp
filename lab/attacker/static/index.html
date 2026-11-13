@@ -56,7 +56,7 @@ input { background: var(--bg); color: var(--text); border: 1px solid var(--line)
 <div class="page">
   <header>
     <h1>Attaccante<small>Strumento di test: lancia attacchi reali contro un server protetto dal toolkit e guarda cosa rileva. Bersaglio: lab-01 · Alveo Energia (azienda sintetica).</small></h1>
-    <a class="btn" href="http://localhost:8089/" target="_blank" rel="noopener" title="La mappa e gli attacchi ricevuti dal server (lab-01)">Mappa degli attacchi ↗</a>
+    <span class="muted" style="font-size:12px;max-width:320px;text-align:right">La mappa e gli attacchi sono sulla pagina di monitoraggio del server, raggiungibile dal Dev Tunnel qui accanto (o dal dominio).</span>
   </header>
 
   <div class="side">
@@ -237,7 +237,7 @@ function addresses(t, pageNote) {
         <div class="field"><code>${esc(t.url)}/mcp</code><button class="btn ghost" onclick="copy('${esc(t.url)}/mcp', this)">Copia</button></div></div>
       <div><div class="label">Intestazione X-API-Key</div>
         <div class="field"><code>••••••••••••••••</code><button class="btn ghost" onclick="copyKey(this)">Copia la chiave</button></div></div>
-      ${t.pageUrl ? `<div><div class="label">Pagina di monitoraggio (mappa e attacchi) · ${esc(pageNote)}</div>
+      ${t.pageUrl ? `<div><div class="label">Pagina di monitoraggio (mappa, attacchi e guardiani) · ${esc(pageNote)}</div>
         <div class="field"><code>${esc(t.pageUrl)}</code><a class="btn ghost" href="${esc(t.pageUrl)}/" target="_blank" rel="noopener">Apri</a></div></div>` : ""}
       <div class="field"><button class="btn" onclick="checkTunnel(this)">Verifica dall'indirizzo pubblico</button><span id="tunnel-check" class="muted" style="font-size:12px"></span></div>`;
 }
