@@ -44,9 +44,24 @@ h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: v
 .finding p { color: var(--muted); font-size: 12px; margin-top: 3px; }
 .finding code { display: block; margin-top: 5px; background: #0b0f13; border: 1px solid var(--line); border-radius: 6px; padding: 4px 6px; font-size: 11px; white-space: pre-wrap; word-break: break-all; }
 .finding details { margin-top: 4px; font-size: 11px; color: var(--muted); }
+.conn-row { margin-top: 8px; }
+.conn-row .lbl { color: var(--muted); font-size: 11px; display: block; margin-bottom: 2px; }
+.conn-row .val { display: flex; gap: 6px; align-items: stretch; }
+.conn-row .val code { flex: 1; min-width: 0; background: #0b0f13; border: 1px solid var(--accent); border-radius: 6px; padding: 5px 7px; font-size: 12px; color: var(--text); overflow-x: auto; white-space: nowrap; }
+.conn-row.key .val code { border-color: var(--line); color: var(--muted); }
+.conn-copy { background: var(--accent); color: #0b0f13; border: 0; border-radius: 6px; padding: 0 9px; font: 600 11px system-ui, sans-serif; cursor: pointer; white-space: nowrap; }
+.conn-row.key .val code { border-color: var(--medium); color: var(--text); }
+.c-state { font-size: 13px; margin-bottom: 2px; }
+.c-state b.on { color: var(--ok); } .c-state b.off { color: var(--muted); } .c-state b.err { color: var(--critical); }
+.btn.ghost { background: transparent; color: var(--text); border: 1px solid var(--line); }
+.btnrow { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+.code-big { font: 600 18px ui-monospace, Menlo, monospace; letter-spacing: .08em; background: #0b0f13; border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; display: inline-block; }
+#connection a { color: var(--accent); }
 .toolbar { display: flex; gap: 8px; align-items: center; color: var(--muted); font-size: 12px; flex-wrap: wrap; }
 select, input { background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 3px 6px; font: inherit; }
-#map { min-height: 0; }
+#map { min-height: 0; background: #0a1017; }
+.city-bg { color: #5b6b7a; font: 10px/1 system-ui, sans-serif; white-space: nowrap; text-shadow: 0 1px 2px #0a1017, 0 0 2px #0a1017; pointer-events: none; }
+.city-atk { font: 600 11px/1 system-ui, sans-serif; white-space: nowrap; text-shadow: 0 1px 2px #000, 0 0 3px #000; pointer-events: none; }
 .table-wrap { overflow: auto; border-top: 1px solid var(--line); background: var(--panel); }
 table { width: 100%; border-collapse: collapse; font-size: 13px; }
 th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
@@ -59,6 +74,8 @@ td.num { font-variant-numeric: tabular-nums; text-align: right; }
 @keyframes pulse { 0% { box-shadow: 0 0 0 0 currentColor; } 100% { box-shadow: 0 0 0 18px transparent; } }
 .target { background: var(--accent); border-radius: 4px; border: 2px solid #fff; }
 .leaflet-popup-content { font: 13px/1.45 system-ui, sans-serif; }
+.city-atk-tt { background: transparent; border: 0; box-shadow: none; padding: 0; }
+.city-atk-tt::before { display: none; }
 .muted { color: var(--muted); }
 .error { color: var(--critical); font-size: 12px; }
 .login { position: fixed; inset: 0; background: rgba(15,20,25,.92); display: none; align-items: center; justify-content: center; z-index: 2000; }
@@ -187,6 +204,8 @@ const FINDINGS = {
   "host-monitor-missing": ["Nessuno guarda cosa succede dentro il server", "Senza Falco, dopo un'intrusione chiavi lette, account aggiunti o un miner passerebbero inosservati (circa 230 MB di RAM)."],
   "firewall-off": ["Il firewall del server è spento", "Consenti prima SSH, poi accendilo (ufw allow OpenSSH; ufw enable). Questo pacchetto non lo accende mai da solo: un errore chiude fuori tutti."],
   "host-alerts-unlinked": ["Attività critica nel server senza un'origine nota", "Guardale una per una: un job di cron che conosci, o un intruso entrato da una strada che i log non mostrano."],
+  "connection-temporary": ["XRCopilotLab usa un indirizzo di test temporaneo", "Va bene per una prova. In produzione pubblica l'API sul dominio del cliente (nginx con TLS) e imposta Connection:PublicUrl."],
+  "connection-tunnel-open": ["Un tunnel di test è ancora aperto accanto al dominio", "Chiudilo: XRCopilotLab deve usare il dominio del cliente, non l'indirizzo temporaneo del tunnel."],
 };
 const PREFIX = {
   "guardian-stopped-": ["è installato ma fermo", "Avvialo e controlla perché si è fermato."],
@@ -218,10 +237,22 @@ $("login-form").addEventListener("submit", (e) => {
   refresh(); refreshGuard();
 });
 
-const map = L.map("map", { worldCopyJump: true }).setView([35, 25], 2);
-L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
-  maxZoom: 18, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
-}).addTo(map);
+const map = L.map("map", { worldCopyJump: true, minZoom: 2, maxZoom: 7 }).setView([35, 25], 2);
+map.attributionControl.setPrefix("");
+// Offline basemap: country outlines bundled with the package (vendor/world.geo.json). No external tiles, so the map
+// works on a server with no internet or blocked egress, and does not depend on OpenStreetMap's tile policy.
+fetch("vendor/world.geo.json").then(r => r.json()).then(geo => {
+  L.geoJSON(geo, { interactive: false, renderer: L.canvas(),
+    style: { fillColor: "#1a232d", fillOpacity: 1, color: "#2e3c49", weight: 0.6 },
+    attribution: "Confini e città © Natural Earth" }).addTo(map);
+}).catch(() => {});
+// Major world cities as faint labels (bundled, offline): the map has names even where there are no attacks.
+const cityLabels = L.layerGroup().addTo(map);
+fetch("vendor/world.cities.json").then(r => r.json()).then(cities => {
+  for (const [name, lat, lon] of cities)
+    L.marker([lat, lon], { interactive: false, keyboard: false,
+      icon: L.divIcon({ className: "", iconSize: [0, 0], html: `<div class="city-bg">· ${name}</div>` }) }).addTo(cityLabels);
+}).catch(() => {});
 const layer = L.layerGroup().addTo(map);
 let target = null, targetMarker = null;
 const seen = new Set();
@@ -249,9 +280,11 @@ function drawMap(summary, bannedIps) {
     seen.add(p.ip);
     const icon = L.divIcon({ className: "", iconSize: [size, size],
       html: `<div class="dot${isNew ? " new" : ""}" style="width:${size}px;height:${size}px;background:${color};color:${color}"></div>` });
-    L.marker([p.latitude, p.longitude], { icon }).addTo(layer).bindPopup(
+    const m = L.marker([p.latitude, p.longitude], { icon }).addTo(layer).bindPopup(
       `<b>${esc(p.ip)}</b><br>${esc(p.city)}, ${esc(p.country)}<br>${esc(types(p.attackTypes))}<br>` +
       `${p.attempts} tentativi · gravità ${esc(SEVERITY[p.severity] || p.severity)}${bannedIps.has(p.ip) ? "<br><b>bannato da fail2ban</b>" : ""}`);
+    if (p.city) m.bindTooltip(`<span class="city-atk" style="color:${color}">${esc(p.city)}</span>`,
+      { permanent: true, direction: "top", offset: [0, -size / 2], className: "city-atk-tt" });
   }
   if (fresh.length) map.flyTo([fresh[0].latitude, fresh[0].longitude], Math.max(map.getZoom(), 3), { duration: 1.2 });
   // The first time there is something to show: the server and its attackers in one view, not the whole world.
@@ -322,23 +355,102 @@ function drawGuardians(g) {
       <b><i class="light ${esc(x.status)}"></i>${esc(GUARDIANS[x.name] || x.name)}</b>
       <span>${esc(STATUS[x.status] || x.status)}${x.mode ? " · " + esc(MODE[x.mode] || x.mode) : ""}${x.version ? " · " + esc(x.version) : ""}</span>
     </div>`).join("");
-  drawConnection(g.connection);
+  lastConn = g.connection;
+  refreshConnection();
 }
 
-const CONN = {
-  domain: ["var(--ok)", "Dominio del cliente", "Indirizzo stabile, sul dominio del cliente: è quello che usa XRCopilotLab."],
-  tunnel: ["var(--medium)", "Indirizzo di test (temporaneo)", "Un tunnel di prova (Dev Tunnels): cambia se il tunnel viene ricreato. Per la produzione pubblica l'API sul dominio del cliente."],
-  local: ["var(--muted)", "Nessun indirizzo pubblico", "XRCopilotLab non può ancora raggiungere questo server: pubblicalo sul dominio del cliente o apri un tunnel di test."],
+function connRow(label, value, cls) {
+  if (!value) return "";
+  return `<div class="conn-row ${cls || ""}"><span class="lbl">${esc(label)}</span>
+    <div class="val"><code title="${esc(value)}">${esc(value)}</code>
+      <button class="conn-copy" onclick='connCopy(${JSON.stringify(value)}, this)'>Copia</button></div></div>`;
+}
+window.connCopy = async (text, btn) => {
+  try { await navigator.clipboard.writeText(text); const o = btn.textContent; btn.textContent = "Copiato"; setTimeout(() => btn.textContent = o, 1500); } catch {}
 };
-function drawConnection(c) {
-  if (!c) { $("connection").innerHTML = `<span class="muted">—</span>`; return; }
-  const [color, title, note] = CONN[c.mode] || CONN.local;
-  const warn = c.mode === "domain" && c.tunnelUrl
-    ? `<p class="error">Attenzione: un tunnel di test è ancora aperto (${esc(c.tunnelUrl)}). Chiudilo: XRCopilotLab deve usare il dominio.</p>` : "";
-  $("connection").innerHTML = `<div style="border-left:4px solid ${color};margin:-8px -10px;padding:8px 10px">
-    <b>${esc(title)}</b>
-    ${c.api ? `<code>${esc(c.api)}</code>` : ""}
-    <p>${esc(note)}</p>${warn}</div>`;
+
+// How XRCopilotLab reaches this server. Two modes:
+//  - Production (a domain is set, connection.mode === "domain"): the stable domain URLs, no key, no Dev Tunnel.
+//  - Test (no domain): the Dev Tunnel, driven here — Microsoft login, then the URLs and the visible test key to paste
+//    into XRCopilotLab and into the attacker. Driven through the lab's tunnel container (/api/tunnel/*); on a real
+//    server, which has no tunnel container, those paths do not answer and only the domain/local view is shown.
+let lastConn = null, tunnelKey = null;
+
+function urls(base, keyRow) {
+  return connRow("Indirizzo del server MCP (XRCopilotLab → MCP)", base + "/mcp")
+    + connRow("Indirizzo API (tool HTTP / blueprint)", base + "/api")
+    + keyRow;
+}
+function domainView(c) {
+  // Production: the stable domain URLs, and NO key — in production the key is secret (set at install), never shown.
+  return `<div style="border-left:4px solid var(--ok);margin:-8px -10px;padding:8px 10px">
+    <div class="c-state"><b class="on">● Dominio del cliente</b> · indirizzo stabile</div>
+    ${urls(c.url, "")}
+    <p class="muted" style="font-size:12px;margin-top:6px">In produzione XRCopilotLab usa questo dominio, con la chiave X-API-Key impostata all'installazione del toolkit (segreta, non mostrata qui).</p></div>`;
+}
+function staticView(c) {
+  if (c && c.mode === "domain") return domainView(c);
+  return `<div style="border-left:4px solid var(--muted);margin:-8px -10px;padding:8px 10px">
+    <b>Nessun indirizzo pubblico</b>
+    <p class="muted" style="font-size:12px;margin-top:4px">Imposta PUBLIC_DOMAIN (produzione) o apri un Dev Tunnel di test.</p></div>`;
+}
+function tunnelView(t) {
+  const user = t.user ? ` · ${esc(t.user)}` : "";
+  if (t.phase === "logged-out") {
+    return `<div class="c-state"><b class="off">Dev Tunnel non collegato</b></div>
+      <p class="muted" style="font-size:12px">Per dare a questo server un indirizzo di test serve un account Microsoft (Entra ID Hevolus, Microsoft o GitHub). Microsoft Dev Tunnels, senza costi.</p>
+      ${t.error ? `<div class="error">${esc(t.error)}</div>` : ""}
+      <div class="btnrow"><button class="btn" onclick="tunnelAction('login')">Accedi con l'account Microsoft</button></div>`;
+  }
+  if (t.phase === "login-pending") {
+    return t.login
+      ? `<div class="c-state"><b class="off">Accesso in corso</b></div>
+         <p style="font-size:12px">Apri <a href="${esc(t.login.url)}" target="_blank" rel="noopener">${esc(t.login.url)}</a> e inserisci il codice:</p>
+         <div><span class="code-big">${esc(t.login.code)}</span> <button class="conn-copy" onclick='connCopy(${JSON.stringify(t.login.code)}, this)'>Copia</button></div>
+         <p class="muted" style="font-size:12px">La pagina si aggiorna da sola a login completato.</p>`
+      : `<div class="c-state"><b class="off">Richiesta del codice…</b></div>`;
+  }
+  if (t.phase === "online") {
+    const keyRow = connRow("Chiave X-API-Key (su ogni chiamata)", tunnelKey || "… (carico la chiave)", "key");
+    return `<div class="c-state"><b class="on">● Dev Tunnel online</b>${user} · indirizzo di test, temporaneo</div>
+      ${urls(t.url, keyRow)}
+      <div class="btnrow"><button class="btn" onclick="tunnelCheck(this)">Verifica dall'indirizzo pubblico</button>
+        <span id="tunnel-check" class="muted" style="font-size:12px;align-self:center"></span></div>
+      <div class="btnrow"><button class="btn ghost" onclick="tunnelAction('restart')">Riavvia</button>
+        <button class="btn ghost" onclick="tunnelAction('logout')">Esci</button></div>`;
+  }
+  if (t.phase === "error") {
+    return `<div class="c-state"><b class="err">Tunnel chiuso</b>${user}</div><div class="error">${esc(t.error || "")}</div>
+      <div class="btnrow"><button class="btn" onclick="tunnelAction('restart')">Riapri il tunnel</button>
+        <button class="btn ghost" onclick="tunnelAction('logout')">Esci</button></div>`;
+  }
+  return `<div class="c-state"><b class="off">Apertura del tunnel…</b>${user}</div>`;
+}
+function renderConnection(c, t) {
+  const box = $("connection");
+  if (c && c.mode === "domain") { box.innerHTML = domainView(c); return; }   // production: no Dev Tunnel, no key
+  if (t) { box.innerHTML = tunnelView(t); return; }                         // test: the Dev Tunnel lives here
+  box.innerHTML = staticView(c);
+}
+async function refreshConnection() {
+  const t = await fetch("api/tunnel/status").then(r => r.ok ? r.json() : null).catch(() => null);
+  if (t && t.phase === "online" && tunnelKey === null)
+    tunnelKey = await fetch("api/tunnel/key").then(r => r.ok ? r.json() : null).then(d => d && d.key).catch(() => null);
+  if (!t || t.phase !== "online") tunnelKey = null;
+  renderConnection(lastConn, t);
+}
+async function tunnelAction(action) {
+  tunnelKey = null;
+  await fetch(`api/tunnel/${action}`, { method: "POST" }).catch(() => null);
+  refreshConnection();
+}
+async function tunnelCheck(btn) {
+  btn.disabled = true; $("tunnel-check").textContent = "verifica in corso…";
+  const r = await fetch("api/tunnel/check").then(r => r.json()).catch(() => ({ ok: false, error: "nessuna risposta" }));
+  $("tunnel-check").innerHTML = r.ok
+    ? `<span style="color:var(--ok)">funziona: risponde ${esc(r.host)}</span>`
+    : `<span class="error">${esc(r.error)}</span>`;
+  btn.disabled = false;
 }
 
 function drawFindings(p) {
@@ -381,8 +493,10 @@ async function refreshGuard() {
 
 $("hours").addEventListener("change", refresh);
 refreshGuard().then(refresh);
+refreshConnection();
 setInterval(refresh, 5000);
 setInterval(refreshGuard, 30000);
+setInterval(refreshConnection, 2500);
 </script>
 </body>
 </html>

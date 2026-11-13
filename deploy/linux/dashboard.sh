@@ -80,7 +80,7 @@ $allow    deny all;
 
     add_header X-Frame-Options DENY always;
     add_header X-Content-Type-Options nosniff always;
-    add_header Content-Security-Policy "default-src 'self'; img-src 'self' data: https://*.tile.openstreetmap.org https://tile.openstreetmap.org; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'" always;
+    add_header Content-Security-Policy "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'" always;
 
     location = / { proxy_pass http://127.0.0.1:8470; }
     location = /index.html { proxy_pass http://127.0.0.1:8470; }
