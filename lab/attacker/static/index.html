@@ -4,90 +4,55 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Laboratorio intrusioni</title>
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
 <style>
 :root {
   --bg: #0f1419; --panel: #161d24; --line: #26313b; --text: #e6edf3; --muted: #8b98a5;
-  --accent: #4aa3ff; --low: #8b98a5; --medium: #e3b341; --high: #f0883e; --critical: #f85149; --ok: #3fb950;
+  --accent: #4aa3ff; --medium: #e3b341; --critical: #f85149; --ok: #3fb950;
 }
 * { box-sizing: border-box; margin: 0; padding: 0; }
-html, body { height: 100%; background: var(--bg); color: var(--text); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
-.app { display: grid; grid-template-columns: 380px 1fr; height: 100vh; }
-aside { background: var(--panel); border-right: 1px solid var(--line); overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 16px; }
-main { display: grid; grid-template-rows: 1fr 260px; min-width: 0; }
-h1 { font-size: 17px; font-weight: 600; }
+html, body { min-height: 100%; background: var(--bg); color: var(--text); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+.page { max-width: 1180px; margin: 0 auto; padding: 20px 16px 32px; display: grid; grid-template-columns: 360px 1fr; gap: 20px; align-items: start; }
+header { grid-column: 1 / -1; display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+h1 { font-size: 18px; font-weight: 600; }
 h1 small { display: block; color: var(--muted); font-size: 12px; font-weight: 400; margin-top: 2px; }
 h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 600; margin-bottom: 8px; }
-.stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
-.stat { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 8px; }
-.stat b { display: block; font-size: 20px; font-variant-numeric: tabular-nums; }
-.stat span { color: var(--muted); font-size: 11px; }
-.alert { display: none; background: rgba(248,81,73,.12); border: 1px solid var(--critical); border-radius: 8px; padding: 10px 12px; }
-.alert.on { display: block; }
-.alert b { color: var(--critical); }
-.scenarios { display: flex; flex-direction: column; gap: 6px; }
-.scenario { text-align: left; background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 9px 11px; cursor: pointer; font: inherit; }
+.side, .main { display: flex; flex-direction: column; gap: 18px; min-width: 0; }
+.scenarios { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 8px; }
+.scenario { text-align: left; background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; cursor: pointer; font: inherit; }
 .scenario:hover:not(:disabled) { border-color: var(--accent); }
 .scenario:disabled { opacity: .45; cursor: default; }
 .scenario.running { border-color: var(--medium); opacity: 1; }
 .scenario b { display: block; font-weight: 600; }
 .scenario span { color: var(--muted); font-size: 12px; }
 .scenario .expect { display: block; margin-top: 3px; font-size: 12px; color: var(--muted); }
-.log { background: #0b0f13; border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; max-height: 260px; overflow-y: auto; white-space: pre-wrap; }
+.log { background: #0b0f13; border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; min-height: 120px; max-height: 320px; overflow-y: auto; white-space: pre-wrap; }
 .log .t { color: var(--muted); }
 .log .ok { color: var(--critical); font-weight: 600; }
-.toolbar { display: flex; gap: 8px; align-items: center; color: var(--muted); font-size: 12px; }
-select { background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 3px 6px; font: inherit; }
-#map { min-height: 0; }
-.table-wrap { overflow: auto; border-top: 1px solid var(--line); background: var(--panel); }
-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
-th { position: sticky; top: 0; background: var(--panel); color: var(--muted); font-weight: 500; font-size: 12px; }
-td.num { font-variant-numeric: tabular-nums; text-align: right; }
-.sev { display: inline-block; padding: 1px 7px; border-radius: 10px; font-size: 11px; font-weight: 600; color: #0f1419; }
-.sev-Low { background: var(--low); } .sev-Medium { background: var(--medium); } .sev-High { background: var(--high); } .sev-Critical { background: var(--critical); color: #fff; }
-.dot { border-radius: 50%; border: 2px solid rgba(255,255,255,.85); box-shadow: 0 0 0 0 currentColor; }
-.dot.new { animation: pulse 1.4s ease-out 3; }
-@keyframes pulse { 0% { box-shadow: 0 0 0 0 currentColor; } 100% { box-shadow: 0 0 0 18px transparent; } }
-.target { background: var(--accent); border-radius: 4px; border: 2px solid #fff; }
-.leaflet-popup-content { font: 13px/1.45 system-ui, sans-serif; }
 .muted { color: var(--muted); }
 .error { color: var(--critical); font-size: 12px; }
-.tunnel { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
+input { background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 4px 6px; font: inherit; }
+.tunnel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
 .tunnel .state { font-size: 13px; }
 .tunnel .state b.on { color: var(--ok); } .tunnel .state b.off { color: var(--muted); } .tunnel .state b.err { color: var(--critical); }
 .tunnel .code { font: 600 20px ui-monospace, Menlo, monospace; letter-spacing: .12em; }
 .tunnel .field { display: flex; gap: 6px; align-items: center; }
 .tunnel .field code { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; background: #0b0f13; border: 1px solid var(--line); border-radius: 6px; padding: 4px 6px; font-size: 12px; }
 .tunnel .label { color: var(--muted); font-size: 11px; }
-.btn { background: var(--accent); color: #0b0f13; border: 0; border-radius: 6px; padding: 5px 10px; font: 600 12px system-ui, sans-serif; cursor: pointer; }
+.btn { background: var(--accent); color: #0b0f13; border: 0; border-radius: 6px; padding: 5px 10px; font: 600 12px system-ui, sans-serif; cursor: pointer; text-decoration: none; display: inline-block; }
 .btn.ghost { background: transparent; color: var(--text); border: 1px solid var(--line); }
 .btn:disabled { opacity: .5; cursor: default; }
 .tunnel a { color: var(--accent); }
-@media (max-width: 900px) {
-  .app { grid-template-columns: 1fr; height: auto; }
-  aside { border-right: 0; border-bottom: 1px solid var(--line); }
-  main { grid-template-rows: 60vh auto; }
-}
+@media (max-width: 900px) { .page { grid-template-columns: 1fr; } }
 </style>
 </head>
 <body>
-<div class="app">
-  <aside>
-    <div>
-      <h1>Laboratorio intrusioni<small>Bersaglio: lab-01 · Alveo Energia (azienda sintetica) · dati di laboratorio</small></h1>
-    </div>
+<div class="page">
+  <header>
+    <h1>Laboratorio intrusioni<small>Bersaglio: lab-01 · Alveo Energia (azienda sintetica) · dati di laboratorio</small></h1>
+    <a class="btn" id="page-link" hidden target="_blank" rel="noopener" title="Si apre con il tuo account Microsoft">Mappa e lista degli attacchi ↗</a>
+  </header>
 
-    <div class="stats">
-      <div class="stat"><b id="s-attempts">–</b><span>tentativi</span></div>
-      <div class="stat"><b id="s-addresses">–</b><span>indirizzi</span></div>
-      <div class="stat"><b id="s-banned">–</b><span>bannati ora</span></div>
-      <div class="stat"><b id="s-blocks">–</b><span>blocchi firewall</span></div>
-    </div>
-
-    <div class="alert" id="alert"></div>
-
+  <div class="side">
     <div>
       <h2>Collegamento a XRCopilotLab</h2>
       <div class="tunnel" id="tunnel"><span class="muted">Controllo del tunnel…</span></div>
@@ -105,8 +70,16 @@ td.num { font-variant-numeric: tabular-nums; text-align: right; }
       </div>
     </div>
 
+    <div class="muted" style="font-size:12px">
+      Senza un server da testare gli attacchi partono solo verso lab-01, dentro la rete del laboratorio, da indirizzi di
+      documentazione (RFC 5737) con città inventate. Verso un server esterno partono dal nostro indirizzo e solo gli
+      attacchi web, e solo dopo che la chiave ha provato che puoi già leggere quel server.
+    </div>
+  </div>
+
+  <div class="main">
     <div>
-      <h2>Attacchi</h2>
+      <h2>Attacchi <span class="error" id="error" style="text-transform:none;letter-spacing:0"></span></h2>
       <div class="scenarios" id="scenarios"></div>
     </div>
 
@@ -114,159 +87,12 @@ td.num { font-variant-numeric: tabular-nums; text-align: right; }
       <h2>Cosa sta facendo l'attaccante</h2>
       <div class="log" id="log"><span class="muted">Nessun attacco lanciato.</span></div>
     </div>
-
-    <div class="muted" style="font-size:12px">
-      Senza un server da testare gli attacchi partono solo verso lab-01, dentro la rete del laboratorio, da indirizzi di
-      documentazione (RFC 5737) con città inventate. Verso un server esterno partono dal nostro indirizzo e solo gli
-      attacchi web, e solo dopo che la chiave ha provato che puoi già leggere quel server.
-    </div>
-  </aside>
-
-  <main>
-    <div id="map"></div>
-    <div class="table-wrap">
-      <div class="toolbar" style="padding:8px 10px">
-        <span>Periodo</span>
-        <select id="hours">
-          <option value="1">ultima ora</option>
-          <option value="24" selected>ultime 24 ore</option>
-          <option value="168">ultima settimana</option>
-        </select>
-        <span id="updated"></span>
-        <span class="error" id="error"></span>
-      </div>
-      <table>
-        <thead><tr><th>Gravità</th><th>Indirizzo</th><th>Città</th><th>Tipo di attacco</th><th class="num">Tentativi</th><th class="num">Blocchi</th><th>Bannato</th><th>Ultimo evento</th></tr></thead>
-        <tbody id="rows"><tr><td colspan="8" class="muted">In attesa dei dati di lab-01…</td></tr></tbody>
-      </table>
-    </div>
-  </main>
+  </div>
 </div>
 
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
-        integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
 <script>
-const TARGET = { lat: 45.070, lon: 7.687, label: "lab-01 · Alveo Energia (Torino)" };
-const COLORS = { Low: "#8b98a5", Medium: "#e3b341", High: "#f0883e", Critical: "#f85149" };
-const SEVERITY = { Low: "bassa", Medium: "media", High: "alta", Critical: "critica" };
-const TYPES = {
-  SshBruteForce: "forza bruta SSH", DistributedSshBruteForce: "campagna distribuita", WebLoginBruteForce: "forza bruta web",
-  WebVulnerabilityScan: "scansione del sito", WebExploitAttempt: "exploit web", RequestFlood: "flood di richieste",
-  MailLoginBruteForce: "forza bruta posta", PortScan: "scansione porte", IndustrialProtocolProbe: "protocolli industriali",
-  RepeatOffender: "recidivo", LoginAfterFailures: "ACCESSO dopo tentativi",
-  NetworkExploitAttempt: "exploit di rete", KnownMaliciousSource: "indirizzo in blacklist",
-  IndustrialProtocolCommand: "comandi industriali", CommandAndControl: "SERVER COMPROMESSO (C2)",
-  SensitiveFileAccess: "file riservati letti", SuspiciousExecution: "programma sospetto", Persistence: "porta sul retro (chiave/account)",
-  PrivilegeEscalation: "scalata dei privilegi", LogTampering: "log cancellati", CryptoMining: "MINER di criptovalute", Other: "altro",
-};
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-const time = (iso) => iso ? new Date(iso).toLocaleTimeString("it-IT", { timeZone: "Europe/Rome" }) : "";
-const types = (list) => (list || []).map(t => TYPES[t] || t).join(", ");
-
-const map = L.map("map", { worldCopyJump: true, zoomControl: true }).setView([35, 40], 2);
-L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
-  maxZoom: 18, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
-}).addTo(map);
-L.marker([TARGET.lat, TARGET.lon], { icon: L.divIcon({ className: "target", iconSize: [14, 14] }) })
-  .addTo(map).bindTooltip(TARGET.label, { permanent: true, direction: "right", offset: [8, 0] });
-
-const layer = L.layerGroup().addTo(map);
-const seen = new Set();
-let firstLoad = true;
-
-function arc(from, to) {
-  // A bent line, so attacks from the same direction stay distinguishable.
-  const [lat1, lon1] = from, [lat2, lon2] = to, points = [];
-  const mx = (lat1 + lat2) / 2 + (lon2 - lon1) * 0.15, my = (lon1 + lon2) / 2 - (lat2 - lat1) * 0.15;
-  for (let i = 0; i <= 24; i++) {
-    const t = i / 24, a = (1 - t) * (1 - t), b = 2 * (1 - t) * t, c = t * t;
-    points.push([a * lat1 + b * mx + c * lat2, a * lon1 + b * my + c * lon2]);
-  }
-  return points;
-}
-
-function drawMap(summary, bannedIps) {
-  layer.clearLayers();
-  const fresh = [];
-  for (const p of summary.mapPoints || []) {
-    const color = COLORS[p.severity] || COLORS.Low;
-    const size = Math.min(26, 10 + Math.log2(1 + p.attempts) * 2.5);
-    L.polyline(arc([p.latitude, p.longitude], [TARGET.lat, TARGET.lon]), { color, weight: 1.5, opacity: .55, dashArray: "4 4" }).addTo(layer);
-    const isNew = !firstLoad && !seen.has(p.ip);
-    if (isNew) fresh.push(p);
-    seen.add(p.ip);
-    const icon = L.divIcon({
-      className: "", iconSize: [size, size],
-      html: `<div class="dot${isNew ? " new" : ""}" style="width:${size}px;height:${size}px;background:${color};color:${color}"></div>`,
-    });
-    L.marker([p.latitude, p.longitude], { icon }).addTo(layer).bindPopup(
-      `<b>${esc(p.ip)}</b><br>${esc(p.city)}, ${esc(p.country)}<br>${esc(types(p.attackTypes))}<br>` +
-      `${p.attempts} tentativi · gravità ${esc(SEVERITY[p.severity] || p.severity)}${bannedIps.has(p.ip) ? "<br><b>bannato da fail2ban</b>" : ""}`);
-  }
-  if (fresh.length) map.flyTo([fresh[0].latitude, fresh[0].longitude], Math.max(map.getZoom(), 3), { duration: 1.2 });
-  firstLoad = false;
-}
-
-function drawTable(summary, bannedIps) {
-  const rows = (summary.topAttackers || []).map(r => `<tr>
-      <td><span class="sev sev-${esc(r.severity)}">${esc(SEVERITY[r.severity] || r.severity)}</span></td>
-      <td>${esc(r.ip)}</td>
-      <td>${esc(r.location?.city || "")}${r.location?.country ? ", " + esc(r.location.country) : ""}</td>
-      <td>${esc(types(r.attackTypes))}</td>
-      <td class="num">${r.attempts}</td>
-      <td class="num">${r.firewallBlocks}</td>
-      <td>${bannedIps.has(r.ip) ? "sì" : ""}</td>
-      <td>${time(r.lastSeen)}</td></tr>`);
-  $("rows").innerHTML = rows.length ? rows.join("") : `<tr><td colspan="8" class="muted">Nessun attacco nel periodo: lancia uno scenario.</td></tr>`;
-}
-
-function drawStats(summary) {
-  const t = summary.totals || {};
-  $("s-attempts").textContent = t.attempts ?? 0;
-  $("s-addresses").textContent = t.addresses ?? 0;
-  $("s-banned").textContent = t.currentlyBanned ?? 0;
-  $("s-blocks").textContent = t.firewallBlocks ?? 0;
-  const s = summary.suspiciousLogins || [];
-  // The host calling a malware controller (Suricata) comes first: it means the intrusion went further than a login.
-  const c2 = (summary.topAttackers || []).find(r => (r.attackTypes || []).includes("CommandAndControl"));
-  const alert = $("alert");
-  const parts = [];
-  if (c2) {
-    parts.push(`<b>Server compromesso</b>: lab-01 sta chiamando ${esc(c2.ip)} (${esc(c2.location?.city || "")}, ` +
-      `${esc(c2.location?.country || "")}), un server di controllo di malware, l'ultima volta alle ${time(c2.lastSeen)}. Lo ha visto Suricata.`);
-  }
-  // What the intruder did once in (Falco), tied to the address that got in.
-  const inside = (summary.hostAlerts || []).filter(a => a.ip);
-  if (inside.length) {
-    const what = [...new Set(inside.map(a => TYPES[a.attackType] || a.attackType))].join(", ");
-    parts.push(`<b>Dentro il server</b>: da ${esc(inside[0].ip)} (utente ${esc(inside[0].user || "")}) Falco ha visto ${esc(what)}, ` +
-      `l'ultima volta alle ${time(inside[0].time)}.`);
-  }
-  if (s.length) {
-    const last = s[s.length - 1];
-    parts.push(`<b>Accesso sospetto</b>: ${esc(last.user)} è entrato da ${esc(last.ip)} ` +
-      `(${esc(last.location?.city || "")}, ${esc(last.location?.country || "")}) alle ${time(last.time)}, dopo ${last.failuresBefore} tentativi falliti.`);
-  }
-  alert.innerHTML = parts.join("<br><br>");
-  alert.classList.toggle("on", parts.length > 0);
-}
-
-async function refreshLab() {
-  try {
-    const hours = $("hours").value;
-    const [summary, banned] = await Promise.all([
-      fetch(`/api/lab/summary?hours=${hours}&top=50`).then(r => r.ok ? r.json() : Promise.reject(r.status)),
-      fetch(`/api/lab/banned`).then(r => r.ok ? r.json() : { banned: [] }),
-    ]);
-    const bannedIps = new Set((banned.banned || []).map(b => b.ip));
-    drawStats(summary); drawMap(summary, bannedIps); drawTable(summary, bannedIps);
-    $("updated").textContent = "aggiornato alle " + new Date().toLocaleTimeString("it-IT");
-    $("error").textContent = "";
-  } catch (e) {
-    $("error").textContent = "lab-01 non risponde (" + e + ")";
-  }
-}
 
 let scenarios = [];
 let targetMode = "lab";
@@ -298,11 +124,11 @@ async function setTarget() {
     else { $("target-msg").innerHTML = `<span style="color:var(--ok)">verificato: ${esc(d.host)} (${esc((d.detectors || []).join(", "))})</span>`; $("target-key").value = ""; }
   } catch { $("target-msg").innerHTML = `<span class="error">nessuna risposta</span>`; }
   $("target-set").disabled = false;
-  refreshTarget(); refreshLab();
+  refreshTarget();
 }
 async function clearTarget() {
   await fetch("/api/target/clear", { method: "POST" }).catch(() => null);
-  $("target-msg").textContent = ""; refreshTarget(); refreshLab();
+  $("target-msg").textContent = ""; refreshTarget();
 }
 async function refreshTarget() {
   const t = await fetch("/api/target").then(r => r.json()).catch(() => null);
@@ -337,18 +163,18 @@ async function refreshRuns() {
   if (atBottom) box.scrollTop = box.scrollHeight;
 }
 
-$("hours").addEventListener("change", refreshLab);
 loadScenarios().then(refreshTarget);
-refreshLab();
 setInterval(refreshRuns, 1500);
-setInterval(refreshLab, 4000);
 // --- Tunnel: the lab's public address (Microsoft Dev Tunnels), for the XRCopilotLab connection ---------------
 let tunnelPhase = null;
 async function refreshTunnel() {
   const t = await fetch("/api/tunnel/status").then(r => r.ok ? r.json() : null).catch(() => null);
   const box = $("tunnel");
   if (!t) { box.innerHTML = `<span class="error">Il container del tunnel non risponde.</span>`; return; }
-  if (t.phase === tunnelPhase && t.phase === "online" && box.dataset.url === t.url) return;  // keep the copy buttons stable
+  // The monitoring page: through the tunnel only, behind the Microsoft login.
+  $("page-link").hidden = !((t.phase === "online" || t.phase === "domain") && t.pageUrl);
+  if (t.pageUrl) $("page-link").href = t.pageUrl + "/";
+  if (t.phase === tunnelPhase && (t.phase === "online" || t.phase === "domain") && box.dataset.url === t.url) return;  // keep the copy buttons stable
   tunnelPhase = t.phase;
   box.dataset.url = t.url || "";
   const user = t.user ? ` · ${esc(t.user)}` : "";
@@ -365,21 +191,31 @@ async function refreshTunnel() {
          <div class="muted" style="font-size:12px">Questa pagina si aggiorna da sola quando l'accesso è completato.</div>`
       : `<div class="state"><b class="off">Richiesta del codice…</b></div>`;
   } else if (t.phase === "online") {
-    box.innerHTML = `<div class="state"><b class="on">● Online</b>${user} · dalle ${esc(t.since || "")}</div>
-      <div><div class="label">Indirizzo della connessione (blueprint, tool HTTP)</div>
-        <div class="field"><code>${esc(t.url)}/api</code><button class="btn ghost" onclick="copy('${esc(t.url)}/api', this)">Copia</button></div></div>
-      <div><div class="label">Indirizzo MCP</div>
-        <div class="field"><code>${esc(t.url)}/mcp</code><button class="btn ghost" onclick="copy('${esc(t.url)}/mcp', this)">Copia</button></div></div>
-      <div><div class="label">Intestazione X-API-Key</div>
-        <div class="field"><code>••••••••••••••••</code><button class="btn ghost" onclick="copyKey(this)">Copia la chiave</button></div></div>
-      <div class="field"><button class="btn" onclick="checkTunnel(this)">Verifica dall'indirizzo pubblico</button><span id="tunnel-check" class="muted" style="font-size:12px"></span></div>
+    box.innerHTML = `<div class="state"><b class="on">● Online</b>${user} · dalle ${esc(t.since || "")} · indirizzo di test, temporaneo</div>
+      ${addresses(t, "si apre con l'account Microsoft")}
       <div><button class="btn ghost" onclick="tunnelAction('restart')">Riavvia</button> <button class="btn ghost" onclick="tunnelAction('logout')">Esci</button></div>`;
+  } else if (t.phase === "domain") {
+    box.innerHTML = `<div class="state"><b class="on">● Dominio</b> · ${esc(t.url.replace("https://", ""))} · indirizzo stabile (lab/.env)</div>
+      ${addresses(t, "chi la raggiunge lo decide il proxy davanti al dominio")}`;
   } else if (t.phase === "error") {
     box.innerHTML = `<div class="state"><b class="err">Tunnel chiuso</b>${user}</div><div class="error">${esc(t.error || "")}</div>
       <div><button class="btn" onclick="tunnelAction('restart')">Riapri il tunnel</button> <button class="btn ghost" onclick="tunnelAction('logout')">Esci</button></div>`;
   } else {
     box.innerHTML = `<div class="state"><b class="off">Apertura del tunnel…</b>${user}</div>`;
   }
+}
+
+// The addresses to give XRCopilotLab, the key, the monitoring page and the check: the same for a tunnel and a domain.
+function addresses(t, pageNote) {
+  return `<div><div class="label">Indirizzo della connessione (blueprint, tool HTTP)</div>
+        <div class="field"><code>${esc(t.url)}/api</code><button class="btn ghost" onclick="copy('${esc(t.url)}/api', this)">Copia</button></div></div>
+      <div><div class="label">Indirizzo MCP</div>
+        <div class="field"><code>${esc(t.url)}/mcp</code><button class="btn ghost" onclick="copy('${esc(t.url)}/mcp', this)">Copia</button></div></div>
+      <div><div class="label">Intestazione X-API-Key</div>
+        <div class="field"><code>••••••••••••••••</code><button class="btn ghost" onclick="copyKey(this)">Copia la chiave</button></div></div>
+      ${t.pageUrl ? `<div><div class="label">Pagina di monitoraggio (mappa e attacchi) · ${esc(pageNote)}</div>
+        <div class="field"><code>${esc(t.pageUrl)}</code><a class="btn ghost" href="${esc(t.pageUrl)}/" target="_blank" rel="noopener">Apri</a></div></div>` : ""}
+      <div class="field"><button class="btn" onclick="checkTunnel(this)">Verifica dall'indirizzo pubblico</button><span id="tunnel-check" class="muted" style="font-size:12px"></span></div>`;
 }
 
 async function tunnelAction(action) {

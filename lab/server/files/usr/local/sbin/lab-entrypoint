@@ -18,4 +18,6 @@ Site__Name=Alveo Energia (Torino)
 Site__Latitude=45.070
 Site__Longitude=7.687
 ENV
+# The lab on a domain (lab/.env): that is XRCopilotLab's address, shown on the page instead of a tunnel's.
+[[ -n "${PUBLIC_DOMAIN:-}" ]] && printf 'Connection__PublicUrl=https://%s\n' "$PUBLIC_DOMAIN" >> /etc/xrcopilotlab-intrusion-mcp/env
 exec /sbin/init

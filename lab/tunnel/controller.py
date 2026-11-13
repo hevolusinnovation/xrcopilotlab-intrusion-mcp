@@ -1,10 +1,17 @@
 """The lab's public address: Microsoft Dev Tunnels, driven from the console.
 
 - Login with a device code (Entra ID / Microsoft account): the console shows the link and the code.
-- Once logged in: a persistent tunnel with anonymous access (XRCopilotLab cannot log in to Dev Tunnels; the package's
-  X-API-Key still guards every call), port 8091, hosted here. socat forwards that port to lab-01's API-only port.
+- Once logged in: a persistent tunnel with two ports, hosted here; socat forwards each to lab-01.
+  - 8091, lab-01's API-only port, with anonymous access: XRCopilotLab cannot log in to Dev Tunnels; the package's
+    X-API-Key still guards every call.
+  - 8093, the monitoring page (map and attacks), with no anonymous access: the browser asks for the Microsoft login,
+    and only the tunnel's owner and the users of the owner's Entra tenant get in. No password of its own: this
+    login is the only way in.
 - The tunnel id and the login live in /root (a volume): the address stays the same across restarts, until the tunnel
   is unused for 30 days.
+
+With PUBLIC_DOMAIN set (lab/.env) there is no Dev Tunnel: the same two ports are published on the machine, for the
+reverse proxy the domain points to, and the console shows the domain's addresses (phase "domain").
 
 Listens on :8092, on the console network only; the console proxies it.
 
@@ -20,13 +27,17 @@ import time
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 
 PORT = 8091
+PAGE_PORT = 8093
 LAB_API = os.environ.get("LAB_API", "10.77.0.20:8091")
+LAB_PAGE = os.environ.get("LAB_PAGE", "10.77.0.20:8093")
+DOMAIN = os.environ.get("PUBLIC_DOMAIN", "").strip().strip("/")
+PAGE_PUBLIC_PORT = os.environ.get("PUBLIC_PAGE_PORT", "8443").strip()
 ID_FILE = "/root/tunnel-id"
 URL_FILE = os.environ.get("TUNNEL_URL_FILE", "/state/url")
 DEVICE = re.compile(r"open the page (?P<url>https://\S+) and enter the code (?P<code>[A-Z0-9-]+)")
 WEB_URL = re.compile(r"https://\S+?-%d\.\S+?devtunnels\.ms\S*" % PORT)
 
-state = {"phase": "starting", "user": None, "login": None, "url": None, "tunnelId": None, "error": None, "since": None}
+state = {"phase": "starting", "user": None, "login": None, "url": None, "pageUrl": None, "tunnelId": None, "error": None, "since": None}
 lock = threading.Lock()
 host_process = None
 
@@ -96,7 +107,17 @@ def ensure_tunnel():
         tunnel_id = m.group(1)
         with open(ID_FILE, "w") as f:
             f.write(tunnel_id)
-    devtunnel("port", "create", tunnel_id, "-p", str(PORT), "--protocol", "http")  # already there: harmless error
+    for port in (PORT, PAGE_PORT):
+        devtunnel("port", "create", tunnel_id, "-p", str(port), "--protocol", "http")  # already there: harmless error
+    # Access, rewritten on every start (a tunnel made before the page port was anonymous for every port): anonymous on
+    # the API port only; the page's port is left to the owner, plus the owner's Entra tenant (fails harmlessly for a
+    # Microsoft or GitHub account, which has no tenant: then the owner alone).
+    for port in (None, PORT, PAGE_PORT):
+        devtunnel("access", "reset", tunnel_id, *(["-p", str(port)] if port else []))
+    code, out = devtunnel("access", "create", tunnel_id, "-p", str(PORT), "-a")
+    if code != 0:
+        raise RuntimeError("devtunnel access: " + (out.strip().splitlines()[-1] if out.strip() else "failed"))
+    devtunnel("access", "create", tunnel_id, "-p", str(PAGE_PORT), "--tenant")
     return tunnel_id
 
 
@@ -118,10 +139,11 @@ def watch_host(p):
         last = (last + [line.strip()])[-5:]
         m = WEB_URL.search(line)
         if m:
-            set_state(phase="online", url=m.group(0).rstrip("/"), since=time.strftime("%H:%M:%S"))
+            url = m.group(0).rstrip("/")
+            set_state(phase="online", url=url, pageUrl=url.replace(f"-{PORT}.", f"-{PAGE_PORT}.", 1), since=time.strftime("%H:%M:%S"))
     p.wait()
     if state["phase"] != "logged-out":
-        set_state(phase="error", url=None, error="il tunnel si è chiuso: " + " ".join(last[-2:]))
+        set_state(phase="error", url=None, pageUrl=None, error="il tunnel si è chiuso: " + " ".join(last[-2:]))
 
 
 def stop_host():
@@ -134,12 +156,17 @@ def stop_host():
 def logout():
     stop_host()
     devtunnel("user", "logout")
-    set_state(phase="logged-out", user=None, url=None, login=None, error=None)
+    set_state(phase="logged-out", user=None, url=None, pageUrl=None, login=None, error=None)
 
 
 def boot():
-    # lab-01's API port, reachable through this container's localhost: devtunnel hosts local ports only.
+    # lab-01's ports, reachable through this container's localhost: devtunnel hosts local ports only.
     subprocess.Popen(["socat", f"TCP-LISTEN:{PORT},fork,reuseaddr", f"TCP:{LAB_API}"])
+    subprocess.Popen(["socat", f"TCP-LISTEN:{PAGE_PORT},fork,reuseaddr", f"TCP:{LAB_PAGE}"])
+    if DOMAIN:
+        page = f"https://{DOMAIN}" + ("" if PAGE_PUBLIC_PORT in ("", "443") else f":{PAGE_PUBLIC_PORT}")
+        set_state(phase="domain", url=f"https://{DOMAIN}", pageUrl=page, since=time.strftime("%H:%M:%S"))
+        return
     user = logged_in_user()
     if user:
         set_state(phase="logged-in", user=user)
@@ -167,6 +194,8 @@ class Handler(BaseHTTPRequestHandler):
         return self._send(404, {"error": "not found"})
 
     def do_POST(self):
+        if DOMAIN:
+            return self._send(409, {"error": "il laboratorio usa il dominio " + DOMAIN + ": nessun tunnel"})
         if self.path == "/login":
             if state["phase"] == "login-pending":
                 return self._send(409, {"error": "accesso già in corso"})

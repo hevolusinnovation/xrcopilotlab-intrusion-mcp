@@ -84,6 +84,7 @@ $allow    deny all;
 
     location = / { proxy_pass http://127.0.0.1:8470; }
     location = /index.html { proxy_pass http://127.0.0.1:8470; }
+    location = /hevolus-logo.svg { proxy_pass http://127.0.0.1:8470; }
     location /vendor/ { proxy_pass http://127.0.0.1:8470; }
     # Read routes only: GET, and never /mcp.
     location /api/ {

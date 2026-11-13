@@ -2,8 +2,11 @@
 
 A Docker lab for demos and tests: an Ubuntu 24.04 server (`lab-01`) with sshd, nginx, fail2ban and a firewall, on
 which the **customer package** is installed by its own `install.sh` (same tarball as `make package`), and an attacker
-that also serves the console on **http://localhost:8090**: attack buttons, and the map (OpenStreetMap) and table of
-what the package on `lab-01` detects.
+that also serves the console on **http://localhost:8090** (attack buttons, tunnel, server to test). What the package on
+`lab-01` detects (map and table of the attacks) is `lab-01`'s own monitoring page, opened only through the Dev Tunnel
+with the Microsoft login (see below): no password of its own. With `PUBLIC_DOMAIN` in `lab/.env` (see
+`lab/.env.example`) the lab uses that domain instead of a tunnel: DNS, TLS proxy and firewall must already be in place
+(README › "The lab on a domain").
 
 ![The lab console](../docs/images/console.jpg)
 
@@ -23,7 +26,7 @@ The `make` commands use the service names (`make lab-shell SVC=attacker`); plain
 
 | Service (container) | What | Notes |
 |---|---|---|
-| `lab-01` (`intrusion-lab-01`) | Ubuntu 24.04 with systemd: sshd (password login, user `operatore`, in the `sudo` group), nginx (site, `/admin/` with basic auth, the package's API under `/intrusion-mcp/`), fail2ban (`sshd`, `nginx-http-auth`, `nginx-botsearch`, `nginx-limit-req`, `recidive`, times shortened), a UFW-like firewall, **Suricata 8** with the ET Open rules (installed by the package's own `install.sh --with suricata` at build, the only moment lab-01 reaches the internet; it listens on all four interfaces with `--pcap=any -k none`), **Falco 0.45** with the modern eBPF probe (same `install.sh --with falco`; two container-only rules are turned off in `/etc/falco/rules.d/lab.yaml`, since lab-01 is itself a container), **ModSecurity 3 + OWASP CRS** in nginx (`install.sh --with modsecurity`, detection only; the toolkit's own API and the monitoring page are excluded), the package's read-only **monitoring page** (nginx on 8471, served inside the container), the package (`xrcopilotlab-intrusion-mcp.service`, logs mode) | privileged: systemd as PID 1, iptables. A lab container, never a pattern for production |
+| `lab-01` (`intrusion-lab-01`) | Ubuntu 24.04 with systemd: sshd (password login, user `operatore`, in the `sudo` group), nginx (site, `/admin/` with basic auth, the package's API under `/intrusion-mcp/`), fail2ban (`sshd`, `nginx-http-auth`, `nginx-botsearch`, `nginx-limit-req`, `recidive`, times shortened), a UFW-like firewall, **Suricata 8** with the ET Open rules (installed by the package's own `install.sh --with suricata` at build, the only moment lab-01 reaches the internet; it listens on all four interfaces with `--pcap=any -k none`), **Falco 0.45** with the modern eBPF probe (same `install.sh --with falco`; two container-only rules are turned off in `/etc/falco/rules.d/lab.yaml`, since lab-01 is itself a container), **ModSecurity 3 + OWASP CRS** in nginx (`install.sh --with modsecurity`, detection only; the toolkit's own API and the monitoring page are excluded), the package's read-only **monitoring page** (opened through the Dev Tunnel, port 8093; the package's own 8471 site stays unused inside the container), the package (`xrcopilotlab-intrusion-mcp.service`, logs mode) | privileged: systemd as PID 1, iptables. A lab container, never a pattern for production |
 | `attacker` (`intrusion-lab-attacker`) | nmap, ssh, Python: fixed scenarios against `lab-01`, the console, a **"Server da testare"** field that runs the web scenarios against another server once its API key proves you can already read it, and (when the Metasploit container is up) three opt-in **Metasploit** scenarios it drives over msfrpcd | its lab networks are `internal`: no attack reaches the internet |
 | `metasploit` (`intrusion-lab-metasploit`) | **opt-in**, official Metasploit image running `msfrpcd`; the console drives it. Started with `make lab-up-msf` (compose profile `metasploit`) | on the same `internal` networks as the attacker; reaches `lab-01` only, never the internet |
 | `tunnel` (`intrusion-lab-tunnel`) | Dev Tunnels CLI, socat, a small controller driven by the console | the only container that goes out to the internet, for the tunnel |
@@ -43,9 +46,14 @@ in XRCopilotLab can call the lab running on a laptop. Nothing is installed on th
    `X-API-Key`.
 3. **Verifica dall'indirizzo pubblico** calls the package through the public address, as XRCopilotLab will.
 
-What the tunnel reaches: only lab-01's port 8091, which serves `/api/` and `/mcp` and nothing else (its own nginx
-logs, the firewall allows only the tunnel container). Anonymous access is needed because XRCopilotLab cannot log in to
-Dev Tunnels: every call still needs the key. The login and the tunnel id live in the `tunnel-login` volume:
+What the tunnel reaches, two ports of lab-01 (their own nginx logs; the firewall allows only the tunnel container):
+- **8091**, `/api/` and `/mcp` and nothing else, with **anonymous access**: XRCopilotLab cannot log in to Dev Tunnels,
+  and every call still needs the key.
+- **8093**, the **monitoring page** (Hevolus header, map and list of the attacks), read only, **without anonymous
+  access**: Dev Tunnels asks for the Microsoft login, and lets in only the account that opened the tunnel and the
+  users of its Entra tenant (Hevolus). That login is the only way in: the page has no password of its own, and nginx
+  adds the page's key. The console shows its address (*Pagina di monitoraggio*) and the button *Mappa e lista degli
+  attacchi*. The access rules are rewritten at every start of the tunnel. The login and the tunnel id live in the `tunnel-login` volume:
 `make lab-down` keeps them (same address next time), `make lab-reset` deletes them.
 
 Dev Tunnels has no price list; the limits are 5 GB of traffic and 10 tunnels per user per month. It is a preview
@@ -140,6 +148,9 @@ Modbus or S7 conversation ever starts (see [docs/security-tools.md](../docs/secu
   `nginx -t` before and after, removing its file if it fails.
 - ModSecurity inspected the toolkit's own API and monitoring page too (`modsecurity on` at the `http` level), filling
   the audit log the toolkit reads with its own polling. Those locations now carry `modsecurity off;`.
+- That `modsecurity off;` broke the build: the lab's sites were copied before `install.sh`, when nginx did not know the
+  directive yet, so `--with modsecurity` found `nginx -t` already failing and stopped. The sites
+  (`lab/server/nginx-sites/`) are now copied after the package, followed by `nginx -t`.
 - The monitoring page returned 500: nginx (`www-data`) could not traverse the service's `0750` config folder to read
   the page's `htpasswd`. The page's files moved to `/etc/nginx/xrcopilotlab-dashboard`, which nginx can reach.
 - With the default settings every log was read twice (the configuration list is appended to the defaults), so every

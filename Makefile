@@ -39,7 +39,10 @@ IMAGE   := $(ACR)/xrcopilotlab-intrusion-mcp:$(TAG)
 SERVER  := src/XrCopilotLab.Intrusion.Mcp.Server/XrCopilotLab.Intrusion.Mcp.Server.csproj
 RID     ?= linux-x64
 SVC     ?= lab-01
-LAB     := docker compose -f lab/docker-compose.yml --env-file lab/.env
+# lab/.env (see lab/.env.example): with PUBLIC_DOMAIN set, the lab publishes its API and page for that domain instead
+# of opening a Dev Tunnel.
+-include lab/.env
+LAB     := docker compose -f lab/docker-compose.yml $(if $(strip $(PUBLIC_DOMAIN)),-f lab/docker-compose.domain.yml) --env-file lab/.env
 
 .PHONY: help build test run docker-build docker-push deploy smoke package key up down \
         lab-build lab-up lab-down lab-restart lab-rebuild lab-ps lab-logs lab-shell lab-open lab-reset \
@@ -87,8 +90,8 @@ key:
 
 # The lab key lives in lab/.env (git-ignored), created on the first run; the console sends it, the server keeps its hash.
 lab/.env:
-	@printf 'LAB_API_KEY=%s\n' "$$(openssl rand -hex 32)" > $@
-	@echo "created lab/.env with a new lab key"
+	@sed "s/^LAB_API_KEY=.*/LAB_API_KEY=$$(openssl rand -hex 32)/" lab/.env.example > $@
+	@echo "created lab/.env with a new lab key (PUBLIC_DOMAIN empty: Dev Tunnel)"
 
 up: lab-up
 down: lab-down
@@ -98,7 +101,7 @@ lab-build: lab/.env
 
 lab-up: lab/.env
 	$(LAB) up -d --build
-	@echo "console: http://localhost:8090"
+	@echo "console: http://localhost:8090 · $(if $(strip $(PUBLIC_DOMAIN)),domain: https://$(PUBLIC_DOMAIN),map and attacks: through the Dev Tunnel (Microsoft login))"
 
 # Keeps the Dev Tunnels login and the tunnel id (volume tunnel-login): the public address stays the same.
 lab-down: lab/.env

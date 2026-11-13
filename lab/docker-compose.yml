@@ -25,6 +25,8 @@ services:
       - tunnel-state:/var/lib/xrcopilotlab-intrusion-mcp/tunnel:ro
     environment:
       LAB_API_KEY: ${LAB_API_KEY:?run make lab-up, which creates lab/.env}
+      # Set: the package says https://<domain> is XRCopilotLab's address (Connection:PublicUrl).
+      PUBLIC_DOMAIN: ${PUBLIC_DOMAIN:-}
     networks:
       it:       { ipv4_address: 198.51.100.20 }
       internet: { ipv4_address: 203.0.113.250 }
@@ -69,6 +71,10 @@ services:
     hostname: tunnel
     environment:
       LAB_API: 10.77.0.20:8091
+      LAB_PAGE: 10.77.0.20:8093
+      # Set (lab/.env): no Dev Tunnel; lab-01's ports are published for the domain (lab/docker-compose.domain.yml).
+      PUBLIC_DOMAIN: ${PUBLIC_DOMAIN:-}
+      PUBLIC_PAGE_PORT: ${PUBLIC_PAGE_PORT:-8443}
     volumes:
       - tunnel-login:/root
       - tunnel-state:/state

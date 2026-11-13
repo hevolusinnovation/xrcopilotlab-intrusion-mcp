@@ -1,0 +1,57 @@
+# The only part of lab-01 the Dev Tunnel reaches: the package's API (/api for a connection, /mcp for an MCP client),
+# from the tunnel container only. Its own logs: what comes through the tunnel is not the lab's web traffic.
+server {
+    listen 8091;
+    server_name _;
+    access_log /var/log/nginx/tunnel-access.log;
+    error_log  /var/log/nginx/tunnel-error.log;
+
+    allow 10.77.0.0/24;
+    deny  all;
+    # XRCopilotLab's own API/MCP calls are not web attacks: the WAF must not inspect them.
+    modsecurity off;
+
+    location /api/ {
+        proxy_pass http://127.0.0.1:8470;
+        proxy_http_version 1.1;
+        proxy_buffering off;
+    }
+
+    location /mcp {
+        proxy_pass http://127.0.0.1:8470;
+        proxy_http_version 1.1;
+        proxy_buffering off;
+        proxy_read_timeout 300s;
+    }
+
+    location / {
+        return 404;
+    }
+}
+
+# The monitoring page (map and attacks) for the Dev Tunnel's second port, from the tunnel container only. The tunnel
+# lets in only who logs in with Microsoft (the tunnel's owner and the owner's tenant): no password here. Read only:
+# the page's own key (written by install.sh) is added here, and only GET reaches the API.
+server {
+    listen 8093;
+    server_name _;
+    access_log /var/log/nginx/xrcopilotlab-dashboard.log;
+
+    allow 10.77.0.0/24;
+    deny  all;
+    modsecurity off;
+
+    add_header X-Frame-Options DENY always;
+    add_header X-Content-Type-Options nosniff always;
+
+    location = / { proxy_pass http://127.0.0.1:8470; }
+    location = /index.html { proxy_pass http://127.0.0.1:8470; }
+    location = /hevolus-logo.svg { proxy_pass http://127.0.0.1:8470; }
+    location /vendor/ { proxy_pass http://127.0.0.1:8470; }
+    location /api/ {
+        limit_except GET { deny all; }
+        include /etc/nginx/xrcopilotlab-dashboard/key.conf;
+        proxy_pass http://127.0.0.1:8470;
+    }
+    location / { return 404; }
+}

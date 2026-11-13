@@ -32,7 +32,8 @@ flowchart LR
 - [The test console (Docker lab)](#the-test-console-docker-lab)
 - [Install the toolkit on a customer's server](#install-the-toolkit-on-a-customers-server)
   (incl. [the monitoring page](#5-the-monitoring-page))
-- [A public test address for XRCopilotLab (dynamic URL)](#a-public-test-address-for-xrcopilotlab-dynamic-url)
+- [The lab on a domain (stable address)](#the-lab-on-a-domain-stable-address), or else
+  [a public test address for XRCopilotLab (dynamic URL)](#a-public-test-address-for-xrcopilotlab-dynamic-url)
 - [Commands (make)](#commands-make)
 - [Tools](#tools), [Attack types](#attack-types), [The simulated host](#the-simulated-host),
   [Authentication](#authentication), [Configuration](#configuration)
@@ -173,13 +174,18 @@ To see the toolkit at work without a customer's server, `make up` starts a small
 - **`lab-01`** (container `intrusion-lab-01`), a fake company server (Ubuntu, "Alveo Energia" in Turin) with SSH, a website, fail2ban, a firewall, Suricata and Falco,
   and **the same toolkit package a customer installs**, installed by the same `install.sh`;
 - **`attacker`** (container `intrusion-lab-attacker`), which attacks `lab-01` when you press a button, and serves the console on
-  **http://localhost:8090**;
+  **http://localhost:8090**: only the attacks, the tunnel and the server to test;
 - **`tunnel`** (container `intrusion-lab-tunnel`), which gives `lab-01` a public HTTPS address, so XRCopilotLab can call it (see
   [below](#a-public-test-address-for-xrcopilotlab-dynamic-url)).
 
 The attacks never leave the lab: all addresses are "documentation" addresses (RFC 5737) that no real computer uses,
-and each one gets an invented city so that the map has something to show. Everything the console shows comes from the
-toolkit on `lab-01`, exactly as XRCopilotLab would receive it.
+and each one gets an invented city so that the map has something to show.
+
+What the toolkit sees (the numbers, the red box, the map and the table below) is on `lab-01`'s own **monitoring page**,
+the same a customer gets (see [The monitoring page](#5-the-monitoring-page)), with the Hevolus logo at the top. It
+opens **only through the Dev Tunnel**, with your Microsoft account: once the tunnel is online, the console's button
+*Mappa e lista degli attacchi* opens it (see [below](#a-public-test-address-for-xrcopilotlab-dynamic-url)). No
+password of its own.
 
 ### The numbers
 
@@ -392,9 +398,37 @@ readable by the group `adm`, and the exact line format of the server's CrowdSec 
 
 ---
 
+## The lab on a domain (stable address)
+
+When the lab runs on a machine that has a name on the internet (a server, a VM), XRCopilotLab and the monitoring page
+can use that name instead of a Dev Tunnel. It is set in **`lab/.env`** (example: [`lab/.env.example`](lab/.env.example)):
+
+```bash
+PUBLIC_DOMAIN=intrusion-lab.example.com   # empty: no domain, the console opens a Dev Tunnel (next section)
+PUBLIC_PAGE_PORT=8443                      # the public port of the monitoring page
+```
+
+then `make lab-up` (or `make lab-restart` if it was running). The console then shows **● Dominio** with the addresses
+to copy into XRCopilotLab, and no Dev Tunnel is opened.
+
+**This assumes the infrastructure is already in place: the lab does none of it.** Before setting `PUBLIC_DOMAIN`:
+
+| What | Where |
+|---|---|
+| The DNS name (`A`/`AAAA` record, or `CNAME`) points to the machine running the lab | DNS of the domain |
+| A reverse proxy with a valid TLS certificate for that name: `https://<domain>/` → `http://<machine>:8091` (API: `/api`, `/mcp`) and `https://<domain>:<PUBLIC_PAGE_PORT>/` → `http://<machine>:8093` (monitoring page) | nginx, Caddy, Azure Application Gateway, … |
+| Ports 443 and `PUBLIC_PAGE_PORT` open from the internet to the proxy (443 from XRCopilotLab's addresses at least); 8091 and 8093 open **only** from the proxy to the machine | firewall / NSG |
+| Who may open the monitoring page: on a domain the page has **no login of its own** (the Dev Tunnel's Microsoft login is not there), so restrict it at the proxy: VPN, office addresses, or the proxy's own sign-in (e.g. Entra ID) | reverse proxy |
+
+With `PUBLIC_DOMAIN` set, the lab publishes `lab-01`'s port 8091 (`/api`, `/mcp`, every call needs the `X-API-Key`)
+and 8093 (the read-only page) on the machine, plain HTTP, for the proxy (`lab/docker-compose.domain.yml`), and the
+package on `lab-01` reports `https://<domain>` as its address (`Connection:PublicUrl`): the page shows it as
+*Dominio del cliente*. *Verifica dall'indirizzo pubblico* in the console calls `https://<domain>/api/status`, as
+XRCopilotLab will: if it fails, the DNS, the proxy or the firewall is not ready yet.
+
 ## A public test address for XRCopilotLab (dynamic URL)
 
-The lab runs on your laptop, but XRCopilotLab runs in the cloud: it needs a public address to reach `lab-01`. The
+Without `PUBLIC_DOMAIN` (the default), the lab gets a temporary public address for tests. The lab runs on your laptop, but XRCopilotLab runs in the cloud: it needs a public address to reach `lab-01`. The
 `tunnel` container creates one with **Microsoft Dev Tunnels**, free, and you do everything from the console: nothing to
 install on the Mac.
 
@@ -438,6 +472,7 @@ sequenceDiagram
 https://<id>-8091.<region>.devtunnels.ms/api    connection with HTTP tools (blueprint)
 https://<id>-8091.<region>.devtunnels.ms/mcp    MCP server registered by hand
 X-API-Key: <the lab key>                        header, from "Copia la chiave"
+https://<id>-8093.<region>.devtunnels.ms/       monitoring page (map and attacks), Microsoft login
 ```
 
 `<id>` is the tunnel's name, chosen by Microsoft; `8091` is `lab-01`'s port; `<region>` is the closest Microsoft region
@@ -454,8 +489,10 @@ X-API-Key: <the lab key>                        header, from "Copia la chiave"
 
 ### Is it safe?
 
-- The tunnel reaches **only** `/api` and `/mcp` of the toolkit on `lab-01`: not SSH, not the website, not the console.
-- The tunnel has anonymous access (XRCopilotLab cannot sign in to Microsoft), but **every call still needs the key**.
+- The tunnel reaches **only** `/api` and `/mcp` of the toolkit on `lab-01`, and its read-only monitoring page: not SSH, not the website, not the console.
+- The API port (8091) has anonymous access (XRCopilotLab cannot sign in to Microsoft), but **every call still needs the key**.
+- The monitoring page (port 8093) has no anonymous access: Dev Tunnels asks for the Microsoft login and lets in only
+  the account that opened the tunnel and its Entra tenant (Hevolus). It only reads.
 - The key is in `lab/.env` (never committed); the browser never sees it unless you press *Copia la chiave*.
 - Dev Tunnels is for development and tests (limits: 5 GB of traffic and 10 tunnels per user per month). **Never use
   it for a customer's server**: there, the toolkit is published by the customer's nginx, as described above.

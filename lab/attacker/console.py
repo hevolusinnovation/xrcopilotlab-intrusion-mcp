@@ -1,7 +1,7 @@
-"""The lab console: the attack buttons and what the intrusion package sees, on http://localhost:8090.
+"""The lab console: the attack buttons, on http://localhost:8090. What the intrusion package sees (map and attacks) is
+lab-01's own monitoring page, opened through the Dev Tunnel (Microsoft login).
 
-By default the target is lab-01, read through its nginx (/intrusion-mcp/) with the lab key added here: the browser
-never sees it. Only GET is forwarded, only to the package's read routes.
+By default the target is lab-01.
 
 A different server running the package can be tested instead ("Server da testare"): you give its API address and its
 API key, and the console attacks it only after GET {url}/status answers 200 with that key. The key is proof that you
@@ -22,7 +22,6 @@ import scenarios
 LAB_API = f"http://{os.environ.get('TARGET_IT', '198.51.100.20')}/intrusion-mcp/api/"
 KEY = os.environ["LAB_API_KEY"]
 STATIC = Path(__file__).parent / "static"
-READ_ROUTES = {"status", "summary", "banned", "suspicious-logins", "attempts", "host-activity", "guardians", "posture"}
 TUNNEL = os.environ.get("TUNNEL_CONTROLLER", "http://tunnel:8092")
 runner = scenarios.Runner()
 scenarios.start_c2()
@@ -72,11 +71,6 @@ class Handler(BaseHTTPRequestHandler):
         if url.path == "/api/target":
             t = current_target()
             return self._send(200, {"mode": t["mode"], "host": t.get("host"), "api": None if t["mode"] == "lab" else t["api"]})
-        if url.path.startswith("/api/lab/"):
-            route = url.path[len("/api/lab/"):]
-            if route not in READ_ROUTES:
-                return self._send(404, {"error": "unknown route"})
-            return self._proxy(route, url.query)
         return self._send(404, {"error": "not found"})
 
     def do_POST(self):
@@ -151,17 +145,6 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, {"ok": False, "error": f"risposta {ex.code} dall'indirizzo pubblico"})
         except OSError as ex:
             return self._send(200, {"ok": False, "error": f"indirizzo pubblico non raggiungibile: {ex}"})
-
-    def _proxy(self, route, query):
-        t = current_target()
-        request = urllib.request.Request(t["api"] + route + (f"?{query}" if query else ""), headers={"X-API-Key": t["key"]})
-        try:
-            with urllib.request.urlopen(request, timeout=20) as response:
-                return self._send(response.status, response.read())
-        except urllib.error.HTTPError as ex:
-            return self._send(ex.code, {"error": f"il server risponde {ex.code}"})
-        except OSError as ex:
-            return self._send(502, {"error": f"il server non risponde: {ex}"})
 
 
 def url_path(path):
