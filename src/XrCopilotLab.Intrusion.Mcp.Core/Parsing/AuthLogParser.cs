@@ -11,14 +11,17 @@ namespace XrCopilotLab.Intrusion.Mcp.Core.Parsing;
 /// 2026-11-10T03:12:45.123456+01:00 bastion-01 sshd[2345]: Failed password for invalid user admin from 203.0.113.7 port 51234 ssh2
 /// Nov 10 03:12:45 bastion-01 sshd[2345]: Accepted publickey for deploy from 198.51.100.10 port 50122 ssh2: ED25519 SHA256:…
 /// </code>
-/// OpenSSH 9.8+ logs as <c>sshd-session</c>; both names are read.
+/// OpenSSH 9.8+ logs as <c>sshd-session</c>; both names are read. The account of a failed try is whatever the attacker
+/// typed, spaces included: it is cleaned and checked for text written for an AI (<see cref="UntrustedText"/>). The
+/// address is the last <c>from … port …</c> of the line, the one sshd wrote: an account named <c>x from 10.0.0.1 port 22</c>
+/// cannot put the attempt on another address.
 /// </summary>
 public static partial class AuthLogParser
 {
-    [GeneratedRegex(@"^Failed (?<method>password|publickey|keyboard-interactive/pam|none) for (?<invalid>invalid user )?(?<user>\S*) from (?<ip>[0-9A-Fa-f:.]+) port (?<port>\d+)", RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"^Failed (?<method>password|publickey|keyboard-interactive/pam|none) for (?<invalid>invalid user )?(?<user>.*) from (?<ip>[0-9A-Fa-f:.]+) port (?<port>\d+)(?: ssh2)?\s*$", RegexOptions.CultureInvariant)]
     private static partial Regex FailedRegex();
 
-    [GeneratedRegex(@"^Invalid user (?<user>\S*) from (?<ip>[0-9A-Fa-f:.]+)(?: port (?<port>\d+))?", RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"^Invalid user (?<user>.*) from (?<ip>[0-9A-Fa-f:.]+)(?: port (?<port>\d+))?\s*$", RegexOptions.CultureInvariant)]
     private static partial Regex InvalidUserRegex();
 
     [GeneratedRegex(@"^Accepted (?<method>password|publickey|keyboard-interactive/pam) for (?<user>\S+) from (?<ip>[0-9A-Fa-f:.]+) port (?<port>\d+)", RegexOptions.CultureInvariant)]
@@ -50,8 +53,9 @@ public static partial class AuthLogParser
         parsed = null;
         if (!IPAddress.TryParse(m.Groups["ip"].Value, out var ip)) return false;
         int? port = int.TryParse(m.Groups["port"].Value, NumberStyles.None, CultureInfo.InvariantCulture, out var p) ? p : null;
-        var user = m.Groups["user"].Value;
-        parsed = new LogEvent(time, kind, LogOrigin.Auth, ip.ToString(), Jail: null, User: user.Length == 0 ? null : user, Port: port, Method: method);
+        var user = UntrustedText.Clean(m.Groups["user"].Value, UntrustedText.MaxUser)!;
+        parsed = new LogEvent(time, kind, LogOrigin.Auth, ip.ToString(), Jail: null, User: user.Length == 0 ? null : user, Port: port, Method: method,
+            Injection: UntrustedText.Injection(m.Groups["user"].Value));
         return true;
     }
 }

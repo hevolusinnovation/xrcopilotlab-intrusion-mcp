@@ -165,6 +165,7 @@ public static class AttackCatalog
         AttackType.PrivilegeEscalation => "An attempt to get more rights on the host: ptrace, a kernel module, a container escape (Falco).",
         AttackType.LogTampering => "Logs cleared or data removed on the host: someone covering their tracks (Falco).",
         AttackType.CryptoMining => "A crypto-currency miner running on the host (Falco).",
+        AttackType.AiPromptInjection => "Text written for the AI that reads the logs (in a request path, an account name or a command): an attempt to make the agent hide or misreport the attacks.",
         _ => "A detector rule this server does not classify.",
     };
 }

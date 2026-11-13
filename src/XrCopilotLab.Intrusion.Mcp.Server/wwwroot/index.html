@@ -178,7 +178,8 @@ const TYPES = {
   NetworkExploitAttempt: "exploit di rete", KnownMaliciousSource: "indirizzo in blacklist",
   IndustrialProtocolCommand: "comandi industriali", CommandAndControl: "SERVER COMPROMESSO (C2)",
   SensitiveFileAccess: "file riservati letti", SuspiciousExecution: "programma sospetto", Persistence: "porta sul retro (chiave/account)",
-  PrivilegeEscalation: "scalata dei privilegi", LogTampering: "log cancellati", CryptoMining: "MINER di criptovalute", Other: "altro",
+  PrivilegeEscalation: "scalata dei privilegi", LogTampering: "log cancellati", CryptoMining: "MINER di criptovalute",
+  AiPromptInjection: "inganno dell'AI (prompt injection)", Other: "altro",
 };
 const GUARDIANS = {
   sshd: "Accesso remoto (SSH)", nginx: "Server web", ufw: "Firewall", fail2ban: "fail2ban · banna chi sbaglia password",
@@ -344,6 +345,13 @@ function drawStats(summary) {
 
 function drawGuardians(g) {
   const place = g.site && (g.site.city || g.site.country) ? [g.site.city, g.site.country].filter(Boolean).join(", ") : "";
+  // Text written for the AI that reads these logs: the agent was told to quote it, never to follow it.
+  const liar = (summary.topAttackers || []).find(r => (r.attackTypes || []).includes("AiPromptInjection"));
+  if (liar) {
+    const where = { path: "nell'indirizzo di una pagina", userAgent: "nello user agent", user: "come nome utente SSH", command: "in un comando" }[liar.promptInjections?.[0]?.field] || "";
+    parts.push(`<b>Tentativo di ingannare l'AI</b>: ${esc(liar.ip)} (${esc(liar.location?.city || "")}, ${esc(liar.location?.country || "")}) ` +
+      `ha scritto istruzioni per l'assistente ${where}, l'ultima volta alle ${time(liar.lastSeen)}. L'assistente le riporta come prova, non le esegue.`);
+  }
   $("host").textContent = `Guardiano di rete · ${g.host}${place ? " · " + place : ""} · sola lettura`;
   $("simulated").hidden = !g.simulated;
   // The server on the map, at its public IP's location (city/country), not a company name.

@@ -83,14 +83,16 @@ public static partial class ModSecurityParser
             var first = found.MinBy(f => f.Rank);
             var request = t.TryGetProperty("request", out var r) && r.ValueKind == JsonValueKind.Object ? r : default;
             var response = t.TryGetProperty("response", out var rs) && rs.ValueKind == JsonValueKind.Object ? rs : default;
+            var uri = request.ValueKind == JsonValueKind.Object ? Text(request, "uri") : null;
             parsed = new LogEvent(time, LogEventKind.WafAlert, LogOrigin.ModSecurity, ip.ToString(),
-                Method: request.ValueKind == JsonValueKind.Object ? Text(request, "method") : null,
-                Path: request.ValueKind == JsonValueKind.Object ? Text(request, "uri") : null,
+                Method: UntrustedText.Clean(request.ValueKind == JsonValueKind.Object ? Text(request, "method") : null, 16),
+                Path: UntrustedText.Clean(uri, UntrustedText.MaxPath),
                 Status: response.ValueKind == JsonValueKind.Object && response.TryGetProperty("http_code", out var c) && c.TryGetInt32(out var code) ? code : null,
                 Rule: first.Message,
                 Detail: string.Join(",", found.OrderBy(f => f.Rank).Select(f => f.Family).Distinct()),
                 SignatureId: first.RuleId,
-                Score: score);
+                Score: score,
+                Injection: uri is null ? null : UntrustedText.Injection(UntrustedText.Decode(uri)));
             return true;
         }
         catch (JsonException)

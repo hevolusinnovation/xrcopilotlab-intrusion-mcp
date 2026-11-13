@@ -66,6 +66,10 @@ public enum AttackType
     /// <summary>A crypto-currency miner running on the host (Falco).</summary>
     CryptoMining,
 
+    /// <summary>Text written for the AI that reads the logs, in a request path, an account name or a command: "ignore your
+    /// instructions", chat-model role tokens, hidden Unicode. An attempt to make the agent lie about the attacks.</summary>
+    AiPromptInjection,
+
     /// <summary>A fail2ban jail, CrowdSec scenario, Suricata signature or Falco rule this server does not classify.</summary>
     Other,
 }

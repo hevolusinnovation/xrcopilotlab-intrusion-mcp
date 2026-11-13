@@ -5,8 +5,8 @@ namespace XrCopilotLab.Intrusion.Mcp.Core.Parsing;
 
 /// <summary>
 /// The patterns that make a web request an attack, in order: exploits first (they say more), then the scans for known
-/// paths, then the scanner user agents, then the status codes of a refused login and of the rate limit. A request that
-/// matches none is ordinary traffic and is not kept.
+/// paths, then the scanner user agents, then the status codes of a refused login and of the rate limit, then text written
+/// for an AI (<see cref="UntrustedText.Injection"/>). A request that matches none is ordinary traffic and is not kept.
 /// </summary>
 public static partial class WebProbeRules
 {
@@ -27,16 +27,20 @@ public static partial class WebProbeRules
         ("cgi-bin", AttackType.WebVulnerabilityScan, CgiBin()),
     ];
 
+    /// <summary>A request whose only sign of attack is text written for the AI that reads the logs.</summary>
+    public const string PromptInjectionRule = "prompt-injection";
+
     /// <summary>The rule a request matches, or null for ordinary traffic.</summary>
     public static (string Rule, AttackType Type)? Match(string path, int status, string? userAgent)
     {
-        var decoded = Decode(path);
+        var decoded = UntrustedText.Decode(path);
         foreach (var (rule, type, pattern) in PathRules)
             if (pattern.IsMatch(decoded)) return (rule, type);
         if (userAgent is not null && Log4Shell().IsMatch(userAgent)) return ("log4shell", AttackType.WebExploitAttempt);
         if (userAgent is not null && ScannerAgent().IsMatch(userAgent)) return ("scanner-agent", AttackType.WebVulnerabilityScan);
         if (status == 401) return ("auth-failure", AttackType.WebLoginBruteForce);
         if (status == 429) return ("rate-limited", AttackType.RequestFlood);
+        if (Injection(path, userAgent) is not null) return (PromptInjectionRule, AttackType.AiPromptInjection);
         return null;
     }
 
@@ -49,15 +53,14 @@ public static partial class WebProbeRules
             "scanner-agent" => AttackType.WebVulnerabilityScan,
             "auth-failure" => AttackType.WebLoginBruteForce,
             "rate-limited" => AttackType.RequestFlood,
+            PromptInjectionRule => AttackType.AiPromptInjection,
             _ => AttackType.Other,
         };
     }
 
-    private static string Decode(string path)
-    {
-        try { return Uri.UnescapeDataString(path.Replace('+', ' ')); }
-        catch (UriFormatException) { return path; }
-    }
+    /// <summary>The prompt-injection rule the path (decoded) or the user agent matches, or null.</summary>
+    public static string? Injection(string path, string? userAgent) =>
+        UntrustedText.Injection(UntrustedText.Decode(path)) ?? UntrustedText.Injection(userAgent);
 
     [GeneratedRegex(@"\$\{\s*jndi\s*:", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex Log4Shell();

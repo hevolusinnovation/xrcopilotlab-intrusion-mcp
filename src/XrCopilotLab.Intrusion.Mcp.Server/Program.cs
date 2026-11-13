@@ -76,7 +76,9 @@ builder.Services.AddSingleton<GuardQueries>();
 builder.Services.AddScoped<IntrusionTools>();
 
 // Stateless HTTP transport: nothing is kept between calls, so the Container App of the demo scales to zero.
-builder.Services.AddMcpServer().WithHttpTransport(o => o.Stateless = true).WithTools<IntrusionTools>();
+// The instructions tell the agent, before any answer, that some fields are the attackers' text and not orders.
+builder.Services.AddMcpServer(o => o.ServerInstructions = IntrusionTools.Instructions)
+    .WithHttpTransport(o => o.Stateless = true).WithTools<IntrusionTools>();
 
 var aiConn = builder.Configuration["APPLICATIONINSIGHTS_CONNECTION_STRING"];
 builder.Services.Configure<AspNetCoreTraceInstrumentationOptions>(o => o.Filter = ctx => !ctx.Request.Path.StartsWithSegments("/healthz"));

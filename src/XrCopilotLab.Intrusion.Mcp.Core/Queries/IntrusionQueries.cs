@@ -106,7 +106,7 @@ public sealed class IntrusionQueries(ILogSource source, IGeoLocator geo, Intrusi
             .OrderByDescending(e => e.Time)
             .Take(MaxTimeline)
             .Select(e => new TimelineEntry(e.Time, e.Kind.ToString(), DetectorName(e.Origin), e.Jail, e.User, e.Port, e.Method,
-                e.TargetPort, e.Path, e.Status, e.Rule, e.Detail, e.Outbound, e.Command, e.LinkedBy, e.Score))
+                e.TargetPort, e.Path, e.Status, e.Rule, e.Detail, e.Outbound, e.Command, e.LinkedBy, e.Score, e.Injection))
             .ToList();
         return new IpDetailResult(source.Hostname, source.Simulated, period, report,
             _analyzer.SuspiciousLogins(events).Where(s => s.Ip == ip && s.Time >= period.From).ToList(),
@@ -160,7 +160,8 @@ public sealed class IntrusionQueries(ILogSource source, IGeoLocator geo, Intrusi
             inPeriod.Count(e => e.Kind == LogEventKind.CrowdsecAlert),
             inPeriod.Count(e => e.Kind == LogEventKind.IdsAlert),
             inPeriod.Count(e => e.Kind == LogEventKind.HostAlert),
-            inPeriod.Count(e => e.Kind == LogEventKind.WafAlert));
+            inPeriod.Count(e => e.Kind == LogEventKind.WafAlert),
+            inPeriod.Count(e => e.Injection is not null && e.Kind != LogEventKind.InvalidUser));
 
         return new SummaryResult(source.Hostname, source.Simulated, period, totals, byType, byCountry, ThreatAnalyzer.TargetedPorts(inPeriod, 15),
             reports.Take(Math.Clamp(top, 1, MaxTop)).ToList(), campaigns, suspicious, points,

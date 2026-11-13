@@ -121,6 +121,11 @@ public sealed class ThreatAnalyzer(IntrusionPolicy policy, IGeoLocator geo)
             foreach (var a in ids) types.Add(AttackCatalog.FromIdsAlert(a));
             foreach (var a in host) types.Add(AttackCatalog.FromHostAlert(a));
             foreach (var a in waf) types.Add(ModSecurityParser.TypeOf(a));
+            // Text written for the AI that reads these logs, wherever the attacker put it.
+            // sshd writes an invalid account twice (Invalid user, Failed password): count the failure.
+            var injections = events.Where(e => e.Injection is not null && e.Kind != LogEventKind.InvalidUser).ToList();
+            if (injections.Count == 0) injections = events.Where(e => e.Injection is not null).ToList();
+            if (injections.Count > 0) types.Add(AttackType.AiPromptInjection);
 
             var ports = blocks.Where(b => b.TargetPort is not null).GroupBy(b => b.TargetPort!.Value).ToList();
             if (ports.Count >= policy.PortScanMinPorts) types.Add(AttackType.PortScan);
@@ -167,6 +172,9 @@ public sealed class ThreatAnalyzer(IntrusionPolicy policy, IGeoLocator geo)
                     .Select(g => new WafFinding(g.Key, ModSecurityParser.TypeOf(g.First()).ToString(), g.First().SignatureId, g.First().Rule!, g.Count(),
                         g.Max(a => a.Score ?? 0), $"{g.First().Method} {g.First().Path}"))
                     .OrderByDescending(x => x.Requests).Take(10).ToList(),
+                injections.GroupBy(e => (e.Injection!, InjectionField(e)))
+                    .Select(g => new PromptInjection(g.Key.Item1, g.Key.Item2, g.Count(), InjectionExample(g.First())))
+                    .OrderByDescending(x => x.Events).Take(10).ToList(),
                 events.Min(e => e.Time),
                 events.Max(e => e.Time)));
         }
@@ -203,6 +211,23 @@ public sealed class ThreatAnalyzer(IntrusionPolicy policy, IGeoLocator geo)
             .Take(top)
             .ToList();
 
+    /// <summary>Where the attacker wrote the text: the account tried on SSH, the command run, the user agent, or the request path.</summary>
+    public static string InjectionField(LogEvent e) => e.Origin switch
+    {
+        LogOrigin.Auth => "user",
+        LogOrigin.Falco when e.Command is not null && UntrustedText.Injection(e.Command) is not null => "command",
+        LogOrigin.WebAccess when e.Detail is not null => "userAgent",
+        _ => "path",
+    };
+
+    private static string? InjectionExample(LogEvent e) => InjectionField(e) switch
+    {
+        "user" => e.User,
+        "command" => e.Command,
+        "userAgent" => e.Detail,
+        _ => e.Path,
+    };
+
     private static bool IsSsh(string? jail) => string.Equals(jail, AttackCatalog.SshJail, StringComparison.OrdinalIgnoreCase);
 
     private static bool IsRecidive(string? jail) => string.Equals(jail, AttackCatalog.RecidiveJail, StringComparison.OrdinalIgnoreCase);
@@ -236,6 +261,8 @@ public sealed class ThreatAnalyzer(IntrusionPolicy policy, IGeoLocator geo)
         }
         if (types.Contains(AttackType.RepeatOffender) || types.Contains(AttackType.IndustrialProtocolProbe)
             || types.Contains(AttackType.WebExploitAttempt) || types.Contains(AttackType.IndustrialProtocolCommand) || suspicious.Count > 0
+            // Someone who writes for the AI knows an agent reads these logs, and wants it to tell a different story.
+            || types.Contains(AttackType.AiPromptInjection)
             // A high-priority IDS signature on an attack: Suricata saw the exploit itself, not a symptom of it.
             || ids.Any(a => a.Priority == 1 && AttackCatalog.FromIdsAlert(a) == AttackType.NetworkExploitAttempt))
             return Severity.High;

@@ -48,17 +48,21 @@ public static class FalcoParser
 
             // sudo clears SSH_CLIENT but leaves SUDO_USER: then the account is tied to its login by the analysis.
             var client = SshClient(Field(fields, "proc.env[SSH_CLIENT]"));
+            // What the intruder typed or named: cleaned, and checked for text written for the AI reading the alerts.
+            var command = Field(fields, "proc.cmdline");
+            var path = Field(fields, "fd.name") ?? Field(fields, "fs.path.target");
             parsed = new LogEvent(time, LogEventKind.HostAlert, LogOrigin.Falco, client ?? "",
                 // The account that logged in (the kernel keeps it through sudo, when it has audit), else the one sudo
                 // was run by, else the one the process runs as.
-                User: Field(fields, "user.loginname") ?? Field(fields, "proc.env[SUDO_USER]") ?? Field(fields, "user.name"),
-                Path: Field(fields, "fd.name") ?? Field(fields, "fs.path.target"),
+                User: UntrustedText.Clean(Field(fields, "user.loginname") ?? Field(fields, "proc.env[SUDO_USER]") ?? Field(fields, "user.name"), UntrustedText.MaxUser),
+                Path: UntrustedText.Clean(path, UntrustedText.MaxPath),
                 Rule: rule,
                 Detail: string.IsNullOrEmpty(tags) ? null : tags,
                 Priority: priority,
-                Command: Field(fields, "proc.cmdline"),
-                Parent: Ancestry(fields),
-                LinkedBy: client is null ? null : "ssh-session");
+                Command: UntrustedText.Clean(command, UntrustedText.MaxCommand),
+                Parent: UntrustedText.Clean(Ancestry(fields), UntrustedText.MaxCommand),
+                LinkedBy: client is null ? null : "ssh-session",
+                Injection: UntrustedText.Injection(command) ?? UntrustedText.Injection(path));
             return true;
         }
         catch (JsonException)

@@ -11,12 +11,11 @@ namespace XrCopilotLab.Intrusion.Mcp.Core.Parsing;
 /// 198.51.100.150 - - [10/Nov/2026:03:12:45 +0100] "GET /.env HTTP/1.1" 404 162 "-" "Mozilla/5.0 zgrab/0.x"
 /// </code>
 /// Only the requests that match a <see cref="WebProbeRules"/> pattern become events: ordinary traffic is skipped, so
-/// a busy site does not fill the memory. The path is cut at 200 characters.
+/// a busy site does not fill the memory. The path is the attacker's text: cleaned and cut at 200 characters
+/// (<see cref="UntrustedText"/>), and checked, with the user agent, for text written for an AI.
 /// </summary>
 public static partial class NginxAccessLogParser
 {
-    private const int MaxPath = 200;
-
     [GeneratedRegex(
         @"^(?<ip>[0-9A-Fa-f:.]+) \S+ \S+ \[(?<ts>[^\]]+)\] ""(?<method>[A-Z]{3,10}) (?<path>\S+)(?: HTTP/[\d.]+)?"" (?<status>\d{3}) \S+(?: ""[^""]*"" ""(?<ua>[^""]*)"")?",
         RegexOptions.CultureInvariant)]
@@ -42,9 +41,14 @@ public static partial class NginxAccessLogParser
 
         parsed = new LogEvent(time, LogEventKind.WebRequest, LogOrigin.WebAccess, ip.ToString(),
             Method: m.Groups["method"].Value,
-            Path: path.Length > MaxPath ? path[..MaxPath] : path,
+            Path: UntrustedText.Clean(path, UntrustedText.MaxPath),
             Status: status,
-            Rule: match.Rule);
+            Rule: match.Rule,
+            // The user agent is kept (cleaned) only when it is where the attacker wrote for the AI: it is the evidence.
+            Detail: UntrustedText.Injection(UntrustedText.Decode(path)) is null && UntrustedText.Injection(ua) is not null
+                ? UntrustedText.Clean(ua, UntrustedText.MaxPath)
+                : null,
+            Injection: WebProbeRules.Injection(path, ua));
         return true;
     }
 }

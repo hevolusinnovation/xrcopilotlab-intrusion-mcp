@@ -77,6 +77,9 @@ public enum LogOrigin
 /// to an address in <see cref="LinkedBy"/> (<c>ssh-session</c>, <c>web-exploit</c>). A ModSecurity alert carries the
 /// request in <see cref="Method"/>, <see cref="Path"/> and <see cref="Status"/>, the first CRS rule in <see cref="Rule"/>
 /// and <see cref="SignatureId"/>, its attack families in <see cref="Detail"/> and the anomaly score in <see cref="Score"/>.
+/// <see cref="User"/>, <see cref="Path"/>, <see cref="Command"/> and <see cref="Parent"/> are the attacker's text, cleaned by
+/// <see cref="Parsing.UntrustedText"/>; <see cref="Injection"/> is the rule that text matched when it was written for an
+/// AI reading the logs (a prompt injection), or null.
 /// </summary>
 public sealed record LogEvent(
     DateTimeOffset Time,
@@ -99,7 +102,8 @@ public sealed record LogEvent(
     string? Command = null,
     string? Parent = null,
     string? LinkedBy = null,
-    int? Score = null)
+    int? Score = null,
+    string? Injection = null)
 {
     public bool IsBanStart => Kind is LogEventKind.Ban or LogEventKind.RestoreBan;
 
