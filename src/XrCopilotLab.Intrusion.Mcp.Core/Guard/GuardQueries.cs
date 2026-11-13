@@ -3,14 +3,28 @@ using XrCopilotLab.Intrusion.Mcp.Core.Queries;
 
 namespace XrCopilotLab.Intrusion.Mcp.Core.Guard;
 
-/// <summary>Where the protected host is, for the map of the page (<c>Site:*</c>). Optional.</summary>
+/// <summary>
+/// How the toolkit finds where the server is for the page's map. It geolocates the server's own public IP, the same
+/// way for every customer: no name, no coordinates typed by hand. <c>LocationUrl</c> is a service that returns the
+/// caller's public IP location directly (ipapi.co by default), so no local geo database is needed for the marker.
+/// <c>LocationFile</c>, when set, is read instead of calling out: a server with no outbound access (or the Docker lab,
+/// where the tunnel container writes it) can still place the server on the map.
+/// </summary>
 public sealed class SiteOptions
 {
     public const string SectionName = "Site";
 
-    public string? Name { get; set; }
-    public double? Latitude { get; set; }
-    public double? Longitude { get; set; }
+    public List<string> LocationUrls { get; set; } = ["https://ipwho.is/", "https://ipapi.co/json/"];
+    public string? LocationFile { get; set; }
+}
+
+/// <summary>Where the server is on the page's map, from its public IP. All fields may be null until it is resolved.</summary>
+public sealed record SiteLocation(double? Latitude = null, double? Longitude = null, string? City = null, string? Country = null);
+
+/// <summary>Resolves and caches the server's own location (its public IP geolocated).</summary>
+public interface ISiteLocation
+{
+    SiteLocation Current { get; }
 }
 
 /// <summary>
@@ -42,7 +56,7 @@ public sealed record ConnectionInfo(string Mode, string? Url, string? Api, strin
 public sealed record GuardianStatus(string Name, string Role, string Status, bool Installed, string? Version, bool? Running, string? Mode,
     bool Managed, string? Log, DateTimeOffset? LogUpdated, DateTimeOffset? RulesUpdated, string? Note);
 
-public sealed record GuardiansResult(string Host, bool Simulated, DateTimeOffset Now, SiteOptions Site, ConnectionInfo Connection, IReadOnlyList<GuardianStatus> Guardians,
+public sealed record GuardiansResult(string Host, bool Simulated, DateTimeOffset Now, SiteLocation Site, ConnectionInfo Connection, IReadOnlyList<GuardianStatus> Guardians,
     IReadOnlyList<ListeningPort> Listening, SshFacts? Ssh);
 
 public sealed record SeverityCount(string Severity, int Findings);
@@ -50,7 +64,7 @@ public sealed record SeverityCount(string Severity, int Findings);
 public sealed record PostureResult(string Host, bool Simulated, Period Period, IReadOnlyList<SeverityCount> BySeverity, IReadOnlyList<PostureFinding> Findings);
 
 /// <summary>The answers behind <c>intrusion_guardians</c> and <c>intrusion_posture</c>. Read-only: nothing is changed.</summary>
-public sealed class GuardQueries(IHostInspector inspector, IntrusionQueries intrusions, SiteOptions site, ConnectionOptions connection)
+public sealed class GuardQueries(IHostInspector inspector, IntrusionQueries intrusions, ISiteLocation site, ConnectionOptions connection)
 {
     /// <summary>The posture reads a week of attacks: a quiet day says little about a configuration.</summary>
     public const int DefaultPostureHours = 7 * 24;
@@ -70,7 +84,7 @@ public sealed class GuardQueries(IHostInspector inspector, IntrusionQueries intr
     public GuardiansResult Guardians(DateTimeOffset now)
     {
         var facts = inspector.Inspect(now);
-        return new GuardiansResult(intrusions.Host, intrusions.Simulated, now, site, Connection(connection, facts.TunnelUrl),
+        return new GuardiansResult(intrusions.Host, intrusions.Simulated, now, site.Current, Connection(connection, facts.TunnelUrl),
             facts.Guardians.Select(g => new GuardianStatus(g.Name, Roles.GetValueOrDefault(g.Name, ""), StatusOf(g), g.Installed, g.Version, g.Running,
                 g.Mode, g.Managed, g.Log, g.LogUpdated, g.RulesUpdated, g.Note)).ToList(),
             facts.Listening, facts.Ssh);

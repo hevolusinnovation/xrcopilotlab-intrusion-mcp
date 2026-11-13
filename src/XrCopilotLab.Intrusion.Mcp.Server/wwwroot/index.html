@@ -343,12 +343,14 @@ function drawStats(summary) {
 }
 
 function drawGuardians(g) {
-  $("host").textContent = `Guardiano di rete · ${g.host}${g.site?.name ? " · " + g.site.name : ""} · sola lettura`;
+  const place = g.site && (g.site.city || g.site.country) ? [g.site.city, g.site.country].filter(Boolean).join(", ") : "";
+  $("host").textContent = `Guardiano di rete · ${g.host}${place ? " · " + place : ""} · sola lettura`;
   $("simulated").hidden = !g.simulated;
+  // The server on the map, at its public IP's location (city/country), not a company name.
   if (g.site?.latitude != null && g.site?.longitude != null && !target) {
     target = [g.site.latitude, g.site.longitude];
     targetMarker = L.marker(target, { icon: L.divIcon({ className: "target", iconSize: [14, 14] }) })
-      .addTo(map).bindTooltip(g.site.name || g.host, { permanent: true, direction: "right", offset: [8, 0] });
+      .addTo(map).bindTooltip(place || g.host, { permanent: true, direction: "right", offset: [8, 0] });
   }
   $("guardians").innerHTML = (g.guardians || []).map(x => `
     <div class="guardian" title="${esc(x.role)}${x.note ? " — " + esc(x.note) : ""}">

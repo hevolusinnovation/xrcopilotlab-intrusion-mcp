@@ -36,6 +36,7 @@ LOCAL_PAGE_PORT = 8089   # published on this container (localhost:8089): local a
 LAB_API_KEY = os.environ.get("LAB_API_KEY", "")  # the test key, shown on lab-01's page (test mode only)
 ID_FILE = "/root/tunnel-id"
 URL_FILE = os.environ.get("TUNNEL_URL_FILE", "/state/url")
+LOCATION_FILE = os.environ.get("TUNNEL_LOCATION_FILE", "/state/location.json")
 DEVICE = re.compile(r"open the page (?P<url>https://\S+) and enter the code (?P<code>[A-Z0-9-]+)")
 WEB_URL = re.compile(r"https://\S+?-%d\.\S+?devtunnels\.ms\S*" % PORT)
 
@@ -161,7 +162,43 @@ def logout():
     set_state(phase="logged-out", user=None, url=None, pageUrl=None, login=None, error=None)
 
 
+def write_server_location():
+    """lab-01 is isolated; this container has internet. Geolocate our own public IP (the machine running the lab) and
+    write it to the shared volume, so the toolkit places the server on the map the same way a real one does from its IP.
+    ipapi.co/json returns the caller's own location directly, so no geo database is needed for the marker."""
+    import urllib.request
+    services = ["https://ipwho.is/", "https://ipapi.co/json/"]
+    while True:
+        loc = None
+        for url in services:
+            try:
+                with urllib.request.urlopen(url, timeout=8) as r:
+                    d = json.loads(r.read())
+                if d.get("success") is False or d.get("error") or d.get("status") == "fail":
+                    continue
+                lat = d.get("latitude", d.get("lat"))
+                if lat is None:
+                    continue
+                loc = {"latitude": lat, "longitude": d.get("longitude", d.get("lon")),
+                       "city": d.get("city") or d.get("cityName"),
+                       "country": d.get("country_name") or d.get("country") or d.get("countryName")}
+                break
+            except Exception as ex:
+                print(f"location service {url} failed:", ex)
+        if loc:
+            try:
+                os.makedirs(os.path.dirname(LOCATION_FILE), exist_ok=True)
+                with open(LOCATION_FILE + ".tmp", "w") as f:
+                    json.dump(loc, f)
+                os.chmod(LOCATION_FILE + ".tmp", 0o644)
+                os.replace(LOCATION_FILE + ".tmp", LOCATION_FILE)
+            except OSError as ex:
+                print("cannot write the location file:", ex)
+        time.sleep(1800)
+
+
 def boot():
+    threading.Thread(target=write_server_location, daemon=True).start()
     # lab-01's ports, reachable through this container's localhost: devtunnel hosts local ports only.
     subprocess.Popen(["socat", f"TCP-LISTEN:{PORT},fork,reuseaddr", f"TCP:{LAB_API}"])
     subprocess.Popen(["socat", f"TCP-LISTEN:{PAGE_PORT},fork,reuseaddr", f"TCP:{LAB_PAGE}"])

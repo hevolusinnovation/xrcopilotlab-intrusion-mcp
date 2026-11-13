@@ -16,11 +16,11 @@ if [[ -f /etc/suricata/suricata.yaml ]]; then
   home="$(hostname -I | tr ' ' '\n' | grep -v '^$' | grep -v ':' | sed 's|$|/32|' | paste -sd, -)"
   sed -i "0,/^    HOME_NET:.*/s##    HOME_NET: \"[$home]\"#" /etc/suricata/suricata.yaml
 fi
-# The site, from lab/.env (SITE_*, PUBLIC_DOMAIN), in the same file install.sh writes from SITE_* and PUBLIC_URL:
-# the name and place on the page's map, and with a domain XRCopilotLab's address instead of a tunnel's.
+# The site on the page's map comes from the server's public IP, geolocated. lab-01 is isolated, so it cannot call out:
+# the tunnel container (which has internet) writes the location to the shared volume, and the toolkit reads it here.
+# With a domain, that is XRCopilotLab's address (Connection:PublicUrl) instead of a tunnel's.
 {
-  if [[ -n "${SITE_NAME:-}" ]]; then printf 'Site__Name=%s\n' "$SITE_NAME"; fi
-  if [[ -n "${SITE_LATITUDE:-}" && -n "${SITE_LONGITUDE:-}" ]]; then printf 'Site__Latitude=%s\nSite__Longitude=%s\n' "$SITE_LATITUDE" "$SITE_LONGITUDE"; fi
+  printf 'Site__LocationFile=/var/lib/xrcopilotlab-intrusion-mcp/tunnel/location.json\n'
   if [[ -n "${PUBLIC_DOMAIN:-}" ]]; then printf 'Connection__PublicUrl=https://%s\n' "$PUBLIC_DOMAIN"; fi
 } > /etc/xrcopilotlab-intrusion-mcp/site.env
 chgrp xrcopilot-intrusion /etc/xrcopilotlab-intrusion-mcp/site.env && chmod 0640 /etc/xrcopilotlab-intrusion-mcp/site.env

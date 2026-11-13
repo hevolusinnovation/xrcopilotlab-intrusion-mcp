@@ -325,22 +325,21 @@ install and never asks twice:
 | The program and the service | replaced, then the service restarts with the new version (`upgrading 0.2.0 -> 0.3.0`) |
 | User, folders, `libicu` | created only if missing |
 
-**The server's name, place and public address** (optional) are given the same way, as variables:
+**The server's place on the map is automatic:** the toolkit geolocates the server's own **public IP** (one call to
+`ipapi.co`, no local geo database needed for the marker, no company name). It is approximate — the city of the public
+IP / ISP, which for a cloud server is the data center, not the office.
+
+**The public address for XRCopilotLab** (optional) is given as a variable:
 
 ```bash
-sudo SITE_NAME="Officina Rossi (Bari)" SITE_LATITUDE=41.117 SITE_LONGITUDE=16.871 \
-     PUBLIC_URL=https://guardiano.cliente.it/intrusion-mcp ./install.sh
+sudo PUBLIC_URL=https://guardiano.cliente.it/intrusion-mcp ./install.sh
 ```
 
 | Variable | What it does |
 |---|---|
-| `SITE_NAME` | The name at the top of the monitoring page and on the map; without it, the host name only |
-| `SITE_LATITUDE`, `SITE_LONGITUDE` | The server's place on the map, decimal degrees (both or neither) |
 | `PUBLIC_URL` | The address XRCopilotLab uses, on the customer's domain (`https://…`): the DNS name, nginx with TLS and the firewall must already be in place (see [Where it answers](#3-where-it-answers)) |
 
-They go to `/etc/xrcopilotlab-intrusion-mcp/site.env`, checked first (a wrong value stops the script before the
-file is written). A later run that gives none of them keeps the file; one that gives any of them rewrites it whole, so
-give them all again. Remove the file to forget them.
+It goes to `/etc/xrcopilotlab-intrusion-mcp/site.env`; a later run without it keeps the file. Remove the file to forget it.
 
 Options: `--new-key` (replace the key), `--no-start` (install without starting, for images built ahead), and
 `--with` to install the security packages the server does not have yet:
@@ -437,8 +436,8 @@ PUBLIC_DOMAIN=intrusion-lab.example.com   # empty: no domain, the console opens 
 PUBLIC_PAGE_PORT=8443                      # the public port of the monitoring page
 ```
 
-In the same file, `SITE_NAME`, `SITE_LATITUDE` and `SITE_LONGITUDE` set the name and the place the page shows (the
-lab's company, *Alveo Energia (Torino)*, is invented; on a real server the same variables go to `install.sh`).
+The server's place on the map is automatic (its public IP, geolocated). In the lab, lab-01 is isolated, so the tunnel
+container resolves the location — the machine running the lab — and shares it; no company name, nothing to set.
 
 then `make lab-up` (or `make lab-restart` if it was running). The console then shows **● Dominio** with the addresses
 to copy into XRCopilotLab, and no Dev Tunnel is opened.
@@ -698,7 +697,7 @@ configured; `/livez` answers when the process is up. 120 calls per minute per ke
 | `Logs:SuricataFiles` | `/var/log/suricata/eve.json*` | Suricata EVE logs: only `event_type: alert`, priority 1 and 2 |
 | `Logs:FalcoFiles` | `/var/log/falco/events.json*` | Falco JSON file output: alerts of priority Notice and above |
 | `Logs:ModSecurityFiles` | `/var/log/modsecurity/audit.json*` | ModSecurity JSON audit log: web attacks the CRS would block |
-| `Site:Name` / `Site:Latitude` / `Site:Longitude` | — | The server's name and place on the monitoring page's map (optional; `SITE_NAME`, `SITE_LATITUDE`, `SITE_LONGITUDE` at install) |
+| `Site:LocationUrl` | `https://ipapi.co/json/` | Service that returns the server's own public-IP location, to place it on the map (city/country, no name). `Site:LocationFile` reads the location from a file instead, for a server with no outbound access or the lab |
 | `Connection:PublicUrl` | — | The customer's own public address for XRCopilotLab (`https://guardiano.cliente.it/intrusion-mcp`; `PUBLIC_URL` at install). When set, it is the address; without it a test tunnel gives a temporary one |
 | `Connection:TunnelUrlFile` | `/var/lib/.../tunnel/url` | Where a test tunnel writes its temporary public address |
 | `Logs:LocalAddresses` | the interfaces' addresses | The server's own addresses, to tell an attack coming in from a connection the server opened |

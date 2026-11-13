@@ -71,6 +71,7 @@ else
 }
 builder.Services.AddSingleton<IntrusionQueries>();
 builder.Services.AddSingleton(builder.Configuration.GetSection(SiteOptions.SectionName).Get<SiteOptions>() ?? new SiteOptions());
+builder.Services.AddSingleton<ISiteLocation, HttpSiteLocation>();
 builder.Services.AddSingleton<GuardQueries>();
 builder.Services.AddScoped<IntrusionTools>();
 

@@ -13,14 +13,11 @@
 #                also install and configure these security packages (guardians.sh), idempotently, in detection mode
 #   --no-dashboard
 #                do not publish the monitoring page (dashboard.sh: nginx on port 8471, HTTPS, password, internal network only)
-# The server's identity on the monitoring page and for XRCopilotLab, optional, from the environment (sudo -E or
-# VAR=… sudo ./install.sh): written to /etc/xrcopilotlab-intrusion-mcp/site.env when at least one is given, and kept
-# by later runs that give none (remove the file to forget them).
-#   SITE_NAME       the name the page shows ("Officina Rossi (Bari)"); without it, the host name only
-#   SITE_LATITUDE   the server's place on the map, decimal degrees (41.117)
-#   SITE_LONGITUDE  (16.871)
+# The server's public address for XRCopilotLab, optional, from the environment (sudo -E or VAR=… sudo ./install.sh):
+# written to /etc/xrcopilotlab-intrusion-mcp/site.env, kept by later runs that give none (remove the file to forget it).
 #   PUBLIC_URL      the address XRCopilotLab uses, on the customer's domain, published by their nginx with TLS
-#                   (https://guardiano.cliente.it/intrusion-mcp); without it, a test tunnel or none
+#                   (https://guardiano.cliente.it/intrusion-mcp); without it, a test tunnel or none.
+# The server's place on the map is found automatically from its public IP (geolocated); nothing to configure.
 set -euo pipefail
 
 START=1
@@ -111,25 +108,15 @@ elif [[ $START -eq 1 || $NEW_KEY -eq 1 || -n "${INTRUSION_MCP_API_KEY:-}" ]]; th
   echo "key: stored (its SHA-256 only)"
 fi
 
-# The site: name, place on the map, public address (Site:*, Connection:PublicUrl), checked before the file is written.
-if [[ -n "${SITE_NAME:-}${SITE_LATITUDE:-}${SITE_LONGITUDE:-}${PUBLIC_URL:-}" ]]; then
-  NUM='^-?[0-9]+(\.[0-9]+)?$'
-  [[ -z "${SITE_LATITUDE:-}" || "$SITE_LATITUDE" =~ $NUM ]] || { echo "SITE_LATITUDE must be decimal degrees, e.g. 41.117" >&2; exit 2; }
-  [[ -z "${SITE_LONGITUDE:-}" || "$SITE_LONGITUDE" =~ $NUM ]] || { echo "SITE_LONGITUDE must be decimal degrees, e.g. 16.871" >&2; exit 2; }
-  if [[ -n "${SITE_LATITUDE:-}" && -z "${SITE_LONGITUDE:-}" || -z "${SITE_LATITUDE:-}" && -n "${SITE_LONGITUDE:-}" ]]; then
-    echo "SITE_LATITUDE and SITE_LONGITUDE go together" >&2; exit 2
-  fi
-  [[ -z "${PUBLIC_URL:-}" || "$PUBLIC_URL" =~ ^https://[^[:space:]]+$ ]] || { echo "PUBLIC_URL must be https://…" >&2; exit 2; }
-  {
-    if [[ -n "${SITE_NAME:-}" ]]; then printf 'Site__Name=%s\n' "$(printf '%s' "$SITE_NAME" | tr -d '\r\n')"; fi
-    if [[ -n "${SITE_LATITUDE:-}" ]]; then printf 'Site__Latitude=%s\nSite__Longitude=%s\n' "$SITE_LATITUDE" "$SITE_LONGITUDE"; fi
-    if [[ -n "${PUBLIC_URL:-}" ]]; then printf 'Connection__PublicUrl=%s\n' "${PUBLIC_URL%/}"; fi
-  } > "$ETC_DIR/site.env.tmp"
-  chmod 0640 "$ETC_DIR/site.env.tmp" && chgrp "$USER_NAME" "$ETC_DIR/site.env.tmp"
-  mv -f "$ETC_DIR/site.env.tmp" "$ETC_DIR/site.env"
-  echo "site: $(sed 's/__/:/' "$ETC_DIR/site.env" | paste -sd' ' -)"
+# The public address for XRCopilotLab (Connection:PublicUrl), checked before the file is written. The server's place
+# on the map is found automatically from its public IP, so there is nothing to set for it.
+if [[ -n "${PUBLIC_URL:-}" ]]; then
+  [[ "$PUBLIC_URL" =~ ^https://[^[:space:]]+$ ]] || { echo "PUBLIC_URL must be https://…" >&2; exit 2; }
+  ( umask 027 && printf 'Connection__PublicUrl=%s\n' "${PUBLIC_URL%/}" > "$ETC_DIR/site.env.tmp" )
+  chgrp "$USER_NAME" "$ETC_DIR/site.env.tmp" && mv -f "$ETC_DIR/site.env.tmp" "$ETC_DIR/site.env"
+  echo "public URL: ${PUBLIC_URL%/}"
 elif [[ -f "$ETC_DIR/site.env" ]]; then
-  echo "site: kept $ETC_DIR/site.env"
+  echo "public URL: kept $ETC_DIR/site.env"
 fi
 
 [[ $DASHBOARD -eq 1 ]] && dashboard_setup
