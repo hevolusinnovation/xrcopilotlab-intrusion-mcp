@@ -114,7 +114,8 @@ services:
     command: ["-U", "msf", "-P", "${MSF_RPC_PASSWORD:-labmsf}", "-a", "0.0.0.0", "-p", "55553", "-S", "-f"]
     networks:
       it:       {}
-      internet: {}
+      # Fixed: Metasploit does not spoof, so its attacks come from this address (Ashburn, US, on the lab's map).
+      internet: { ipv4_address: 203.0.113.72 }
       homes:    {}
     depends_on:
       server: { condition: service_healthy }

@@ -103,7 +103,9 @@ Three extra scenarios then appear in the console (greyed out until the Metasploi
 | Metasploit · sonda Modbus | `scanner/scada/modbusdetect`, `modbus_findunitid` | IndustrialProtocolProbe (needs port 502 open) |
 
 Metasploit does **not** spoof the source address, so these attacks arrive from the Metasploit container's own lab
-address (one city on the map), and lab-01's guardians attribute them to it — which is the point of the test. They are
+address, fixed at **203.0.113.72** (Ashburn, United States, on the map), and lab-01's guardians attribute them to it —
+which is the point of the test. After *forza bruta SSH* fail2ban bans that address for a few minutes, so the other two
+Metasploit scenarios get no answer until the ban expires. They are
 lab-only: the container sits on the lab's internal networks, it runs against lab-01, and the console refuses these
 scenarios against an external server under test.
 

@@ -31,7 +31,12 @@ PERSONAS = {
     "203.0.113.20": "Shenzhen, Cina",
     "203.0.113.66": "Mosca, Russia",
     "203.0.113.41": "Hanoi, Vietnam",
+    "203.0.113.72": "Ashburn, Stati Uniti",
 }
+
+# The Metasploit container's own address on the lab's "internet" network (fixed in docker-compose.yml): Metasploit
+# does not spoof, so its attacks show up from here, with this address's invented city.
+MSF_SOURCE = os.environ.get("MSF_SOURCE", "203.0.113.72")
 
 # The backdoor's controller: an HTTP listener on the attacker, which lab-01 calls once the intruder is in.
 C2 = "203.0.113.66"
@@ -350,7 +355,7 @@ def backdoor(log):
 
 def msf_web(log):
     """Metasploit scans lab-01's web server: version, directories, robots. Suricata and ModSecurity see it."""
-    src = "203.0.113.9"
+    src = MSF_SOURCE
     _msf(src, [
         ("auxiliary/scanner/http/http_version", {}),
         ("auxiliary/scanner/http/robots_txt", {}),
@@ -361,7 +366,7 @@ def msf_web(log):
 def msf_ssh(log):
     """Metasploit brute-forces SSH on lab-01 until fail2ban bans the attacker. One password per run (no file needed
     on the Metasploit host): seven attempts, so fail2ban (5 in a minute) bans before the last ones."""
-    src = "203.0.113.20"
+    src = MSF_SOURCE
     passwords = ["123456", "password", "admin", "root", "toor", "ubuntu", "1234"]
     modules = [("auxiliary/scanner/ssh/ssh_login",
                 {"USERNAME": "root", "PASSWORD": pw, "STOP_ON_SUCCESS": "false",
@@ -371,7 +376,7 @@ def msf_ssh(log):
 
 def msf_industrial(log):
     """Metasploit probes Modbus on lab-01: a real SCADA module, not just a port scan (needs port 502 open)."""
-    src = "203.0.113.7"
+    src = MSF_SOURCE
     _msf(src, [
         ("auxiliary/scanner/scada/modbusdetect", {"RPORT": "502"}),
         ("auxiliary/scanner/scada/modbus_findunitid", {"RPORT": "502"}),
@@ -413,13 +418,14 @@ SCENARIOS = [
      "expect": "nginx limita le richieste (429): RequestFlood, ban di nginx-limit-req."},
     {"id": "campaign", "title": "Campagna distribuita su un account", "source": "192.0.2.11–22", "run": campaign,
      "expect": "12 indirizzi, 2 tentativi ciascuno sull'account scada: nessun ban, una campagna DistributedSshBruteForce."},
-    {"msf": True, "id": "msf-web", "title": "Metasploit · scansione web", "source": "203.0.113.9", "run": msf_web,
+    {"msf": True, "id": "msf-web", "title": "Metasploit · scansione web", "source": MSF_SOURCE, "run": msf_web,
      "expect": "Moduli http di Metasploit contro lab-01 (versione, robots, cartelle): un attacco vero, non scritto a mano. "
                "Suricata e ModSecurity lo vedono: WebVulnerabilityScan. Usa il container Metasploit del laboratorio (make lab-up-msf se è fermo)."},
-    {"msf": True, "id": "msf-ssh", "title": "Metasploit · forza bruta SSH", "source": "203.0.113.20", "run": msf_ssh,
-     "expect": "Il modulo ssh_login di Metasploit prova più password su lab-01: fail2ban banna l'attaccante. "
+    {"msf": True, "id": "msf-ssh", "title": "Metasploit · forza bruta SSH", "source": MSF_SOURCE, "run": msf_ssh,
+     "expect": "Il modulo ssh_login di Metasploit prova più password su lab-01: fail2ban banna l'attaccante "
+               "(per qualche minuto anche gli altri scenari Metasploit, che partono dallo stesso indirizzo). "
                "Usa il container Metasploit del laboratorio (make lab-up-msf se è fermo)."},
-    {"msf": True, "id": "msf-industrial", "title": "Metasploit · sonda Modbus", "source": "203.0.113.7", "run": msf_industrial,
+    {"msf": True, "id": "msf-industrial", "title": "Metasploit · sonda Modbus", "source": MSF_SOURCE, "run": msf_industrial,
      "expect": "Moduli SCADA Modbus di Metasploit verso la porta 502 di lab-01: IndustrialProtocolProbe. "
                "Usa il container Metasploit del laboratorio (make lab-up-msf se è fermo) e la porta 502 aperta."},
     {"id": "full-night", "title": "La notte completa (in sequenza)", "source": "più indirizzi", "run": full_night,
