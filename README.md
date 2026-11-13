@@ -172,7 +172,7 @@ mistake can lock everyone out of SSH.
 
 To see the toolkit at work without a customer's server, `make up` starts a small lab on your computer, all in Docker:
 
-- **`server`** (container `intrusion-lab-01`, host `lab-01`), a fake company server (Ubuntu, "Alveo Energia" in Turin) with SSH, a website, fail2ban, a firewall, Suricata, Falco and ModSecurity,
+- **`server`** (container `intrusion-lab-server`, host `lab-01`), a fake company server (Ubuntu, "Alveo Energia" in Turin) with SSH, a website, fail2ban, a firewall, Suricata, Falco and ModSecurity,
   and **the same toolkit package a customer installs**, installed by the same `install.sh`; its API is also on
   **http://localhost:8091** (`/api`, `/mcp`, with the `X-API-Key` in `lab/.env`), to try a client from the Mac;
 - **`metasploit`** (container `intrusion-lab-metasploit`), a real attack engine the console drives for three of the attacks;
@@ -187,10 +187,13 @@ The attacks never leave the lab: all addresses are "documentation" addresses (RF
 and each one gets an invented city so that the map has something to show.
 
 What the toolkit sees (the numbers, the red box, the map and the table below) is on `lab-01`'s own **monitoring page**,
-the same a customer gets (see [The monitoring page](#5-the-monitoring-page)), with the Hevolus logo at the top. It
-opens **only through the Dev Tunnel**, with your Microsoft account: once the tunnel is online, the console's button
-*Mappa e lista degli attacchi* opens it (see [below](#a-public-test-address-for-xrcopilotlab-dynamic-url)). No
-password of its own.
+the same a customer gets (see [The monitoring page](#5-the-monitoring-page)), with the Hevolus logo at the top:
+
+- on your computer, **http://localhost:8089** (the server's link in Docker Desktop, or the console's button *Mappa
+  degli attacchi*) opens its **map view**: the map and the list of the attacks received, nothing else. Published on
+  `127.0.0.1` only, so it asks for nothing;
+- from elsewhere, the whole page (numbers, guardians, what to fix) opens **only through the Dev Tunnel**, with your
+  Microsoft account (see [below](#a-public-test-address-for-xrcopilotlab-dynamic-url)). No password of its own.
 
 ### The numbers
 
@@ -285,11 +288,11 @@ processor (`uname -m` on the server: `x86_64` → x64, `aarch64` → arm64):
 From the command line, and straight to the server:
 
 ```bash
-gh release download v0.5.1 -R hevolusinnovation/xrcopilotlab-intrusion-mcp -p '*linux-x64.tar.gz' -p SHA256SUMS
-scp xrcopilotlab-intrusion-mcp-0.5.1-linux-x64.tar.gz SHA256SUMS admin@<server>:/tmp/
+gh release download v0.5.2 -R hevolusinnovation/xrcopilotlab-intrusion-mcp -p '*linux-x64.tar.gz' -p SHA256SUMS
+scp xrcopilotlab-intrusion-mcp-0.5.2-linux-x64.tar.gz SHA256SUMS admin@<server>:/tmp/
 ```
 
-Or build it from this repository: `make package VERSION=0.5.1` (add `RID=linux-arm64` for ARM); the file lands in
+Or build it from this repository: `make package VERSION=0.5.2` (add `RID=linux-arm64` for ARM); the file lands in
 `out/`.
 
 ### 2. Install it
@@ -299,8 +302,8 @@ On the server (Debian or Ubuntu, with fail2ban already running):
 ```bash
 cd /tmp
 sha256sum -c SHA256SUMS --ignore-missing
-tar -xzf xrcopilotlab-intrusion-mcp-0.5.1-linux-x64.tar.gz
-cd xrcopilotlab-intrusion-mcp-0.5.1-linux-x64
+tar -xzf xrcopilotlab-intrusion-mcp-0.5.2-linux-x64.tar.gz
+cd xrcopilotlab-intrusion-mcp-0.5.2-linux-x64
 sudo ./install.sh
 ```
 
@@ -415,6 +418,7 @@ journalctl -u xrcopilotlab-intrusion-mcp -f                                 # it
 (`DASHBOARD_ALLOW` to change). It shows the map, the guardians with a traffic light each, "what to fix" in plain words,
 and how XRCopilotLab reaches the server. It only reads: it never bans, blocks or changes anything, and the commands it
 suggests are for a person to run. The page reads the toolkit's API with a key of its own that the browser never sees.
+`…/?view=map` shows only the map and the list of the attacks received, for a screen on the wall.
 
 **Cities on the map (optional):** download the free DB-IP "IP to City Lite" file (https://db-ip.com/db/lite.php),
 save it as `/opt/xrcopilotlab-intrusion-mcp/geo/dbip-city-lite.csv.gz` and run
@@ -542,7 +546,7 @@ https://<id>-8093.<region>.devtunnels.ms/       monitoring page (map and attacks
 | `make lab-rebuild` | Rebuilds the images from scratch and restarts |
 | `make lab-ps` | Which containers are running, and whether they are healthy |
 | `make lab-logs` | Follows the logs; `SVC=server`, `attacker`, `tunnel` or `metasploit` for one container |
-| `make lab-shell` | Opens a shell in the server `lab-01` (or `SVC=…`); same as `docker exec -it intrusion-lab-01 bash` |
+| `make lab-shell` | Opens a shell in the server `lab-01` (or `SVC=…`); same as `docker exec -it intrusion-lab-server bash` |
 | `make lab-open` | Opens the console in the browser |
 | `make lab-reset` | Stops the lab and deletes everything, tunnel login included |
 | `make build` / `make test` | Builds the solution / runs the unit tests |

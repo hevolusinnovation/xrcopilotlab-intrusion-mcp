@@ -31,7 +31,7 @@
 .DEFAULT_GOAL := help
 
 TAG     ?= dev
-VERSION ?= 0.5.1
+VERSION ?= 0.5.2
 RG      ?= rg-xrcopilotlab-ai
 ACR     ?= crhevoluscoi.azurecr.io
 APP     ?= hev-intrusion-mcp
@@ -101,7 +101,7 @@ lab-build: lab/.env
 
 lab-up: lab/.env
 	$(LAB) up -d --build
-	@echo "console: http://localhost:8090 · API: http://localhost:8091/api (X-API-Key) · $(if $(strip $(PUBLIC_DOMAIN)),domain: https://$(PUBLIC_DOMAIN),map and attacks: through the Dev Tunnel (Microsoft login))"
+	@echo "console: http://localhost:8090 · map: http://localhost:8089 · API: http://localhost:8091/api (X-API-Key) · $(if $(strip $(PUBLIC_DOMAIN)),domain: https://$(PUBLIC_DOMAIN),full page: through the Dev Tunnel (Microsoft login))"
 
 # Keeps the Dev Tunnels login and the tunnel id (volume tunnel-login): the public address stays the same.
 lab-down: lab/.env

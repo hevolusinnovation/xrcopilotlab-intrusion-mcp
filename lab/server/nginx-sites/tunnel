@@ -64,3 +64,33 @@ server {
     }
     location / { return 404; }
 }
+
+# The server's own page on the Mac (http://localhost:8089, Docker's published port on the "mac" network): the
+# monitoring page in its map view (?view=map: the map and the attacks received). Read only, with the page's key added
+# here; published on the Mac's 127.0.0.1 only, so no login of its own.
+server {
+    listen 8089;
+    server_name _;
+    access_log /var/log/nginx/xrcopilotlab-dashboard.log;
+
+    allow 10.78.0.0/24;
+    deny  all;
+    modsecurity off;
+
+    add_header X-Frame-Options DENY always;
+    add_header X-Content-Type-Options nosniff always;
+
+    location = / {
+        if ($arg_view != "map") { return 302 /?view=map; }
+        proxy_pass http://127.0.0.1:8470;
+    }
+    location = /index.html { proxy_pass http://127.0.0.1:8470; }
+    location = /hevolus-logo.svg { proxy_pass http://127.0.0.1:8470; }
+    location /vendor/ { proxy_pass http://127.0.0.1:8470; }
+    location /api/ {
+        limit_except GET { deny all; }
+        include /etc/nginx/xrcopilotlab-dashboard/key.conf;
+        proxy_pass http://127.0.0.1:8470;
+    }
+    location / { return 404; }
+}

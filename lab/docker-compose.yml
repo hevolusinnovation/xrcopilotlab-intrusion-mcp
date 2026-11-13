@@ -1,18 +1,18 @@
-# The intrusion lab: the server lab-01 (service "server": an Ubuntu server with the customer package installed, its
-# API on http://localhost:8091), the attacker, which also serves the console on http://localhost:8090, Metasploit,
+# The intrusion lab: the server lab-01 (service "server": an Ubuntu server with the customer package installed, the
+# map of the attacks it received on http://localhost:8089, its API on http://localhost:8091), the attacker, which also serves the console on http://localhost:8090, Metasploit,
 # and the tunnel that gives lab-01's API a public address (Dev Tunnels).
 # Three networks with documentation addresses (RFC 5737): every attacker address gets an invented city, as in the
 # simulated mode. None of them reaches the internet; the server's own "mac" network, for its published API, does.
 #   make lab-up    /    make lab-down    /    make lab-reset
-# Fixed container names (intrusion-lab-01, intrusion-lab-attacker, intrusion-lab-tunnel, intrusion-lab-metasploit), so `docker exec` and
+# Fixed container names (intrusion-lab-server, intrusion-lab-attacker, intrusion-lab-tunnel, intrusion-lab-metasploit), so `docker exec` and
 # `docker logs` work without the compose suffix; the services keep their short names for `make lab-shell SVC=…`.
 
 name: intrusion-lab
 
 services:
-  # The customer's server. Service "server" (Docker Desktop shows it so), container intrusion-lab-01, host lab-01.
+  # The customer's server: service and container "server" (Docker Desktop shows it so), host lab-01.
   server:
-    container_name: intrusion-lab-01
+    container_name: intrusion-lab-server
     build:
       context: ..
       dockerfile: lab/server/Dockerfile
@@ -43,6 +43,9 @@ services:
       # PUBLIC_DOMAIN the Makefile binds it on every interface, for the domain's reverse proxy.
       mac:      { ipv4_address: 10.78.0.20 }
     ports:
+      # First, so Docker Desktop links it: the map and the attacks received (the monitoring page's map view), on the
+      # Mac's 127.0.0.1 only.
+      - "127.0.0.1:8089:8089"
       - "${SERVER_API_BIND:-127.0.0.1}:8091:8091"
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8470/healthz"]
@@ -139,6 +142,6 @@ networks:
     ipam: { config: [ { subnet: 10.77.0.0/24 } ] }
   # The only network with a way out: it publishes the console on the Mac's localhost. The attacks never use it.
   console: {}
-  # The server's API on the Mac (port 8091): nginx and the firewall accept 8091 from here, never 8093 (the page).
+  # The server's map (8089) and API (8091) on the Mac: nginx and the firewall accept those two from here, never 8093.
   mac:
     ipam: { config: [ { subnet: 10.78.0.0/24 } ] }
