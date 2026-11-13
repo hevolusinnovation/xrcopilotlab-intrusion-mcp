@@ -1,0 +1,366 @@
+#!/usr/bin/env bash
+# xrc-vpn: the customer's WireGuard VPN, installed by install.sh --with wireguard. The customer manages it: who gets in
+# is their decision, so every user (a person's device, or a router of another site) is added and revoked here, by
+# them. Hevolus never does it for them, and the toolkit only reads who is connected.
+#
+#   xrc-vpn add <name>                       a phone or a laptop: prints the QR code to scan with the WireGuard app
+#   xrc-vpn add <name> --conf > name.conf    the same, as a file to import (delete it once imported: it holds the key)
+#   xrc-vpn add <name> --pubkey <key> [--lan 192.168.20.0/24]
+#                                            a device that made its own key (a router, a managed PC): only its public
+#                                            key comes here; --lan for the network behind a router
+#   xrc-vpn revoke <name>                    out at once: its key no longer opens anything
+#   xrc-vpn list                             users, address, last connection
+#   xrc-vpn show [<name>]                    the data to type into a router (no secret), or the server's
+#   xrc-vpn endpoint <host>[:port]           the address the users connect to (the customer's public IP or name)
+#   xrc-vpn init | firewall up|down | state  used by systemd; init is safe to run again
+#
+# Run as root, or as a member of the group vpn-admin (sudo, own password): only this command, nothing else as root.
+# A user's private key is made here only for "add <name>" without --pubkey, shown once and never kept: the server
+# keeps public keys only. The server's own key is made at the first start (init), never in an image.
+set -euo pipefail
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+umask 077
+
+if [[ $EUID -ne 0 ]]; then exec sudo -- "$0" "$@"; fi
+
+IFACE=wgxrc
+CONF_DIR=/etc/xrcopilotlab-vpn
+SETTINGS=$CONF_DIR/vpn.env
+PEERS=$CONF_DIR/peers
+WG_DIR=/etc/wireguard
+KEY=$WG_DIR/$IFACE.key
+WG_CONF=$WG_DIR/$IFACE.conf
+STATE_DIR=/run/xrcopilotlab-vpn
+STATE=$STATE_DIR/state.json
+FWD_CHAIN=XRCVPN-FWD
+NAT_CHAIN=XRCVPN-NAT
+
+die() { echo "xrc-vpn: $*" >&2; exit 1; }
+
+# The settings, written by install.sh (VPN_* at install) and by "endpoint". Read as data, never sourced.
+WG_PORT=51820 WG_SUBNET=10.88.0.0/24 WG_ENDPOINT="" WG_LAN="" WG_DNS=""
+load_settings() {
+  [[ -f "$SETTINGS" ]] || return 0
+  local k v
+  while IFS='=' read -r k v; do
+    case "$k" in WG_PORT|WG_SUBNET|WG_ENDPOINT|WG_LAN|WG_DNS) printf -v "$k" '%s' "$v" ;; esac
+  done < "$SETTINGS"
+}
+save_setting() {
+  local k="$1" v="$2" tmp
+  install -d -m 0750 "$CONF_DIR"
+  tmp="$(mktemp "$CONF_DIR/.vpn.env.XXXXXX")"
+  { [[ -f "$SETTINGS" ]] && grep -v "^$k=" "$SETTINGS" || true; printf '%s=%s\n' "$k" "$v"; } > "$tmp"
+  chmod 0640 "$tmp" && mv -f "$tmp" "$SETTINGS"
+}
+
+valid_name()   { [[ "$1" =~ ^[a-z0-9][a-z0-9-]{0,30}$ ]]; }
+valid_key()    { [[ "$1" =~ ^[A-Za-z0-9+/]{42}[AEIMQUYcgkosw480]=$ ]]; }
+valid_cidr4()  {
+  [[ "$1" =~ ^([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})/([0-9]{1,2})$ ]] || return 1
+  local i; for i in 1 2 3 4; do (( 10#${BASH_REMATCH[i]} <= 255 )) || return 1; done; (( 10#${BASH_REMATCH[5]} <= 32 ))
+}
+valid_host()   { [[ "$1" =~ ^[A-Za-z0-9.-]{1,253}$ || "$1" =~ ^\[[0-9A-Fa-f:]+\]$ ]]; }
+
+# 10.88.0.0/24 -> 10.88.0 ; only /24 subnets: 253 users is more than a small company needs.
+prefix_of() { [[ "$WG_SUBNET" =~ ^([0-9]+\.[0-9]+\.[0-9]+)\.0/24$ ]] || die "WG_SUBNET must be a /24 (a.b.c.0/24), found $WG_SUBNET"; echo "${BASH_REMATCH[1]}"; }
+server_address() { echo "$(prefix_of).1"; }
+
+# Integer form of an IPv4 address, to tell whether two networks overlap.
+ip2int() { local IFS=.; read -r a b c d <<< "$1"; echo $(( (a << 24) | (b << 16) | (c << 8) | d )); }
+overlaps() {
+  local n1="${1%/*}" l1="${1#*/}" n2="${2%/*}" l2="${2#*/}" m
+  m=$(( l1 < l2 ? l1 : l2 ))
+  local mask=$(( m == 0 ? 0 : (0xFFFFFFFF << (32 - m)) & 0xFFFFFFFF ))
+  (( ($(ip2int "$n1") & mask) == ($(ip2int "$n2") & mask) ))
+}
+
+# The internal network the VPN opens: the one of the interface with the default route, unless VPN_LAN said otherwise.
+detect_lan() {
+  local dev; dev="$(ip -o route show default 2>/dev/null | awk '{print $5; exit}')"
+  [[ -n "$dev" ]] || dev="$(ip -o -4 addr show up 2>/dev/null | awk '$2 != "lo" { print $2; exit }')"
+  [[ -n "$dev" ]] && ip -o -4 route show dev "$dev" scope link proto kernel 2>/dev/null | awk '{print $1}' | paste -sd, -
+}
+
+peer_get() { grep -m1 "^$2=" "$PEERS/$1" 2>/dev/null | cut -d= -f2- || true; }
+
+# ---- wgxrc.conf: rebuilt from the server key and the peer files at every change ----
+write_conf() {
+  local tmp f name pub psk addr lan allowed
+  tmp="$(mktemp "$WG_DIR/.$IFACE.conf.XXXXXX")"
+  {
+    echo "# Written by xrc-vpn (xrcopilotlab-intrusion-mcp): rebuilt at every change, edit with xrc-vpn, not by hand."
+    echo "[Interface]"
+    echo "Address = $(server_address)/24"
+    echo "ListenPort = $WG_PORT"
+    echo "PrivateKey = $(cat "$KEY")"
+    echo "PostUp = /usr/local/sbin/xrc-vpn firewall up"
+    echo "PostDown = /usr/local/sbin/xrc-vpn firewall down"
+    for f in "$PEERS"/*; do
+      [[ -f "$f" ]] || continue
+      name="$(basename "$f")"; pub="$(peer_get "$name" PUBLIC_KEY)"; psk="$(peer_get "$name" PRESHARED_KEY)"
+      addr="$(peer_get "$name" ADDRESS)"; lan="$(peer_get "$name" LAN)"
+      allowed="$addr/32${lan:+,$lan}"
+      echo
+      echo "[Peer]"
+      echo "# $name"
+      echo "PublicKey = $pub"
+      echo "PresharedKey = $psk"
+      echo "AllowedIPs = $allowed"
+    done
+  } > "$tmp"
+  mv -f "$tmp" "$WG_CONF"
+}
+
+iface_up() { ip link show "$IFACE" >/dev/null 2>&1; }
+
+# A change takes effect without dropping the users already connected.
+apply() {
+  write_conf
+  if iface_up; then
+    wg syncconf "$IFACE" <(wg-quick strip "$IFACE")
+    # The routes to the networks behind routers follow the peers.
+    local f lan net
+    for f in "$PEERS"/*; do
+      [[ -f "$f" ]] || continue
+      lan="$(peer_get "$(basename "$f")" LAN)"
+      for net in ${lan//,/ }; do ip route replace "$net" dev "$IFACE"; done
+    done
+    firewall_up
+  fi
+  write_state
+}
+
+cmd_init() {
+  command -v wg >/dev/null || die "wireguard-tools is not installed: run install.sh --with wireguard"
+  load_settings
+  install -d -m 0750 "$CONF_DIR" && install -d -m 0700 "$PEERS" "$WG_DIR"
+  [[ -n "$WG_LAN" ]] || { WG_LAN="$(detect_lan)"; [[ -n "$WG_LAN" ]] && save_setting WG_LAN "$WG_LAN"; }
+  local net; for net in ${WG_LAN//,/ }; do
+    overlaps "$net" "$WG_SUBNET" && die "the VPN network $WG_SUBNET overlaps the internal network $net: set another VPN_SUBNET and run install.sh again"
+  done
+  prefix_of >/dev/null
+  if [[ ! -s "$KEY" ]]; then
+    wg genkey > "$KEY.tmp" && mv -f "$KEY.tmp" "$KEY"
+    echo "xrc-vpn: made the server's key (first start)"
+  fi
+  write_conf
+  write_state
+}
+
+# ---- Routing: the VPN reaches the internal network(s) only, never the internet through this server ----
+fw() { iptables -w "$@"; }
+firewall_up() {
+  load_settings
+  local net f lan
+  sysctl -q -w net.ipv4.ip_forward=1
+  fw -N "$FWD_CHAIN" 2>/dev/null || fw -F "$FWD_CHAIN"
+  fw -t nat -N "$NAT_CHAIN" 2>/dev/null || fw -t nat -F "$NAT_CHAIN"
+  fw -C FORWARD -j "$FWD_CHAIN" 2>/dev/null || fw -I FORWARD 1 -j "$FWD_CHAIN"
+  fw -t nat -C POSTROUTING -j "$NAT_CHAIN" 2>/dev/null || fw -t nat -I POSTROUTING 1 -j "$NAT_CHAIN"
+  fw -A "$FWD_CHAIN" -o "$IFACE" -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+  for net in ${WG_LAN//,/ }; do
+    fw -A "$FWD_CHAIN" -i "$IFACE" -d "$net" -j ACCEPT
+    # The internal hosts answer the VPN user as if the gateway asked: no route to add on the customer's router.
+    fw -t nat -A "$NAT_CHAIN" -s "$WG_SUBNET" -d "$net" -j MASQUERADE
+  done
+  # The networks behind routers: reachable from the internal network and from the VPN users.
+  for f in "$PEERS"/*; do
+    [[ -f "$f" ]] || continue
+    lan="$(peer_get "$(basename "$f")" LAN)"
+    for net in ${lan//,/ }; do
+      fw -A "$FWD_CHAIN" -o "$IFACE" -d "$net" -j ACCEPT
+      fw -A "$FWD_CHAIN" -i "$IFACE" -s "$net" -j ACCEPT
+    done
+  done
+  fw -A "$FWD_CHAIN" -i "$IFACE" -j DROP
+}
+firewall_down() {
+  fw -D FORWARD -j "$FWD_CHAIN" 2>/dev/null || true
+  fw -t nat -D POSTROUTING -j "$NAT_CHAIN" 2>/dev/null || true
+  fw -F "$FWD_CHAIN" 2>/dev/null && fw -X "$FWD_CHAIN" 2>/dev/null || true
+  fw -t nat -F "$NAT_CHAIN" 2>/dev/null && fw -t nat -X "$NAT_CHAIN" 2>/dev/null || true
+}
+
+next_address() {
+  local p n used; p="$(prefix_of)"
+  used="$(cat "$PEERS"/* 2>/dev/null | sed -n 's/^ADDRESS=//p')"
+  for n in $(seq 2 254); do
+    grep -Fqx "$p.$n" <<< "$used" || { echo "$p.$n"; return; }
+  done
+  die "the VPN network $WG_SUBNET is full"
+}
+
+server_pub() { wg pubkey < "$KEY"; }
+endpoint_of() { [[ "$WG_ENDPOINT" == *:* && "$WG_ENDPOINT" != \[*\] ]] && echo "$WG_ENDPOINT" || echo "$WG_ENDPOINT:$WG_PORT"; }
+
+cmd_add() {
+  local name="${1:-}" pubkey="" lan="" conf=0 priv="" psk addr net
+  [[ -n "$name" ]] || die "usage: xrc-vpn add <name> [--pubkey <key>] [--lan <cidr>[,<cidr>]] [--conf]"
+  shift
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --pubkey) [[ $# -ge 2 ]] || die "--pubkey needs the device's public key"; pubkey="$2"; shift ;;
+      --lan)    [[ $# -ge 2 ]] || die "--lan needs a network, e.g. 192.168.20.0/24"; lan="$2"; shift ;;
+      --conf)   conf=1 ;;
+      *) die "unknown option: $1" ;;
+    esac
+    shift
+  done
+  valid_name "$name" || die "the name must be lowercase letters, digits and dashes (mario-telefono, sede-milano), at most 31"
+  load_settings
+  [[ -s "$KEY" ]] || die "the VPN has no key yet: run xrc-vpn init (it runs by itself at the first start)"
+  [[ -n "$WG_ENDPOINT" ]] || die "first say where the users connect to: xrc-vpn endpoint <the office's public IP or name>"
+  [[ ! -e "$PEERS/$name" ]] || die "$name already exists: revoke it first (xrc-vpn revoke $name) to give it a new key"
+  if [[ -n "$pubkey" ]]; then
+    valid_key "$pubkey" || die "that is not a WireGuard public key (44 characters ending with =)"
+    [[ "$pubkey" != "$(server_pub)" ]] || die "that is the server's own key: use the device's"
+    grep -Fqx "PUBLIC_KEY=$pubkey" "$PEERS"/* 2>/dev/null && die "this key is already used by another user"
+  fi
+  if [[ -n "$lan" ]]; then
+    [[ -n "$pubkey" ]] || die "--lan is for a router, which makes its own key: give it with --pubkey"
+    for net in ${lan//,/ }; do
+      valid_cidr4 "$net" || die "not a network: $net (e.g. 192.168.20.0/24)"
+      overlaps "$net" "$WG_SUBNET" && die "$net overlaps the VPN network $WG_SUBNET"
+      local own; for own in ${WG_LAN//,/ }; do overlaps "$net" "$own" && die "$net overlaps the internal network $own: the two sites need different networks"; done
+    done
+  fi
+  if [[ -z "$pubkey" ]]; then priv="$(wg genkey)"; pubkey="$(wg pubkey <<< "$priv")"; fi
+  psk="$(wg genpsk)"
+  addr="$(next_address)"
+  {
+    printf 'NAME=%s\nKIND=%s\nADDRESS=%s\nPUBLIC_KEY=%s\nPRESHARED_KEY=%s\nLAN=%s\nCREATED=%s\n' \
+      "$name" "$([[ -n "$lan" ]] && echo router || echo device)" "$addr" "$pubkey" "$psk" "$lan" "$(date -u +%s)"
+  } > "$PEERS/$name"
+  apply
+
+  local allowed="$WG_LAN,$WG_SUBNET"
+  if [[ -n "$priv" ]]; then
+    local text
+    text="$(printf '[Interface]\n# %s\nPrivateKey = %s\nAddress = %s/32\n%s\n[Peer]\nPublicKey = %s\nPresharedKey = %s\nEndpoint = %s\nAllowedIPs = %s\nPersistentKeepalive = 25\n' \
+      "$name" "$priv" "$addr" "${WG_DNS:+DNS = $WG_DNS}" "$(server_pub)" "$psk" "$(endpoint_of)" "$allowed")"
+    unset priv
+    if [[ $conf -eq 1 ]]; then printf '%s\n' "$text"; return; fi
+    echo "Added $name ($addr). Scan this with the WireGuard app (+, Scan from QR code). It is shown only now:"
+    echo "the server does not keep this key. Lost? xrc-vpn revoke $name, then add it again."
+    if command -v qrencode >/dev/null; then qrencode -t ansiutf8 <<< "$text"; else printf '\n%s\n' "$text"; fi
+  else
+    echo "Added $name ($addr)$([[ -n "$lan" ]] && echo ", network behind it: $lan"). Type these into the device:"
+    show_peer "$name" "$psk"
+  fi
+}
+
+# What a router needs, field by field. The preshared key is shown only by add: afterwards it stays on the server.
+show_peer() {
+  local name="$1" psk="${2:-}" addr lan
+  addr="$(peer_get "$name" ADDRESS)"; lan="$(peer_get "$name" LAN)"
+  cat <<EOF
+
+  Interface (this device)
+    Address / tunnel IP     $addr/32
+    Private key             the device's own (it never leaves the device)
+  Peer (the VPN server)
+    Public key              $(server_pub)
+    Endpoint                $(endpoint_of)
+    Allowed IPs             $WG_LAN,$WG_SUBNET
+    Preshared key           ${psk:-(shown only when the user was added)}
+    Persistent keepalive    25
+EOF
+  [[ -n "$lan" ]] && echo "  On the server, the network behind this router: $lan"
+  echo
+}
+
+cmd_show() {
+  load_settings
+  if [[ -n "${1:-}" ]]; then
+    valid_name "$1" && [[ -f "$PEERS/$1" ]] || die "no user called ${1}"
+    show_peer "$1"
+  else
+    echo "Server public key  $(server_pub)"
+    if [[ -n "$WG_ENDPOINT" ]]; then echo "Endpoint           $(endpoint_of)"; else echo "Endpoint           not set (xrc-vpn endpoint <host>)"; fi
+    echo "VPN network        $WG_SUBNET (server $(server_address))"
+    echo "Internal network   ${WG_LAN:-not found}"
+  fi
+}
+
+cmd_revoke() {
+  local name="${1:-}"
+  valid_name "$name" && [[ -f "$PEERS/$name" ]] || die "no user called ${name:-?} (xrc-vpn list)"
+  load_settings
+  local lan; lan="$(peer_get "$name" LAN)"
+  rm -f "$PEERS/$name"
+  apply
+  local net; for net in ${lan//,/ }; do ip route del "$net" dev "$IFACE" 2>/dev/null || true; done
+  echo "Revoked $name: its key no longer opens the VPN."
+}
+
+cmd_endpoint() {
+  local v="${1:-}" host port
+  [[ -n "$v" ]] || die "usage: xrc-vpn endpoint <public IP or name>[:port]"
+  host="$v"; port=""
+  if [[ "$v" =~ ^(.+):([0-9]{1,5})$ && "$v" != \[*\] ]]; then host="${BASH_REMATCH[1]}"; port="${BASH_REMATCH[2]}"; fi
+  valid_host "$host" || die "not an address or a name: $host"
+  [[ -z "$port" ]] || (( port >= 1 && port <= 65535 )) || die "not a port: $port"
+  save_setting WG_ENDPOINT "$v"
+  load_settings
+  write_state
+  echo "Users connect to $(endpoint_of). The office router must forward UDP $WG_PORT to this server."
+  [[ -z "$(ls -A "$PEERS" 2>/dev/null)" ]] || echo "Users added before this change still have the old address in their configuration."
+}
+
+cmd_list() {
+  load_settings
+  local now f name dump hs
+  now="$(date +%s)"
+  dump="$(iface_up && wg show "$IFACE" latest-handshakes 2>/dev/null || true)"
+  printf '%-24s %-7s %-15s %s\n' NAME KIND ADDRESS "LAST CONNECTION"
+  for f in "$PEERS"/*; do
+    [[ -f "$f" ]] || continue
+    name="$(basename "$f")"
+    hs="$(awk -v k="$(peer_get "$name" PUBLIC_KEY)" '$1 == k {print $2}' <<< "$dump")"
+    if [[ -z "$hs" || "$hs" == 0 ]]; then hs="never"; else hs="$(( (now - hs) / 60 )) min ago"; fi
+    printf '%-24s %-7s %-15s %s\n' "$name" "$(peer_get "$name" KIND)" "$(peer_get "$name" ADDRESS)" "$hs"
+  done
+}
+
+# ---- What the toolkit reads: names, addresses, last connection and where from. Never a key of any kind: the first
+# line of "wg show dump" is the server's private key and the second field of a peer line its preshared key, and
+# neither is copied. ----
+json_list() { local out="" x; for x in ${1//,/ }; do out+="${out:+,}\"$x\""; done; echo "[$out]"; }
+write_state() {
+  load_settings
+  install -d -m 0750 -g adm "$STATE_DIR"
+  local up=false dump="" f name pub row endpoint hs rx tx tmp first=1
+  if iface_up; then up=true; dump="$(wg show "$IFACE" dump 2>/dev/null | tail -n +2 | awk -F'\t' '{print $1"\t"$3"\t"$5"\t"$6"\t"$7}')"; fi
+  tmp="$(mktemp "$STATE_DIR/.state.XXXXXX")"
+  {
+    printf '{"interface":"%s","up":%s,"updated":%s,"port":%s,"endpoint":%s,"subnet":"%s","lan":%s,"peers":[' \
+      "$IFACE" "$up" "$(date -u +%s)" "$WG_PORT" "$([[ -n "$WG_ENDPOINT" ]] && echo "\"$WG_ENDPOINT\"" || echo null)" "$WG_SUBNET" "$(json_list "$WG_LAN")"
+    for f in "$PEERS"/*; do
+      [[ -f "$f" ]] || continue
+      name="$(basename "$f")"; pub="$(peer_get "$name" PUBLIC_KEY)"
+      row="$(awk -F'\t' -v k="$pub" '$1 == k' <<< "$dump")"
+      endpoint="$(cut -f2 <<< "$row")"; hs="$(cut -f3 <<< "$row")"; rx="$(cut -f4 <<< "$row")"; tx="$(cut -f5 <<< "$row")"
+      [[ "$endpoint" == "(none)" ]] && endpoint=""
+      (( first )) || printf ','
+      first=0
+      printf '{"name":"%s","kind":"%s","address":"%s","lan":%s,"created":%s,"endpoint":%s,"latestHandshake":%s,"received":%s,"sent":%s}' \
+        "$name" "$(peer_get "$name" KIND)" "$(peer_get "$name" ADDRESS)" "$(json_list "$(peer_get "$name" LAN)")" \
+        "$(peer_get "$name" CREATED)" "$([[ -n "$endpoint" ]] && echo "\"$endpoint\"" || echo null)" "${hs:-0}" "${rx:-0}" "${tx:-0}"
+    done
+    printf ']}\n'
+  } > "$tmp"
+  chgrp adm "$tmp" && chmod 0640 "$tmp" && mv -f "$tmp" "$STATE"
+}
+
+case "${1:-}" in
+  add)      shift; cmd_add "$@" ;;
+  revoke)   shift; cmd_revoke "$@" ;;
+  list)     cmd_list ;;
+  show)     shift; cmd_show "$@" ;;
+  endpoint) shift; cmd_endpoint "$@" ;;
+  init)     cmd_init ;;
+  firewall) case "${2:-}" in up) firewall_up ;; down) firewall_down ;; *) die "usage: xrc-vpn firewall up|down" ;; esac ;;
+  state)    write_state ;;
+  *) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+esac

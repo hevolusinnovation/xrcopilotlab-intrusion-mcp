@@ -18,6 +18,8 @@ public sealed class SystemHostInspector(LogFileOptions logs, ConnectionOptions c
 
     private const string ModSecurityNginx = "/etc/nginx/conf.d/xrcopilotlab-modsecurity.conf";
     private const string ModSecurityMain = "/etc/modsecurity/xrcopilotlab/main.conf";
+    private const string VpnUnit = "wg-quick@wgxrc";
+    private const string VpnSettings = "/etc/xrcopilotlab-vpn";
 
     public HostFacts Inspect(DateTimeOffset now)
     {
@@ -32,9 +34,9 @@ public sealed class SystemHostInspector(LogFileOptions logs, ConnectionOptions c
     private HostFacts Read(DateTimeOffset now)
     {
         var packages = Packages("openssh-server", "nginx", "ufw", "fail2ban", "crowdsec", "crowdsec-firewall-bouncer-nftables",
-            "crowdsec-firewall-bouncer-iptables", "suricata", "falco", "libnginx-mod-http-modsecurity", "modsecurity-crs");
+            "crowdsec-firewall-bouncer-iptables", "suricata", "falco", "libnginx-mod-http-modsecurity", "modsecurity-crs", "wireguard-tools");
         string? V(string p) => packages.GetValueOrDefault(p);
-        var active = ActiveUnits("ssh", "sshd", "nginx", "fail2ban", "crowdsec", "suricata", "falco-modern-bpf", "falco-kmod", "falco-bpf", "falco");
+        var active = ActiveUnits("ssh", "sshd", "nginx", "fail2ban", "crowdsec", "suricata", "falco-modern-bpf", "falco-kmod", "falco-bpf", "falco", VpnUnit);
         bool? Running(bool installed, params string[] units) => installed ? units.Any(active.Contains) : null;
 
         var nginxOn = V("nginx") is not null;
@@ -56,7 +58,13 @@ public sealed class SystemHostInspector(LogFileOptions logs, ConnectionOptions c
                 File.Exists("/etc/falco/.xrcopilotlab-managed"), logs.FalcoFiles),
             ModSecurity(V("libnginx-mod-http-modsecurity"), V("modsecurity-crs"), active.Contains("nginx")),
         };
-        return new HostFacts(now, guardians, Listening(), Ssh(), TunnelUrl());
+        var vpn = Vpn();
+        // The VPN counts once xrc-vpn is set up: wireguard-tools alone may be the customer's own tunnel.
+        var managed = Directory.Exists(VpnSettings);
+        var wireguard = Guardian("wireguard", managed ? V("wireguard-tools") : null, Running(managed && V("wireguard-tools") is not null, VpnUnit), null, managed,
+            [logs.VpnStateFile], note: vpn is null ? null : VpnNote(vpn, now));
+        guardians.Add(wireguard);
+        return new HostFacts(now, guardians, Listening(), Ssh(), TunnelUrl(), vpn);
     }
 
     private GuardianFacts Guardian(string name, string? version, bool? running, string? mode, bool managed, List<string> patterns,
@@ -100,6 +108,18 @@ public sealed class SystemHostInspector(LogFileOptions logs, ConnectionOptions c
                 .Any(f => Lines(f).Any(l => !l.TrimStart().StartsWith('#') && l.Contains(text, StringComparison.Ordinal)));
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return false; }
+    }
+
+    private VpnFacts? Vpn()
+    {
+        try { return File.Exists(logs.VpnStateFile) ? VpnState.Parse(File.ReadAllText(logs.VpnStateFile)) : null; }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return null; }
+    }
+
+    private static string VpnNote(VpnFacts vpn, DateTimeOffset now)
+    {
+        var connected = vpn.Peers.Count(p => VpnState.Connected(p, now));
+        return $"{vpn.Peers.Count} user(s), {connected} connected now" + (vpn.Endpoint is null ? "; no public address set yet (xrc-vpn endpoint)" : $"; users connect to {vpn.Endpoint}");
     }
 
     // The test tunnel's agent writes its public address there while the tunnel is open, and removes it when it closes.

@@ -40,6 +40,9 @@ public sealed class LogFileOptions
     /// <summary>ModSecurity's JSON audit log (OWASP CRS, detection only): web attacks, request bodies included. <c>install.sh --with modsecurity</c> writes it here.</summary>
     public List<string> ModSecurityFiles { get; set; } = ["/var/log/modsecurity/audit.json*"];
 
+    /// <summary>Who is connected to the customer's VPN, written every minute by <c>xrc-vpn state</c> (no key in it). <c>install.sh --with wireguard</c>.</summary>
+    public string VpnStateFile { get; set; } = "/run/xrcopilotlab-vpn/state.json";
+
     /// <summary>
     /// The host's own addresses, to tell an attack coming in from a connection the host opened (a Suricata alert on
     /// malware calling home). Empty = the addresses of the host's network interfaces.

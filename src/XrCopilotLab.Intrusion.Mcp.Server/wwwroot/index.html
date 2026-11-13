@@ -37,6 +37,10 @@ h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: v
 .guardian .light { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; vertical-align: 1px; }
 .guardian span { display: block; color: var(--muted); font-size: 11px; }
 .light.ok { background: var(--ok); } .light.stopped, .light.log-unreadable { background: var(--critical); } .light.missing { background: var(--line); border: 1px solid var(--muted); }
+.vpn-users { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; }
+.vpn-user { display: flex; justify-content: space-between; gap: 8px; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 5px 9px; font-size: 12px; }
+.vpn-user span { color: var(--muted); text-align: right; }
+.vpn-user.away { border-color: var(--high); } .vpn-user.away span { color: var(--high); }
 .findings { display: flex; flex-direction: column; gap: 8px; }
 .finding { background: var(--bg); border: 1px solid var(--line); border-left: 4px solid var(--low); border-radius: 8px; padding: 8px 10px; }
 .finding.Critical { border-left-color: var(--critical); } .finding.High { border-left-color: var(--high); } .finding.Medium { border-left-color: var(--medium); }
@@ -124,6 +128,12 @@ body.map-only main { grid-template-rows: 1fr 300px; }
       <div class="guardians" id="guardians"><span class="muted">…</span></div>
     </div>
 
+    <div id="vpn-box" hidden>
+      <h2>VPN · chi è collegato</h2>
+      <div class="muted" id="vpn-note" style="font-size:12px"></div>
+      <div class="vpn-users" id="vpn-users"></div>
+    </div>
+
     <div>
       <h2>Cosa migliorare <span class="muted" style="text-transform:none;letter-spacing:0">· ultimi 7 giorni</span></h2>
       <div class="findings" id="findings"><span class="muted">…</span></div>
@@ -184,7 +194,7 @@ const TYPES = {
 const GUARDIANS = {
   sshd: "Accesso remoto (SSH)", nginx: "Server web", ufw: "Firewall", fail2ban: "fail2ban · banna chi sbaglia password",
   crowdsec: "CrowdSec · riconosce gli attacchi", suricata: "Suricata · controlla la rete", falco: "Falco · controlla dentro il server",
-  modsecurity: "ModSecurity · filtra il web",
+  modsecurity: "ModSecurity · filtra il web", wireguard: "WireGuard · VPN di dipendenti e sedi",
 };
 const STATUS = { ok: "attivo", stopped: "FERMO", "log-unreadable": "log non leggibile", missing: "non installato" };
 const MODE = { detection: "osserva", blocking: "blocca", off: "spento" };
@@ -206,6 +216,9 @@ const FINDINGS = {
   "firewall-off": ["Il firewall del server è spento", "Consenti prima SSH, poi accendilo (ufw allow OpenSSH; ufw enable). Questo pacchetto non lo accende mai da solo: un errore chiude fuori tutti."],
   "host-alerts-unlinked": ["Attività critica nel server senza un'origine nota", "Guardale una per una: un job di cron che conosci, o un intruso entrato da una strada che i log non mostrano."],
   "connection-temporary": ["XRCopilotLab usa un indirizzo di test temporaneo", "Va bene per una prova. In produzione pubblica l'API sul dominio del cliente (nginx con TLS) e imposta Connection:PublicUrl."],
+  "vpn-unexpected-country": ["Un utente della VPN si è collegato da un Paese inatteso", "Chiedi alla persona se è in viaggio. Se no, il dispositivo o la sua configurazione sono stati presi: revocalo subito (la chiave smette di funzionare all'istante) e dagliene una nuova."],
+  "vpn-unused-users": ["Utenti della VPN che nessuno usa", "Una chiave inutilizzata da mesi è spesso un vecchio telefono o qualcuno che non c'è più, e apre ancora la rete: revocala."],
+  "vpn-endpoint-missing": ["La VPN non ha ancora un indirizzo pubblico", "Imposta l'IP pubblico o il nome dell'ufficio; il router deve inoltrare la porta UDP della VPN a questo server."],
   "connection-tunnel-open": ["Un tunnel di test è ancora aperto accanto al dominio", "Chiudilo: XRCopilotLab deve usare il dominio del cliente, non l'indirizzo temporaneo del tunnel."],
 };
 const PREFIX = {
@@ -332,6 +345,13 @@ function drawStats(summary) {
     parts.push(`<b>Dentro il server</b>: entrato ${how} da ${esc(ip)}${mine[0].user ? " (utente " + esc(mine[0].user) + ")" : ""}, Falco ha visto ${esc(what)}, ` +
       `l'ultima volta alle ${time(mine[0].time)}.`);
   }
+  // Text written for the AI that reads these logs: the agent was told to quote it, never to follow it.
+  const liar = (summary.topAttackers || []).find(r => (r.attackTypes || []).includes("AiPromptInjection"));
+  if (liar) {
+    const where = { path: "nell'indirizzo di una pagina", userAgent: "nello user agent", user: "come nome utente SSH", command: "in un comando" }[liar.promptInjections?.[0]?.field] || "";
+    parts.push(`<b>Tentativo di ingannare l'AI</b>: ${esc(liar.ip)} (${esc(liar.location?.city || "")}, ${esc(liar.location?.country || "")}) ` +
+      `ha scritto istruzioni per l'assistente ${where}, l'ultima volta alle ${time(liar.lastSeen)}. L'assistente le riporta come prova, non le esegue.`);
+  }
   const s = summary.suspiciousLogins || [];
   if (s.length) {
     const last = s[0];
@@ -345,13 +365,6 @@ function drawStats(summary) {
 
 function drawGuardians(g) {
   const place = g.site && (g.site.city || g.site.country) ? [g.site.city, g.site.country].filter(Boolean).join(", ") : "";
-  // Text written for the AI that reads these logs: the agent was told to quote it, never to follow it.
-  const liar = (summary.topAttackers || []).find(r => (r.attackTypes || []).includes("AiPromptInjection"));
-  if (liar) {
-    const where = { path: "nell'indirizzo di una pagina", userAgent: "nello user agent", user: "come nome utente SSH", command: "in un comando" }[liar.promptInjections?.[0]?.field] || "";
-    parts.push(`<b>Tentativo di ingannare l'AI</b>: ${esc(liar.ip)} (${esc(liar.location?.city || "")}, ${esc(liar.location?.country || "")}) ` +
-      `ha scritto istruzioni per l'assistente ${where}, l'ultima volta alle ${time(liar.lastSeen)}. L'assistente le riporta come prova, non le esegue.`);
-  }
   $("host").textContent = `Guardiano di rete · ${g.host}${place ? " · " + place : ""} · sola lettura`;
   $("simulated").hidden = !g.simulated;
   // The server on the map, at its public IP's location (city/country), not a company name.
@@ -463,6 +476,26 @@ async function tunnelCheck(btn) {
   btn.disabled = false;
 }
 
+// The VPN's users: the customer adds and revokes them with xrc-vpn; the page only says who is connected and from where.
+function ago(iso) {
+  if (!iso) return "mai collegato";
+  const m = Math.round((Date.now() - new Date(iso)) / 60000);
+  return m < 60 ? `${m} min fa` : m < 2880 ? `${Math.round(m / 60)} ore fa` : `${Math.round(m / 1440)} giorni fa`;
+}
+function drawVpn(v) {
+  $("vpn-box").hidden = !v.installed;
+  if (!v.installed) return;
+  $("vpn-note").textContent = !v.up ? "La VPN è spenta: nessuno può collegarsi."
+    : !v.endpoint ? "Accesa, ma senza indirizzo pubblico: impostalo con xrc-vpn endpoint."
+    : `Accesa su ${v.endpoint} (UDP ${v.port}) · ${v.peers.length} utenti, ${v.connected} collegati ora · si gestiscono con xrc-vpn sul server.`;
+  $("vpn-users").innerHTML = (v.peers || []).map(u => {
+    const place = u.location && (u.location.city || u.location.country) ? [u.location.city, u.location.country].filter(Boolean).join(", ") : "";
+    return `<div class="vpn-user ${u.expectedCountry ? "" : "away"}" title="${esc(u.address)}${u.remoteIp ? " · da " + esc(u.remoteIp) : ""}">
+      <b>${u.connected ? '<i class="light ok" style="display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:5px"></i>' : ""}${esc(u.name)}${u.kind === "router" ? " · sede" : ""}</b>
+      <span>${u.connected ? "collegato" : esc(ago(u.lastHandshake))}${place ? " · " + esc(place) : ""}</span></div>`;
+  }).join("");
+}
+
 function drawFindings(p) {
   const items = (p.findings || []).map(f => {
     const prefix = Object.keys(PREFIX).find(k => f.id.startsWith(k));
@@ -496,8 +529,8 @@ async function refresh() {
 
 async function refreshGuard() {
   try {
-    const [g, p] = await Promise.all([api("guardians"), api("posture")]);
-    drawGuardians(g); drawFindings(p);
+    const [g, p, v] = await Promise.all([api("guardians"), api("posture"), api("vpn").catch(() => ({ installed: false }))]);
+    drawGuardians(g); drawFindings(p); drawVpn(v);
   } catch { }
 }
 

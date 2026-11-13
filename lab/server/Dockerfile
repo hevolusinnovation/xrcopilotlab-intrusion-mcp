@@ -41,13 +41,14 @@ RUN useradd -m -s /bin/bash -G sudo operatore && echo 'operatore:Alveo2026!' | c
  && systemctl disable ssh.socket \
  && systemctl enable ssh.service nginx.service fail2ban.service rsyslog.service ulogd2.service lab-firewall.service
 
-# The package, installed as the customer installs it, with Suricata and Falco from its --with option (here, at build,
-# the only time lab-01 reaches the internet: the ET Open rules are fetched now). The key arrives at start (lab-entrypoint).
+# The package, installed as the customer installs it, with Suricata, Falco, ModSecurity and the VPN from its --with
+# option (here, at build, the only time lab-01 reaches the internet: the ET Open rules are fetched now). The VPN's key
+# is made at lab-01's first start, as on a customer's mini PC built from an image; its users are added with xrc-vpn. The key arrives at start (lab-entrypoint).
 # The monitoring page is opened through the Dev Tunnel only (port 8093, see lab/server/nginx-sites/tunnel): the
 # package's own 8471 site, with its password, stays unused inside lab-01; it is installed for the page's key.
 COPY --from=package /out/package.tar.gz /tmp/package.tar.gz
 RUN mkdir /tmp/package && tar -xzf /tmp/package.tar.gz -C /tmp/package --strip-components=1 \
- && DASHBOARD_PASSWORD=AlveoLab2026! /tmp/package/install.sh --no-start --with suricata,falco,modsecurity \
+ && DASHBOARD_PASSWORD=AlveoLab2026! VPN_ENDPOINT=203.0.113.250 /tmp/package/install.sh --no-start --with suricata,falco,modsecurity,wireguard \
  && suricata-update -q --no-test --local /etc/suricata/rules/lab.rules \
  && systemctl enable suricata.service falco-modern-bpf.service nginx.service \
  && rm -rf /tmp/package /tmp/package.tar.gz /var/lib/apt/lists/*

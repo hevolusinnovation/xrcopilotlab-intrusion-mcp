@@ -9,8 +9,10 @@
 # service. A second run with nothing changed changes nothing but the restart.
 #   --no-start   install and enable the service without starting it (an image build, where systemd is not running yet)
 #   --new-key    replace the stored key (asked again, or INTRUSION_MCP_API_KEY): the old key stops working
-#   --with fail2ban,crowdsec,suricata,falco,modsecurity
-#                also install and configure these security packages (guardians.sh), idempotently, in detection mode
+#   --with fail2ban,crowdsec,suricata,falco,modsecurity,wireguard
+#                also install and configure these security packages (guardians.sh), idempotently, in detection mode;
+#                wireguard is the customer's VPN (VPN_ENDPOINT, VPN_SUBNET, VPN_PORT, VPN_LAN, VPN_DNS: see guardians.sh),
+#                whose users the customer adds with xrc-vpn
 #   --no-dashboard
 #                do not publish the monitoring page (dashboard.sh: nginx on port 8471, HTTPS, password, internal network only)
 # The server's public address for XRCopilotLab, optional, from the environment (sudo -E or VAR=… sudo ./install.sh):

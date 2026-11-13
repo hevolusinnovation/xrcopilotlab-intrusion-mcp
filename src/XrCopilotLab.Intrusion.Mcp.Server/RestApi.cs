@@ -54,6 +54,8 @@ public static class RestApi
 
         api.MapGet("/guardians", (GuardQueries g, TimeProvider clock) => g.Guardians(clock.GetUtcNow()));
 
+        api.MapGet("/vpn", (GuardQueries g, TimeProvider clock) => g.Vpn(clock.GetUtcNow()));
+
         api.MapGet("/posture", (GuardQueries g, IntrusionQueries q, TimeProvider clock, int? hours, DateTimeOffset? since, DateTimeOffset? until) =>
         {
             var now = clock.GetUtcNow();

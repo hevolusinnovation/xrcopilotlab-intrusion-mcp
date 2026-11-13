@@ -1,3 +1,5 @@
+using XrCopilotLab.Intrusion.Mcp.Core.Analysis;
+using XrCopilotLab.Intrusion.Mcp.Core.Geo;
 using XrCopilotLab.Intrusion.Mcp.Core.Models;
 using XrCopilotLab.Intrusion.Mcp.Core.Queries;
 
@@ -59,12 +61,27 @@ public sealed record GuardianStatus(string Name, string Role, string Status, boo
 public sealed record GuardiansResult(string Host, bool Simulated, DateTimeOffset Now, SiteLocation Site, ConnectionInfo Connection, IReadOnlyList<GuardianStatus> Guardians,
     IReadOnlyList<ListeningPort> Listening, SshFacts? Ssh);
 
+/// <summary>
+/// One VPN user as the page and the agents see it: where it last connected from (<c>Location</c>, geolocated) and
+/// whether that country is one the customer's people are expected in (<c>Policy:AllowedCountries</c>).
+/// </summary>
+public sealed record VpnPeerStatus(string Name, string Kind, string Address, IReadOnlyList<string> Lan, DateTimeOffset Created, bool Connected,
+    DateTimeOffset? LastHandshake, string? RemoteIp, GeoLocation? Location, bool ExpectedCountry, long Received, long Sent);
+
+/// <summary>
+/// The customer's VPN: <c>Installed</c> once <c>install.sh --with wireguard</c> set it up, <c>Up</c> while it listens on
+/// UDP <c>Port</c>. The customer adds and revokes the users with <c>xrc-vpn</c>: this is only what they did.
+/// </summary>
+public sealed record VpnResult(string Host, bool Simulated, DateTimeOffset Now, bool Installed, bool Up, int? Port, string? Endpoint, string? Subnet,
+    IReadOnlyList<string> Lan, DateTimeOffset? Updated, int Connected, IReadOnlyList<VpnPeerStatus> Peers, string Note, string? Attribution);
+
 public sealed record SeverityCount(string Severity, int Findings);
 
 public sealed record PostureResult(string Host, bool Simulated, Period Period, IReadOnlyList<SeverityCount> BySeverity, IReadOnlyList<PostureFinding> Findings);
 
-/// <summary>The answers behind <c>intrusion_guardians</c> and <c>intrusion_posture</c>. Read-only: nothing is changed.</summary>
-public sealed class GuardQueries(IHostInspector inspector, IntrusionQueries intrusions, ISiteLocation site, ConnectionOptions connection)
+/// <summary>The answers behind <c>intrusion_guardians</c>, <c>intrusion_vpn</c> and <c>intrusion_posture</c>. Read-only: nothing is changed.</summary>
+public sealed class GuardQueries(IHostInspector inspector, IntrusionQueries intrusions, ISiteLocation site, ConnectionOptions connection, IGeoLocator geo,
+    IntrusionPolicy policy)
 {
     /// <summary>The posture reads a week of attacks: a quiet day says little about a configuration.</summary>
     public const int DefaultPostureHours = 7 * 24;
@@ -79,6 +96,7 @@ public sealed class GuardQueries(IHostInspector inspector, IntrusionQueries intr
         ["suricata"] = "Network IDS: checks all traffic against known attack signatures, and sees the host calling a malware controller.",
         ["falco"] = "Watches what happens inside the host: sensitive files read, shells from the web server, keys added, miners.",
         ["modsecurity"] = "Web application firewall (OWASP CRS): reads every request, bodies included; detection only unless switched on.",
+        ["wireguard"] = "The customer's VPN: their people and sites reach the internal network with a key per device; it does not answer anyone else.",
     };
 
     public GuardiansResult Guardians(DateTimeOffset now)
@@ -93,11 +111,35 @@ public sealed class GuardQueries(IHostInspector inspector, IntrusionQueries intr
     public PostureResult Posture(DateTimeOffset now, Period period)
     {
         var facts = inspector.Inspect(now);
-        var findings = PostureChecks.Evaluate(facts, intrusions.Summary(now, period, IntrusionQueries.MaxTop), Connection(connection, facts.TunnelUrl));
+        var findings = PostureChecks.Evaluate(facts, intrusions.Summary(now, period, IntrusionQueries.MaxTop), Connection(connection, facts.TunnelUrl),
+            Vpn(facts, now));
         var counts = Enum.GetValues<Severity>().Reverse()
             .Select(s => new SeverityCount(s.ToString(), findings.Count(f => f.Severity == s.ToString())))
             .ToList();
         return new PostureResult(intrusions.Host, intrusions.Simulated, period, counts, findings);
+    }
+
+    public VpnResult Vpn(DateTimeOffset now) => Vpn(inspector.Inspect(now), now);
+
+    private VpnResult Vpn(HostFacts facts, DateTimeOffset now)
+    {
+        var installed = facts.Guardians.Any(g => g.Name == "wireguard" && g.Installed);
+        if (facts.Vpn is not { } vpn)
+            return new VpnResult(intrusions.Host, intrusions.Simulated, now, installed, false, null, null, null, [], null, 0, [],
+                installed ? "The VPN is installed but has not written its state yet (xrc-vpn state, every minute)."
+                          : "No VPN: install.sh --with wireguard sets one up, whose users the customer adds with xrc-vpn.", geo.Attribution);
+        var peers = vpn.Peers.Select(p =>
+        {
+            var location = p.RemoteIp is null ? null : geo.Locate(p.RemoteIp);
+            return new VpnPeerStatus(p.Name, p.Kind, p.Address, p.Lan, p.Created, VpnState.Connected(p, now), p.LastHandshake, p.RemoteIp, location,
+                policy.IsAllowedCountry(location?.CountryCode), p.Received, p.Sent);
+        }).OrderByDescending(p => p.Connected).ThenByDescending(p => p.LastHandshake).ThenBy(p => p.Name, StringComparer.Ordinal).ToList();
+        var connected = peers.Count(p => p.Connected);
+        var note = !vpn.Up ? "The VPN is installed but its interface is down: nobody can connect."
+            : vpn.Endpoint is null ? "Up, but no public address is set: the customer sets it with xrc-vpn endpoint before adding users."
+            : $"Up on UDP {vpn.Port}; users connect to {vpn.Endpoint}. {peers.Count} user(s), {connected} connected now.";
+        return new VpnResult(intrusions.Host, intrusions.Simulated, now, true, vpn.Up, vpn.Port, vpn.Endpoint, vpn.Subnet, vpn.Lan, vpn.Updated, connected,
+            peers, note, geo.Attribution);
     }
 
     /// <summary>The customer's domain wins; a tunnel is the address only when there is no domain.</summary>

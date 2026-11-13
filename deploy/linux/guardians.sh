@@ -1,10 +1,10 @@
-# The security packages ("guardians") the toolkit reads, installed on request: install.sh --with fail2ban,crowdsec,suricata,falco,modsecurity
+# The security packages ("guardians") the toolkit reads, installed on request: install.sh --with fail2ban,crowdsec,suricata,falco,modsecurity,wireguard
 # Sourced by install.sh, as root. Every function is idempotent: a package already there is configured, not reinstalled,
 # and a configuration this script did not write is left alone. Everything runs in detection mode: nothing here blocks
 # traffic that fail2ban would not already block. UFW is never switched on: a firewall turned on by a script can lock
 # everyone out of SSH.
 
-GUARDIANS_SUPPORTED="fail2ban crowdsec suricata falco modsecurity"
+GUARDIANS_SUPPORTED="fail2ban crowdsec suricata falco modsecurity wireguard"
 SERVICE_DROPIN_DIR=/etc/systemd/system/xrcopilotlab-intrusion-mcp.service.d
 
 installed() { dpkg-query -W -f='${Status}' "$1" 2>/dev/null | grep -q "install ok installed"; }
@@ -375,6 +375,104 @@ CONF
   echo "modsecurity: on for every nginx site, detection only, attacks in $MODSEC_LOG"
 }
 
+# WireGuard, the customer's VPN: their people (phone, laptop) and their other sites (a router) reach the internal
+# network, and nobody else, since WireGuard does not even answer a packet without a known key. The customer manages
+# the users with xrc-vpn (root, or the group vpn-admin through sudo); this script installs and wires it, adds no user.
+# The server's key is made by xrcopilotlab-vpn-init at the first start, never here: an image built with --no-start
+# would otherwise give every customer the same key. Opt-in like the rest, but it is not only a watcher: it opens UDP
+# VPN_PORT and routes the VPN to the internal network (to that network only, never to the internet).
+#   VPN_ENDPOINT  the public IP or name the users connect to (xrc-vpn endpoint later, if unknown now)
+#   VPN_SUBNET    the VPN's own network, a /24 that no site uses (default 10.88.0.0/24)
+#   VPN_PORT      UDP port (default 51820); the office router forwards it to this server
+#   VPN_LAN       the internal network(s) it opens, comma separated (default: the one of the default route)
+#   VPN_DNS       a DNS server the users get (optional, e.g. the office's 192.168.1.1)
+VPN_DIR=/etc/xrcopilotlab-vpn
+VPN_IFACE=wgxrc
+
+guardian_wireguard() {
+  if installed wireguard-tools && installed qrencode && command -v iptables >/dev/null; then
+    echo "wireguard: already installed"
+  else
+    echo "wireguard: installing (VPN, users managed by the customer with xrc-vpn)"
+    apt_install wireguard-tools qrencode iptables
+  fi
+  if [[ -f /etc/wireguard/$VPN_IFACE.conf ]] && ! grep -q "Written by xrc-vpn" "/etc/wireguard/$VPN_IFACE.conf"; then
+    echo "wireguard: /etc/wireguard/$VPN_IFACE.conf was not written by xrc-vpn: left as it is" >&2; return 1
+  fi
+  install -m 0755 "$HERE/xrc-vpn" /usr/local/sbin/xrc-vpn
+  install -d -m 0750 "$VPN_DIR" && install -d -m 0700 "$VPN_DIR/peers"
+
+  # The settings given now are written; those not given keep what an earlier run wrote.
+  local k v var re
+  for k in ENDPOINT SUBNET PORT LAN DNS; do
+    var="VPN_$k"; v="${!var:-}"
+    [[ -n "$v" ]] || continue
+    case "$k" in
+      ENDPOINT) re='^[][A-Za-z0-9.:-]{1,260}$'; [[ "$v" =~ $re ]] || { echo "wireguard: VPN_ENDPOINT is not an address or a name" >&2; return 1; } ;;
+      SUBNET)   [[ "$v" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.0/24$ ]] || { echo "wireguard: VPN_SUBNET must be a /24 (10.88.0.0/24)" >&2; return 1; } ;;
+      PORT)     [[ "$v" =~ ^[0-9]{1,5}$ ]] || { echo "wireguard: VPN_PORT is not a port" >&2; return 1; } ;;
+      LAN)      [[ "$v" =~ ^[0-9./,]+$ ]] || { echo "wireguard: VPN_LAN must be networks like 192.168.1.0/24" >&2; return 1; } ;;
+      DNS)      [[ "$v" =~ ^[0-9a-fA-F.:,]+$ ]] || { echo "wireguard: VPN_DNS must be addresses" >&2; return 1; } ;;
+    esac
+    touch "$VPN_DIR/vpn.env"
+    { grep -v "^WG_$k=" "$VPN_DIR/vpn.env" || true; printf 'WG_%s=%s\n' "$k" "$v"; } > "$VPN_DIR/vpn.env.tmp"
+    chmod 0640 "$VPN_DIR/vpn.env.tmp" && mv -f "$VPN_DIR/vpn.env.tmp" "$VPN_DIR/vpn.env"
+  done
+
+  # Who may manage the users: the group vpn-admin, through sudo with their own password, for xrc-vpn only.
+  getent group vpn-admin >/dev/null || groupadd --system vpn-admin
+  printf '# Written by xrcopilotlab-intrusion-mcp (install.sh --with wireguard): the VPN users, managed by the customer.\n%%vpn-admin ALL=(root) /usr/local/sbin/xrc-vpn\n' \
+    > /etc/sudoers.d/xrcopilotlab-vpn.tmp
+  if visudo -cqf /etc/sudoers.d/xrcopilotlab-vpn.tmp; then
+    chmod 0440 /etc/sudoers.d/xrcopilotlab-vpn.tmp && mv -f /etc/sudoers.d/xrcopilotlab-vpn.tmp /etc/sudoers.d/xrcopilotlab-vpn
+  else
+    rm -f /etc/sudoers.d/xrcopilotlab-vpn.tmp; echo "wireguard: the sudo rule does not validate: only root can run xrc-vpn" >&2
+  fi
+
+  # The key and the configuration at every start (the key only the first time), before the interface comes up.
+  cat > /etc/systemd/system/xrcopilotlab-vpn-init.service <<UNIT
+[Unit]
+Description=VPN key (first start) and configuration (installed by xrcopilotlab-intrusion-mcp)
+After=network-online.target
+Wants=network-online.target
+Before=wg-quick@$VPN_IFACE.service
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/xrc-vpn init
+RemainAfterExit=yes
+[Install]
+WantedBy=multi-user.target
+UNIT
+  install -d -m 0755 "/etc/systemd/system/wg-quick@$VPN_IFACE.service.d"
+  printf '# Written by install.sh --with wireguard.\n[Unit]\nRequires=xrcopilotlab-vpn-init.service\nAfter=xrcopilotlab-vpn-init.service\n[Service]\nExecStartPost=-/usr/local/sbin/xrc-vpn state\nExecStopPost=-/usr/local/sbin/xrc-vpn state\n' \
+    > "/etc/systemd/system/wg-quick@$VPN_IFACE.service.d/xrcopilotlab.conf"
+  # Who is connected, for the toolkit (names and places, no key), every minute.
+  cat > /etc/systemd/system/xrcopilotlab-vpn-state.service <<'UNIT'
+[Unit]
+Description=Write who is connected to the VPN for the toolkit (no key)
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/xrc-vpn state
+UNIT
+  cat > /etc/systemd/system/xrcopilotlab-vpn-state.timer <<'UNIT'
+[Unit]
+Description=Every minute: who is connected to the VPN
+[Timer]
+OnBootSec=30s
+OnUnitActiveSec=60s
+AccuracySec=5s
+[Install]
+WantedBy=timers.target
+UNIT
+  # Enabled now, so an image built with --no-start makes its key and comes up at its first start.
+  systemctl enable xrcopilotlab-vpn-init.service "wg-quick@$VPN_IFACE" xrcopilotlab-vpn-state.timer >/dev/null 2>&1 || true
+  if command -v ufw >/dev/null && ufw status 2>/dev/null | grep -q "^Status: active"; then
+    echo "wireguard: UFW is on and this script never changes it: allow the VPN yourself, e.g." >&2
+    echo "  sudo ufw allow ${VPN_PORT:-51820}/udp" >&2
+  fi
+  echo "wireguard: installed. The users are added by the customer: sudo usermod -aG vpn-admin <their account>, then xrc-vpn add <name>"
+}
+
 # The start of whatever was configured; called by install.sh once systemd is up (not with --no-start).
 guardians_start() {
   local g
@@ -392,6 +490,11 @@ guardians_start() {
       modsecurity)
         # A restart, not a reload: ModSecurity opens its audit log once, when nginx starts.
         [[ -f "$MODSEC_NGINX" ]] && systemctl restart nginx ;;
+      wireguard)
+        systemctl daemon-reload
+        systemctl restart xrcopilotlab-vpn-init.service
+        systemctl restart "wg-quick@$VPN_IFACE"
+        systemctl start xrcopilotlab-vpn-state.timer ;;
       *) ;;
     esac
   done

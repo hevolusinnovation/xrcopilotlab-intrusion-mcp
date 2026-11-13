@@ -29,7 +29,10 @@ public static class PostureChecks
 
     public const int StaleRulesDays = 3;
 
-    public static IReadOnlyList<PostureFinding> Evaluate(HostFacts facts, SummaryResult attacks, ConnectionInfo? connection = null)
+    /// <summary>A VPN user silent this long is probably a device nobody uses any more, and its key still opens the network.</summary>
+    public const int UnusedVpnDays = 60;
+
+    public static IReadOnlyList<PostureFinding> Evaluate(HostFacts facts, SummaryResult attacks, ConnectionInfo? connection = null, VpnResult? vpn = null)
     {
         var findings = new List<PostureFinding>();
         var g = facts.Guardians.ToDictionary(x => x.Name, StringComparer.Ordinal);
@@ -93,15 +96,19 @@ public static class PostureChecks
                 "A try every few minutes stays under fail2ban's findtime. Let CrowdSec act on what it sees (its firewall bouncer), or raise fail2ban's findtime for sshd to a few hours.",
                 null));
 
-        // ---- Exposed services ----
+        // ---- Exposed services: the VPN is the way to keep reaching them from outside ----
+        var vpnOn = Active("wireguard") && vpn is { Up: true };
+        var behindVpn = vpnOn ? " The VPN is already here: close the port to the internet and let the people who need it connect through the VPN."
+                              : " A VPN lets the people who need it keep reaching it from outside.";
+        var vpnFix = vpnOn ? null : "sudo ./install.sh --with wireguard";
         foreach (var p in facts.Listening.Where(p => p.Public && AttackCatalog.IndustrialPorts.ContainsKey(p.Port)).DistinctBy(p => p.Port))
             findings.Add(new($"exposed-industrial-{p.Port}", nameof(Severity.Critical), "industrial", $"{AttackCatalog.IndustrialPorts[p.Port]} is open to the network",
                 $"Port {p.Port} listens on {p.Address}. Industrial protocols have no password: whoever reaches the port can send commands to the plant.",
-                "Never publish it on the internet: reach it only through a VPN, from the plant's own network.", null));
+                "Never publish it on the internet: reach it only through a VPN, from the plant's own network." + behindVpn, vpnFix));
         foreach (var p in facts.Listening.Where(p => p.Public && RiskyPorts.ContainsKey(p.Port)).DistinctBy(p => p.Port))
             findings.Add(new($"exposed-service-{p.Port}", nameof(Severity.High), "network", $"{RiskyPorts[p.Port]} is open to the network",
                 $"Port {p.Port} listens on {p.Address}.",
-                "Bind it to 127.0.0.1 or to the internal network only, or put it behind a VPN.", null));
+                "Bind it to 127.0.0.1 or to the internal network only." + behindVpn, vpnFix));
         if (Has(nameof(AttackType.IndustrialProtocolProbe)))
             findings.Add(new("industrial-probes", nameof(Severity.Medium), "industrial", "Someone is looking for plant systems",
                 $"{Addresses(nameof(AttackType.IndustrialProtocolProbe))} address(es) tried industrial ports (Modbus, S7, IEC 104…) in the last {period}.",
@@ -126,8 +133,12 @@ public static class PostureChecks
 
         // ---- The guardians themselves ----
         foreach (var x in facts.Guardians.Where(x => x.Installed && x.Running == false))
+        {
+            var unit = x.Name == "wireguard" ? "wg-quick@wgxrc" : x.Name;
             findings.Add(new($"guardian-stopped-{x.Name}", nameof(Severity.High), "guardians", $"{x.Name} is installed but not running",
-                "Its service is not active: it sees nothing.", $"Start it and check why it stopped (journalctl -u {x.Name}).", $"sudo systemctl enable --now {x.Name}"));
+                x.Name == "wireguard" ? "The VPN's interface is down: nobody can connect." : "Its service is not active: it sees nothing.",
+                $"Start it and check why it stopped (journalctl -u {unit}).", $"sudo systemctl enable --now {unit}"));
+        }
         foreach (var x in facts.Guardians.Where(x => x.Installed && x.LogExists && !x.LogReadable))
             findings.Add(new($"log-unreadable-{x.Name}", nameof(Severity.Medium), "guardians", $"The toolkit cannot read {x.Name}'s log",
                 $"{x.Log} exists but is not readable by the toolkit's service (group adm).",
@@ -153,6 +164,30 @@ public static class PostureChecks
             findings.Add(new("host-alerts-unlinked", nameof(Severity.High), "host", "Critical activity on the host with no known origin",
                 $"{unlinked} critical Falco alert(s) could not be tied to a login or a web attack.",
                 "Look at them (intrusion_host_activity unlinkedOnly=true): a cron job you know, or an intruder who came in a way the logs do not show.", null));
+
+        // ---- The VPN: who holds a key is the customer's decision; these say when a key looks out of place ----
+        if (vpn is { Installed: true })
+        {
+            var away = vpn.Peers.Where(p => !p.ExpectedCountry && p.LastHandshake >= attacks.Period.From).ToList();
+            if (away.Count > 0)
+                findings.Add(new("vpn-unexpected-country", nameof(Severity.High), "vpn", "A VPN user connected from an unexpected country",
+                    string.Join("; ", away.Select(p => $"{p.Name} from {p.RemoteIp} ({p.Location?.City}, {p.Location?.Country}), last {p.LastHandshake:u}")) + ".",
+                    "Ask the person if they are travelling. If not, the device or its configuration was taken: revoke it now, the key stops working at once, "
+                    + "and give the person a new one.",
+                    away.Count == 1 ? $"sudo xrc-vpn revoke {away[0].Name}" : null));
+            var unused = vpn.Peers.Where(p => p.LastHandshake is { } at ? facts.Time - at > TimeSpan.FromDays(UnusedVpnDays)
+                                                                      : facts.Time - p.Created > TimeSpan.FromDays(30)).ToList();
+            if (unused.Count > 0)
+                findings.Add(new("vpn-unused-users", nameof(Severity.Low), "vpn", "VPN users nobody uses",
+                    string.Join("; ", unused.Select(p => p.LastHandshake is { } at ? $"{p.Name}: last connected {at:u}" : $"{p.Name}: never connected, added {p.Created:u}")) + ".",
+                    $"A key that has not been used for {UnusedVpnDays} days is often an old phone or someone who left, and it still opens the network: revoke it.",
+                    unused.Count == 1 ? $"sudo xrc-vpn revoke {unused[0].Name}" : null));
+            if (vpn.Up && vpn.Endpoint is null)
+                findings.Add(new("vpn-endpoint-missing", nameof(Severity.Low), "vpn", "The VPN has no public address yet",
+                    "Nobody can be given a configuration until it is set.",
+                    "Set the public IP or name of the office (the router must forward the VPN's UDP port to this server).",
+                    "sudo xrc-vpn endpoint <the office's public IP or name>"));
+        }
 
         // ---- How XRCopilotLab reaches the server ----
         if (connection?.Mode == "tunnel")
