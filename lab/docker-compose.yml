@@ -103,6 +103,9 @@ services:
   metasploit:
     container_name: intrusion-lab-metasploit
     image: metasploitframework/metasploit-framework:latest
+    # Published for amd64 only: on Apple silicon Docker runs it emulated (Rosetta), slower to start but fine for the
+    # lab. Declared, so the pull is deliberate and compose does not warn on every start.
+    platform: linux/amd64
     hostname: metasploit
     entrypoint: ["./msfrpcd"]
     command: ["-U", "msf", "-P", "${MSF_RPC_PASSWORD:-labmsf}", "-a", "0.0.0.0", "-p", "55553", "-S", "-f"]
