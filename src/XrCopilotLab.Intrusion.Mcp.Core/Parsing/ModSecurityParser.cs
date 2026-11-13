@@ -39,6 +39,7 @@ public static partial class ModSecurityParser
         ("attack-fixation", "session-fixation"),
         ("attack-generic", "generic-attack"),
         ("attack-reputation-scanner", "scanner-agent"),
+        ("attack-prompt-injection", "prompt-injection"),
         ("attack-multipart-header", "protocol-violation"),
         ("attack-protocol", "protocol-violation"),
     ];
@@ -79,6 +80,12 @@ public static partial class ModSecurityParser
                 if (rank >= 0) found.Add((rank, Families[rank].Family, ruleId, message));
             }
             if (score is null || found.Count == 0) return false;
+            // install.sh --with modsecurity adds rules for text written for an AI in the body (a chatbot's message):
+            // their message names the rule, "AI prompt injection: instruction-override".
+            var injected = found.FirstOrDefault(f => f.Family == PromptInjectionFamily).Message is { } said
+                && said.StartsWith(PromptInjectionMessage, StringComparison.Ordinal)
+                ? said[PromptInjectionMessage.Length..].Trim()
+                : null;
 
             var first = found.MinBy(f => f.Rank);
             var request = t.TryGetProperty("request", out var r) && r.ValueKind == JsonValueKind.Object ? r : default;
@@ -92,7 +99,7 @@ public static partial class ModSecurityParser
                 Detail: string.Join(",", found.OrderBy(f => f.Rank).Select(f => f.Family).Distinct()),
                 SignatureId: first.RuleId,
                 Score: score,
-                Injection: uri is null ? null : UntrustedText.Injection(UntrustedText.Decode(uri)));
+                Injection: (uri is null ? null : UntrustedText.Injection(UntrustedText.Decode(uri))) ?? injected);
             return true;
         }
         catch (JsonException)
@@ -104,9 +111,23 @@ public static partial class ModSecurityParser
     /// <summary>The attack family of a WAF alert: the first family in <see cref="LogEvent.Detail"/>.</summary>
     public static string FamilyOf(LogEvent alert) => (alert.Detail ?? "").Split(',')[0];
 
-    /// <summary>An exploit if any family is one; a scan if the request only looked like a tool or broke HTTP.</summary>
-    public static AttackType TypeOf(LogEvent alert) =>
-        (alert.Detail ?? "").Split(',').Any(f => f.Length > 0 && !ScanFamilies.Contains(f)) ? AttackType.WebExploitAttempt : AttackType.WebVulnerabilityScan;
+    /// <summary>The family of the rules for text written for an AI (install.sh --with modsecurity, ids 200100-200199).</summary>
+    public const string PromptInjectionFamily = "prompt-injection";
+
+    /// <summary>How those rules start their message; the rest is the <see cref="UntrustedText.Injection"/> rule.</summary>
+    public const string PromptInjectionMessage = "AI prompt injection:";
+
+    /// <summary>
+    /// An exploit if any family is one; a scan if the request only looked like a tool or broke HTTP; a prompt injection
+    /// if text for an AI was all there was.
+    /// </summary>
+    public static AttackType TypeOf(LogEvent alert)
+    {
+        var families = (alert.Detail ?? "").Split(',').Where(f => f.Length > 0).ToList();
+        if (families.Any(f => !ScanFamilies.Contains(f) && f != PromptInjectionFamily)) return AttackType.WebExploitAttempt;
+        if (families.Contains(PromptInjectionFamily)) return AttackType.AiPromptInjection;
+        return AttackType.WebVulnerabilityScan;
+    }
 
     // "Thu Nov 12 13:51:22 2026", or with the day padded by a space ("Thu Nov  5 …").
     private static bool TryTime(string? text, TimeZoneInfo zone, out DateTimeOffset time)

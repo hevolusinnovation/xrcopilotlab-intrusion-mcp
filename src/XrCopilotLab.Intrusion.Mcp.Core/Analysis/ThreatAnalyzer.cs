@@ -130,6 +130,7 @@ public sealed class ThreatAnalyzer(IntrusionPolicy policy, IGeoLocator geo)
             var ports = blocks.Where(b => b.TargetPort is not null).GroupBy(b => b.TargetPort!.Value).ToList();
             if (ports.Count >= policy.PortScanMinPorts) types.Add(AttackType.PortScan);
             if (ports.Any(p => AttackCatalog.IndustrialPorts.ContainsKey(p.Key))) types.Add(AttackType.IndustrialProtocolProbe);
+            if (ports.Any(p => AttackCatalog.AiServicePorts.ContainsKey(p.Key))) types.Add(AttackType.AiServiceProbe);
 
             if (campaignMembers.Contains(ip)) { types.Remove(AttackType.SshBruteForce); types.Add(AttackType.DistributedSshBruteForce); }
             if (suspicious[ip].Any(s => s.Reason == "after-failures")) types.Add(AttackType.LoginAfterFailures);
@@ -217,6 +218,8 @@ public sealed class ThreatAnalyzer(IntrusionPolicy policy, IGeoLocator geo)
         LogOrigin.Auth => "user",
         LogOrigin.Falco when e.Command is not null && UntrustedText.Injection(e.Command) is not null => "command",
         LogOrigin.WebAccess when e.Detail is not null => "userAgent",
+        // The WAF read it in the body of the request (a chatbot's message): the log keeps only the path.
+        LogOrigin.ModSecurity when UntrustedText.Injection(UntrustedText.Decode(e.Path ?? "")) is null => "body",
         _ => "path",
     };
 
@@ -267,7 +270,8 @@ public sealed class ThreatAnalyzer(IntrusionPolicy policy, IGeoLocator geo)
             || ids.Any(a => a.Priority == 1 && AttackCatalog.FromIdsAlert(a) == AttackType.NetworkExploitAttempt))
             return Severity.High;
         if (bans > 0 || crowdsecAlerts > 0 || ids.Count > 0 || attempts >= policy.MediumAttempts || types.Contains(AttackType.DistributedSshBruteForce)
-            || types.Contains(AttackType.RequestFlood) || types.Contains(AttackType.WebLoginBruteForce) || types.Contains(AttackType.PortScan))
+            || types.Contains(AttackType.RequestFlood) || types.Contains(AttackType.WebLoginBruteForce) || types.Contains(AttackType.PortScan)
+            || types.Contains(AttackType.AiServiceProbe))
             return Severity.Medium;
         return Severity.Low;
     }

@@ -54,7 +54,7 @@ public sealed class IntrusionTools(IntrusionQueries queries, GuardQueries guard,
         [Description("End of the period (ISO 8601). Null = now.")] DateTimeOffset? until = null,
         [Description(SlotHelp)] int? slotMinutes = null,
         [Description("Only addresses seen by this fail2ban jail. Null = all.")] string? jail = null,
-        [Description("Only this attack type: SshBruteForce, DistributedSshBruteForce, WebLoginBruteForce, WebVulnerabilityScan, WebExploitAttempt, RequestFlood, MailLoginBruteForce, PortScan, IndustrialProtocolProbe, RepeatOffender, LoginAfterFailures, NetworkExploitAttempt, KnownMaliciousSource, IndustrialProtocolCommand, CommandAndControl, SensitiveFileAccess, SuspiciousExecution, Persistence, PrivilegeEscalation, LogTampering, CryptoMining, AiPromptInjection. Null = all.")] string? attackType = null,
+        [Description("Only this attack type: SshBruteForce, DistributedSshBruteForce, WebLoginBruteForce, WebVulnerabilityScan, WebExploitAttempt, RequestFlood, MailLoginBruteForce, PortScan, IndustrialProtocolProbe, RepeatOffender, LoginAfterFailures, NetworkExploitAttempt, KnownMaliciousSource, IndustrialProtocolCommand, CommandAndControl, SensitiveFileAccess, SuspiciousExecution, Persistence, PrivilegeEscalation, LogTampering, CryptoMining, AiServiceProbe, AiPromptInjection. Null = all.")] string? attackType = null,
         [Description("Only addresses in this country (ISO code, e.g. CN). Null = all.")] string? country = null,
         [Description("Max rows. Default 20, max 100.")] int top = 20)
     {
@@ -144,7 +144,7 @@ public sealed class IntrusionTools(IntrusionQueries queries, GuardQueries guard,
      Description(
         "Checks of the host's configuration against what attacked it: incidents first (someone got in), then SSH with passwords, " +
         "services and industrial ports open to the network, a slow brute force nobody banned, no web firewall, guardians stopped or " +
-        "unreadable, old IDS rules, VPN users connected from an unexpected country or unused for months. Each finding has a stable id, a severity grown with the evidence of the period, the evidence, a " +
+        "unreadable, old IDS rules, AI services (Ollama, vector databases) open to the network, someone looking for them or writing instructions for an AI, VPN users connected from an unexpected country or unused for months. Each finding has a stable id, a severity grown with the evidence of the period, the evidence, a " +
         "recommendation in plain words and, when this package can do it, the command that fixes it. Nothing is applied. " +
         "Use it to propose a security plan for this customer. Default period: the last 7 days.")]
     public PostureResult Posture(

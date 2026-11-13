@@ -133,6 +133,28 @@ public static class PostureChecks
                 $"{Addresses(nameof(AttackType.IndustrialProtocolProbe))} address(es) tried industrial ports (Modbus, S7, IEC 104…) in the last {period}.",
                 "Check that no PLC or SCADA port is reachable from the internet, here or on other hosts of the network.", null));
 
+        // ---- AI services ----
+        // Ollama, LM Studio, Gradio, ComfyUI and the vector databases answer without a password by default: whoever reaches
+        // the port uses the models (and the GPU), reads the documents indexed, downloads or deletes models.
+        foreach (var p in facts.Listening.Where(p => p.Public && AttackCatalog.AiServicePorts.ContainsKey(p.Port)).DistinctBy(p => p.Port))
+            findings.Add(new($"exposed-ai-{p.Port}", nameof(Severity.High), "ai", $"{AttackCatalog.AiServicePorts[p.Port]} is open to the network",
+                $"Port {p.Port} listens on {p.Address}. It has no password by default: anyone who reaches it can use the models, read what is " +
+                (Has(nameof(AttackType.AiServiceProbe)) ? $"indexed, or replace a model. {Addresses(nameof(AttackType.AiServiceProbe))} address(es) looked for AI services in the last {period}."
+                    : "indexed, or replace a model."),
+                (p.Port == 11434 ? "Let Ollama listen on 127.0.0.1 only (OLLAMA_HOST=127.0.0.1 in its service) and put the applications that use it on the same host or behind an authenticated proxy."
+                    : "Bind it to 127.0.0.1 and reach it through the application that uses it, or through an authenticated proxy.") + behindVpn,
+                VpnFix(p.Port)));
+        if (Has(nameof(AttackType.AiServiceProbe)))
+            findings.Add(new("ai-probes", nameof(Severity.Low), "ai", "Someone is looking for AI services",
+                $"{Addresses(nameof(AttackType.AiServiceProbe))} address(es) looked for Ollama, OpenAI-compatible APIs, MCP servers or vector databases in the last {period}.",
+                "Check that no model, MCP server or vector database is reachable without a password, here or on other hosts of the network.", null));
+        if (Has(nameof(AttackType.AiPromptInjection)))
+            findings.Add(new("ai-prompt-injection", nameof(Severity.Medium), "ai", "Someone wrote instructions for an AI",
+                $"{Addresses(nameof(AttackType.AiPromptInjection))} address(es) wrote text meant for an AI in the last {period}: in page addresses, " +
+                "SSH account names, commands, or the messages sent to a chatbot. It may target the assistant that reads these logs, or a chatbot of yours.",
+                "The assistant reports that text as evidence and does not follow it. If you run a chatbot or an agent that reads what visitors send " +
+                "(forms, emails, tickets), treat that input as untrusted: never let it trigger an action without a person's approval.", null));
+
         // ---- Web ----
         if (g.TryGetValue("nginx", out var nginx) && nginx.Installed)
         {

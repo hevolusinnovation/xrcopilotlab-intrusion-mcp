@@ -189,7 +189,7 @@ const TYPES = {
   IndustrialProtocolCommand: "comandi industriali", CommandAndControl: "SERVER COMPROMESSO (C2)",
   SensitiveFileAccess: "file riservati letti", SuspiciousExecution: "programma sospetto", Persistence: "porta sul retro (chiave/account)",
   PrivilegeEscalation: "scalata dei privilegi", LogTampering: "log cancellati", CryptoMining: "MINER di criptovalute",
-  AiPromptInjection: "inganno dell'AI (prompt injection)", Other: "altro",
+  AiServiceProbe: "cerca servizi AI", AiPromptInjection: "inganno dell'AI (prompt injection)", Other: "altro",
 };
 const GUARDIANS = {
   sshd: "Accesso remoto (SSH)", nginx: "Server web", ufw: "Firewall", fail2ban: "fail2ban · banna chi sbaglia password",
@@ -207,6 +207,8 @@ const FINDINGS = {
   "ssh-root-login": ["root può entrare via SSH", "Entra con un utente nominale e usa sudo; imposta PermitRootLogin no."],
   "fail2ban-missing": ["Nessuno banna chi prova le password SSH", "Installa fail2ban: un indirizzo che sbaglia cinque volte resta fuori per un po'."],
   "slow-brute-force-unbanned": ["Un attacco lento alle password non è mai stato bannato", "Un tentativo ogni pochi minuti passa sotto la soglia di fail2ban. Fai agire CrowdSec su quello che vede (bouncer) o allunga la finestra di fail2ban per SSH."],
+  "ai-probes": ["Qualcuno cerca servizi di intelligenza artificiale", "Verifica che nessun modello (Ollama, LM Studio), server MCP o database vettoriale sia raggiungibile senza password, qui o su altri server della rete."],
+  "ai-prompt-injection": ["Qualcuno ha scritto istruzioni per un'AI", "L'assistente le riporta come prova e non le esegue. Se hai un chatbot o un agente che legge quello che scrivono i visitatori (moduli, email, ticket), non fargli mai avviare un'azione senza l'approvazione di una persona."],
   "industrial-probes": ["Qualcuno cerca sistemi industriali", "Verifica che nessuna porta di PLC o SCADA sia raggiungibile da internet, qui o su altri server della rete."],
   "waf-missing": ["Nessun firewall web legge le richieste", "Installa ModSecurity con le regole OWASP in sola osservazione: vede SQL injection, XSS e comandi in ogni richiesta, anche nel corpo delle POST, e non blocca niente."],
   "waf-detection-only": ["Il firewall web osserva soltanto", "Lascialo osservare un paio di settimane: se tra quello che avrebbe bloccato non ci sono richieste dei tuoi utenti, si può passare al blocco."],
@@ -225,6 +227,7 @@ const PREFIX = {
   "guardian-stopped-": ["è installato ma fermo", "Avvialo e controlla perché si è fermato."],
   "log-unreadable-": ["ha un log che il guardiano non riesce a leggere", "Rendi il log leggibile al gruppo adm, come fa install.sh --with."],
   "exposed-industrial-": ["Un protocollo industriale è aperto sulla rete", "Mai su internet: raggiungilo solo dalla VPN, dalla rete dell'impianto."],
+  "exposed-ai-": ["Un servizio AI senza password è aperto sulla rete", "Chiunque lo raggiunga usa i modelli e legge i documenti indicizzati. Legalo a 127.0.0.1 (per Ollama: OLLAMA_HOST=127.0.0.1) o mettilo dietro la VPN."],
   "exposed-service-": ["Un servizio delicato è aperto sulla rete", "Legalo a 127.0.0.1 o alla sola rete interna, o mettilo dietro la VPN."],
 };
 
@@ -348,7 +351,7 @@ function drawStats(summary) {
   // Text written for the AI that reads these logs: the agent was told to quote it, never to follow it.
   const liar = (summary.topAttackers || []).find(r => (r.attackTypes || []).includes("AiPromptInjection"));
   if (liar) {
-    const where = { path: "nell'indirizzo di una pagina", userAgent: "nello user agent", user: "come nome utente SSH", command: "in un comando" }[liar.promptInjections?.[0]?.field] || "";
+    const where = { path: "nell'indirizzo di una pagina", userAgent: "nello user agent", body: "in un messaggio inviato al sito", user: "come nome utente SSH", command: "in un comando" }[liar.promptInjections?.[0]?.field] || "";
     parts.push(`<b>Tentativo di ingannare l'AI</b>: ${esc(liar.ip)} (${esc(liar.location?.city || "")}, ${esc(liar.location?.country || "")}) ` +
       `ha scritto istruzioni per l'assistente ${where}, l'ultima volta alle ${time(liar.lastSeen)}. L'assistente le riporta come prova, non le esegue.`);
   }

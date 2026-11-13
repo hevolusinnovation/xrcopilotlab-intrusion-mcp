@@ -66,6 +66,11 @@ public enum AttackType
     /// <summary>A crypto-currency miner running on the host (Falco).</summary>
     CryptoMining,
 
+    /// <summary>Looking for AI services: Ollama, OpenAI-compatible APIs, MCP servers, image generators, vector databases,
+    /// on the web server (paths that do not exist here) or on their ports (closed by the firewall). An exposed model is
+    /// free computing power, and an exposed MCP server hands over its tools.</summary>
+    AiServiceProbe,
+
     /// <summary>Text written for the AI that reads the logs, in a request path, an account name or a command: "ignore your
     /// instructions", chat-model role tokens, hidden Unicode. An attempt to make the agent lie about the attacks.</summary>
     AiPromptInjection,

@@ -24,6 +24,18 @@ public static class AttackCatalog
         [47808] = "BACnet",
     };
 
+    /// <summary>Ports of AI services that answer without a password by default: a scan for them is a scan for free models,
+    /// documents and tools.</summary>
+    public static readonly IReadOnlyDictionary<int, string> AiServicePorts = new Dictionary<int, string>
+    {
+        [1234] = "LM Studio",
+        [6333] = "Qdrant (vector database)",
+        [7860] = "Gradio (Stable Diffusion WebUI, text-generation-webui)",
+        [8188] = "ComfyUI",
+        [11434] = "Ollama",
+        [19530] = "Milvus (vector database)",
+    };
+
     private static readonly Dictionary<int, string> CommonPorts = new()
     {
         [21] = "FTP", [22] = "SSH", [23] = "Telnet", [25] = "SMTP", [53] = "DNS", [80] = "HTTP", [110] = "POP3",
@@ -34,7 +46,9 @@ public static class AttackCatalog
     };
 
     public static string? ServiceOf(int port) =>
-        IndustrialPorts.TryGetValue(port, out var ics) ? ics : CommonPorts.TryGetValue(port, out var s) ? s : null;
+        IndustrialPorts.TryGetValue(port, out var ics) ? ics
+            : AiServicePorts.TryGetValue(port, out var ai) ? ai
+            : CommonPorts.TryGetValue(port, out var s) ? s : null;
 
     public static AttackType FromJail(string jail) => jail.Trim().ToLowerInvariant() switch
     {
@@ -165,6 +179,7 @@ public static class AttackCatalog
         AttackType.PrivilegeEscalation => "An attempt to get more rights on the host: ptrace, a kernel module, a container escape (Falco).",
         AttackType.LogTampering => "Logs cleared or data removed on the host: someone covering their tracks (Falco).",
         AttackType.CryptoMining => "A crypto-currency miner running on the host (Falco).",
+        AttackType.AiServiceProbe => "Looking for AI services (Ollama, OpenAI-compatible APIs, MCP servers, image generators, vector databases): an exposed one is free computing power, data and tools.",
         AttackType.AiPromptInjection => "Text written for the AI that reads the logs (in a request path, an account name or a command): an attempt to make the agent hide or misreport the attacks.",
         _ => "A detector rule this server does not classify.",
     };

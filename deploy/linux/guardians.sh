@@ -340,8 +340,25 @@ SecAuditLog /var/log/modsecurity/audit.json
 # The OWASP CRS, file by file: the package's owasp-crs.load uses IncludeOptional, which ModSecurity v3 rejects.
 Include /etc/modsecurity/crs/crs-setup.conf
 Include /etc/modsecurity/crs/REQUEST-900-EXCLUSION-RULES-BEFORE-CRS.conf
+# Ours, before the CRS rules so they count in the same anomaly score: text written for an AI (prompt injection).
+Include /etc/modsecurity/xrcopilotlab/ai.conf
 Include /usr/share/modsecurity-crs/rules/*.conf
 Include /etc/modsecurity/crs/RESPONSE-999-EXCLUSION-RULES-AFTER-CRS.conf
+CONF
+
+  # Text written for an AI, in what is sent to the site: a chatbot's message, a form a model will summarise, a query
+  # string. The same rules the toolkit applies to the logs (UntrustedText), minus "a message to the AI", which is what
+  # a chatbot's users write anyway, and minus zero-width characters, which emoji use. Each adds a critical score, so
+  # the CRS's 949110 logs the request; the message names the rule for the toolkit ("AI prompt injection: <rule>").
+  # Detection only, like everything here. Ids 200100-200199.
+  cat > "$MODSEC_DIR/ai.conf" <<'CONF'
+# Written by xrcopilotlab-intrusion-mcp (install.sh --with modsecurity): text written for an AI. Detection only.
+SecRule REQUEST_BODY|ARGS_GET "@rx (?i)\b(?:ignore|disregard|forget|override|bypass)[\s_+.-]+(?:(?:all|any|the|your)[\s_+.-]+)*(?:(?:previous|prior|above|earlier|system|original)[\s_+.-]+)?(?:instructions?|prompts?|rules|guidelines|directives)\b|\b(?:ignora|dimentica|trascura)\w*[\s_+.-]+(?:(?:tutte|le)[\s_+.-]+)*(?:istruzioni|regole|indicazioni)\b|\b(?:system[\s_+.-]+prompt|new[\s_+.-]+instructions?|nuove[\s_+.-]+istruzioni|developer[\s_+.-]+mode|jailbreak)\b" \
+    "id:200101,phase:2,pass,log,t:none,t:urlDecodeUni,msg:'AI prompt injection: instruction-override',tag:'attack-prompt-injection',tag:'xrcopilotlab',severity:'CRITICAL',setvar:'tx.anomaly_score_pl1=+%{tx.critical_anomaly_score}',setvar:'tx.inbound_anomaly_score_pl1=+%{tx.critical_anomaly_score}'"
+SecRule REQUEST_BODY|ARGS_GET "@rx (?i)<\|(?:im_start|im_end|system|endoftext)\|>|\[/?INST\]|<</?SYS>>" \
+    "id:200102,phase:2,pass,log,t:none,t:urlDecodeUni,msg:'AI prompt injection: role-marker',tag:'attack-prompt-injection',tag:'xrcopilotlab',severity:'CRITICAL',setvar:'tx.anomaly_score_pl1=+%{tx.critical_anomaly_score}',setvar:'tx.inbound_anomaly_score_pl1=+%{tx.critical_anomaly_score}'"
+SecRule REQUEST_BODY|ARGS_GET "@rx \xf3\xa0[\x80\x81][\x80-\xbf]|(?i)\\udb40\\udc[0-7][0-9a-f]" \
+    "id:200103,phase:2,pass,log,t:none,t:urlDecodeUni,msg:'AI prompt injection: hidden-unicode',tag:'attack-prompt-injection',tag:'xrcopilotlab',severity:'CRITICAL',setvar:'tx.anomaly_score_pl1=+%{tx.critical_anomaly_score}',setvar:'tx.inbound_anomaly_score_pl1=+%{tx.critical_anomaly_score}'"
 CONF
 
   # nginx's master (root) opens the log and its workers write it: created first, 0640 group adm, for the toolkit.
