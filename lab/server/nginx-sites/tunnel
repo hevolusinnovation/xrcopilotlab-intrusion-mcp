@@ -13,6 +13,13 @@ server {
     # XRCopilotLab's own API/MCP calls are not web attacks: the WAF must not inspect them.
     modsecurity off;
 
+    # The root says what is here, so a browser does not just get a 404: addresses only, no data, no key.
+    location = / {
+        default_type application/json;
+        add_header Cache-Control no-store always;
+        return 200 '{"service":"Hevolus Intrusion MCP","api":"/api/","mcp":"/mcp","status":"/api/status","auth":"X-API-Key header on every call","note":"API del toolkit per XRCopilotLab: ogni chiamata vuole l\'intestazione X-API-Key. La mappa e la lista degli attacchi sono nella pagina di monitoraggio, dal Dev Tunnel con il login Microsoft."}\n';
+    }
+
     location /api/ {
         proxy_pass http://127.0.0.1:8470;
         proxy_http_version 1.1;
