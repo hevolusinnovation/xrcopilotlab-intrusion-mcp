@@ -35,11 +35,30 @@ guardian_crowdsec() {
     [[ -f /etc/apt/keyrings/crowdsec.gpg ]] || curl -fsSL https://packagecloud.io/crowdsec/crowdsec/gpgkey | gpg --dearmor -o /etc/apt/keyrings/crowdsec.gpg
     printf 'deb [signed-by=/etc/apt/keyrings/crowdsec.gpg] https://packagecloud.io/crowdsec/crowdsec/%s/ %s main\n' "$ID" "$VERSION_CODENAME" \
       > /etc/apt/sources.list.d/crowdsec.list
-    apt_install crowdsec
+    # crowdsec's postinst runs `cscli setup`, which calls `systemctl show` by absolute path; during an image build there
+    # is no running systemd (install.sh --no-start), so that returns an error and dpkg aborts the whole build. When
+    # systemd is not running, swap systemctl for a no-op just for this install, then restore it. (`systemctl enable`,
+    # used elsewhere at build, works offline on the real binary; only `show` needs a running bus, so this is safe.)
+    if [[ -d /run/systemd/system ]]; then
+      apt_install crowdsec
+    else
+      local sc saved="" rc=0
+      sc="$(command -v systemctl || true)"
+      if [[ -n "$sc" ]]; then
+        saved="$sc.xrc-real"; mv "$sc" "$saved"
+        printf '#!/bin/sh\nexit 0\n' > "$sc" && chmod +x "$sc"
+      fi
+      apt_install crowdsec || rc=$?
+      [[ -n "$saved" ]] && mv -f "$saved" "$sc"
+      [[ $rc -eq 0 ]] || return 1
+    fi
   fi
   systemctl enable --now crowdsec >/dev/null 2>&1 || true
-  # CrowdSec writes its log 0600 root; its rotation keeps the mode of the file it replaces, so this holds.
-  [[ -f /var/log/crowdsec.log ]] && chgrp adm /var/log/crowdsec.log && chmod 0640 /var/log/crowdsec.log
+  # The toolkit reads CrowdSec's log as group adm. CrowdSec writes it 0600 root and may not have created it yet at
+  # install time (install.sh --no-start, before it ever runs), so create it now with the right mode; CrowdSec then
+  # appends and keeps it, and its rotation keeps the mode of the file it replaces. Never truncate an existing log.
+  [[ -f /var/log/crowdsec.log ]] || install -m 0640 -g adm /dev/null /var/log/crowdsec.log
+  chgrp adm /var/log/crowdsec.log 2>/dev/null && chmod 0640 /var/log/crowdsec.log 2>/dev/null || true
   return 0
 }
 

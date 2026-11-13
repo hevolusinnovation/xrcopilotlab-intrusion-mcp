@@ -48,9 +48,12 @@ RUN useradd -m -s /bin/bash -G sudo operatore && echo 'operatore:Alveo2026!' | c
 # package's own 8471 site, with its password, stays unused inside lab-01; it is installed for the page's key.
 COPY --from=package /out/package.tar.gz /tmp/package.tar.gz
 RUN mkdir /tmp/package && tar -xzf /tmp/package.tar.gz -C /tmp/package --strip-components=1 \
- && DASHBOARD_PASSWORD=AlveoLab2026! VPN_ENDPOINT=203.0.113.250 /tmp/package/install.sh --no-start --with suricata,falco,modsecurity,wireguard \
+ && DASHBOARD_PASSWORD=AlveoLab2026! VPN_ENDPOINT=203.0.113.250 /tmp/package/install.sh --no-start --with crowdsec,suricata,falco,modsecurity,wireguard \
+ # crowdsec enrolled with its Central API during the build; lab-01 is isolated at runtime, so disable the online client
+ # (no internet) and let it run with its local API only — otherwise crowdsec FATALs on start reaching api.crowdsec.net.
+ && sed -i '/^    online_client:/,+1d' /etc/crowdsec/config.yaml && rm -f /etc/crowdsec/online_api_credentials.yaml \
  && suricata-update -q --no-test --local /etc/suricata/rules/lab.rules \
- && systemctl enable suricata.service falco-modern-bpf.service nginx.service \
+ && systemctl enable crowdsec.service suricata.service falco-modern-bpf.service nginx.service \
  && rm -rf /tmp/package /tmp/package.tar.gz /var/lib/apt/lists/*
 
 # The lab's sites, after the package: they turn ModSecurity off for the API ("modsecurity off;"), a directive nginx only
