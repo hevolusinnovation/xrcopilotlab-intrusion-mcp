@@ -25,6 +25,13 @@ h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: v
 .scenario b { display: block; font-weight: 600; }
 .scenario span { color: var(--muted); font-size: 12px; }
 .scenario .expect { display: block; margin-top: 3px; font-size: 12px; color: var(--muted); }
+.phase { margin-bottom: 14px; }
+.phase-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 6px; }
+.phase-head .n { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 50%; background: var(--line); color: var(--text); font-size: 11px; font-weight: 700; }
+.phase-head h3 { font-size: 13px; font-weight: 600; }
+.phase-head p { color: var(--muted); font-size: 12px; margin-left: auto; }
+.badge { display: inline-block; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; padding: 1px 6px; border-radius: 10px; margin-left: 6px; vertical-align: 1px; }
+.badge.real { background: rgba(63,185,80,.18); color: var(--ok); }
 .log { background: #0b0f13; border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; min-height: 120px; max-height: 320px; overflow-y: auto; white-space: pre-wrap; }
 .log .t { color: var(--muted); }
 .log .ok { color: var(--critical); font-weight: 600; }
@@ -48,7 +55,7 @@ input { background: var(--bg); color: var(--text); border: 1px solid var(--line)
 <body>
 <div class="page">
   <header>
-    <h1>Laboratorio intrusioni<small>Bersaglio: lab-01 · Alveo Energia (azienda sintetica) · dati di laboratorio</small></h1>
+    <h1>Attaccante<small>Strumento di test: lancia attacchi reali contro un server protetto dal toolkit e guarda cosa rileva. Bersaglio: lab-01 · Alveo Energia (azienda sintetica).</small></h1>
     <a class="btn" href="http://localhost:8089/" target="_blank" rel="noopener" title="La mappa e gli attacchi ricevuti dal server (lab-01)">Mappa degli attacchi ↗</a>
   </header>
 
@@ -79,8 +86,8 @@ input { background: var(--bg); color: var(--text); border: 1px solid var(--line)
 
   <div class="main">
     <div>
-      <h2>Attacchi <span class="error" id="error" style="text-transform:none;letter-spacing:0"></span></h2>
-      <div class="scenarios" id="scenarios"></div>
+      <h2>Attacchi, nell'ordine di una vera intrusione <span class="error" id="error" style="text-transform:none;letter-spacing:0"></span></h2>
+      <div id="scenarios"></div>
     </div>
 
     <div>
@@ -96,13 +103,33 @@ const esc = (s) => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<"
 
 let scenarios = [];
 let targetMode = "lab";
+// The phases of an intrusion, in order, with a one-line explanation each.
+const PHASES = [
+  ["Ricognizione", "L'attaccante cerca porte aperte, servizi e pagine deboli."],
+  ["Accesso", "Prova a entrare: password, exploit sul sito, flood."],
+  ["Dentro il server", "Una volta dentro, cosa fa l'intruso."],
+  ["Controllo remoto", "Il server compromesso chiama il controllore dell'attaccante."],
+  ["Tutto", "La sequenza completa, dall'inizio alla fine."],
+];
+
+function card(s) {
+  return `<button class="scenario" data-id="${esc(s.id)}" data-web="${s.web ? 1 : 0}" data-available="${s.available ? 1 : 0}">
+      <b>${esc(s.title)}${s.real ? '<span class="badge real">reale</span>' : ''}</b>
+      <span>da ${esc(s.source)} · ${esc(s.place)}</span>
+      <span class="expect">${esc(s.expect)}</span>
+    </button>`;
+}
+
 async function loadScenarios() {
   scenarios = await fetch("/api/scenarios").then(r => r.json());
-  $("scenarios").innerHTML = scenarios.map(s => `
-    <button class="scenario" data-id="${esc(s.id)}" data-web="${s.web ? 1 : 0}" data-available="${s.available ? 1 : 0}">
-      <b>${esc(s.title)}</b><span>da ${esc(s.source)} · ${esc(s.place)}</span>
-      <span class="expect">${esc(s.expect)}</span>
-    </button>`).join("");
+  $("scenarios").innerHTML = PHASES.map(([name, desc], i) => {
+    const group = scenarios.filter(s => (s.phase || "Tutto") === name);
+    if (!group.length) return "";
+    return `<div class="phase">
+      <div class="phase-head"><span class="n">${i + 1}</span><h3>${esc(name)}</h3><p>${esc(desc)}</p></div>
+      <div class="scenarios">${group.map(card).join("")}</div>
+    </div>`;
+  }).join("");
   $("scenarios").querySelectorAll("button").forEach(b => b.addEventListener("click", () => run(b.dataset.id)));
 }
 

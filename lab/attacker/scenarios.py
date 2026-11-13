@@ -393,42 +393,42 @@ def full_night(log):
 
 
 SCENARIOS = [
-    {"id": "port-scan", "title": "Scansione delle porte", "source": "203.0.113.6", "run": port_scan,
+    {"id": "port-scan", "phase": "Ricognizione", "real": False, "title": "Scansione delle porte", "source": "203.0.113.6", "run": port_scan,
      "expect": "Il firewall registra i tentativi sulle porte chiuse: PortScan, gravità media."},
-    {"id": "industrial", "title": "Ricerca dei protocolli industriali", "source": "203.0.113.7", "run": industrial_probe,
+    {"id": "industrial", "phase": "Ricognizione", "real": False, "title": "Ricerca dei protocolli industriali", "source": "203.0.113.7", "run": industrial_probe,
      "expect": "Modbus, S7, IEC 104, DNP3, BACnet…: IndustrialProtocolProbe, gravità alta."},
-    {"id": "ssh-fast", "title": "Forza bruta SSH veloce", "source": "203.0.113.20", "run": ssh_fast,
+    {"id": "ssh-fast", "phase": "Accesso", "real": False, "title": "Forza bruta SSH veloce", "source": "203.0.113.20", "run": ssh_fast,
      "expect": "Dopo 5 tentativi fail2ban banna l'indirizzo: gli ultimi tentativi non ricevono risposta."},
-    {"id": "intrusion", "title": "Intrusione lenta e accesso riuscito", "source": "198.51.100.213", "run": intrusion,
+    {"id": "intrusion", "phase": "Accesso", "real": False, "title": "Intrusione lenta e accesso riuscito", "source": "198.51.100.213", "run": intrusion,
      "expect": "Scansione, 4 password sbagliate sotto la soglia, poi l'accesso: LoginAfterFailures, gravità critica."},
-    {"id": "inside", "title": "L'intruso dentro il server", "source": "198.51.100.213", "run": inside,
+    {"id": "inside", "phase": "Dentro il server", "real": False, "title": "L'intruso dentro il server", "source": "198.51.100.213", "run": inside,
      "expect": "Falco vede cosa fa dopo l'accesso: legge /etc/shadow, aggiunge una chiave SSH, avvia un miner, svuota wtmp. Tutto legato al suo indirizzo, gravità critica."},
-    {"id": "backdoor", "title": "Backdoor che chiama casa", "source": C2, "run": backdoor,
+    {"id": "backdoor", "phase": "Controllo remoto", "real": False, "title": "Backdoor che chiama casa", "source": C2, "run": backdoor,
      "expect": "Dopo l'accesso, lab-01 chiama il server di controllo: Suricata lo vede, CommandAndControl, gravità critica."},
-    {"web": True, "id": "web-scan", "title": "Scansione del sito", "source": "203.0.113.14", "run": web_scan,
+    {"web": True, "id": "web-scan", "phase": "Ricognizione", "real": False, "title": "Scansione del sito", "source": "203.0.113.14", "run": web_scan,
      "expect": "Richieste a .env, .git, WordPress, phpMyAdmin: WebVulnerabilityScan, ban di nginx-botsearch."},
-    {"web": True, "id": "web-exploit", "title": "Tentativi di exploit web", "source": "203.0.113.9", "run": web_exploit,
+    {"web": True, "id": "web-exploit", "phase": "Accesso", "real": False, "title": "Tentativi di exploit web", "source": "203.0.113.9", "run": web_exploit,
      "expect": "SQL injection, path traversal, PHPUnit, command injection, Log4Shell: WebExploitAttempt, gravità alta."},
-    {"web": True, "id": "hidden-post", "title": "Attacco nascosto nel modulo contatti", "source": "203.0.113.41", "run": hidden_post,
+    {"web": True, "id": "hidden-post", "phase": "Accesso", "real": False, "title": "Attacco nascosto nel modulo contatti", "source": "203.0.113.41", "run": hidden_post,
      "expect": "SQL injection, XSS e comandi nel corpo della POST: il log di nginx mostra solo «POST /contatti.html 200»; "
                "ModSecurity li vede: WebExploitAttempt, gravità alta. Il primo messaggio è legittimo e non va segnalato."},
-    {"web": True, "id": "web-login", "title": "Forza bruta sull'area riservata", "source": "203.0.113.18", "run": web_login,
+    {"web": True, "id": "web-login", "phase": "Accesso", "real": False, "title": "Forza bruta sull'area riservata", "source": "203.0.113.18", "run": web_login,
      "expect": "Password sbagliate su /admin/: WebLoginBruteForce, ban di nginx-http-auth."},
-    {"web": True, "id": "flood", "title": "Flood di richieste", "source": "203.0.113.15", "run": flood,
+    {"web": True, "id": "flood", "phase": "Accesso", "real": False, "title": "Flood di richieste", "source": "203.0.113.15", "run": flood,
      "expect": "nginx limita le richieste (429): RequestFlood, ban di nginx-limit-req."},
-    {"id": "campaign", "title": "Campagna distribuita su un account", "source": "192.0.2.11–22", "run": campaign,
+    {"id": "campaign", "phase": "Accesso", "real": False, "title": "Campagna distribuita su un account", "source": "192.0.2.11–22", "run": campaign,
      "expect": "12 indirizzi, 2 tentativi ciascuno sull'account scada: nessun ban, una campagna DistributedSshBruteForce."},
-    {"msf": True, "id": "msf-web", "title": "Metasploit · scansione web", "source": MSF_SOURCE, "run": msf_web,
+    {"msf": True, "id": "msf-web", "phase": "Ricognizione", "real": True, "title": "Metasploit · scansione web", "source": MSF_SOURCE, "run": msf_web,
      "expect": "Moduli http di Metasploit contro lab-01 (versione, robots, cartelle): un attacco vero, non scritto a mano. "
                "Suricata e ModSecurity lo vedono: WebVulnerabilityScan. Usa il container Metasploit del laboratorio (make lab-up-msf se è fermo)."},
-    {"msf": True, "id": "msf-ssh", "title": "Metasploit · forza bruta SSH", "source": MSF_SOURCE, "run": msf_ssh,
+    {"msf": True, "id": "msf-ssh", "phase": "Accesso", "real": True, "title": "Metasploit · forza bruta SSH", "source": MSF_SOURCE, "run": msf_ssh,
      "expect": "Il modulo ssh_login di Metasploit prova più password su lab-01: fail2ban banna l'attaccante "
                "(per qualche minuto anche gli altri scenari Metasploit, che partono dallo stesso indirizzo). "
                "Usa il container Metasploit del laboratorio (make lab-up-msf se è fermo)."},
-    {"msf": True, "id": "msf-industrial", "title": "Metasploit · sonda Modbus", "source": MSF_SOURCE, "run": msf_industrial,
+    {"msf": True, "id": "msf-industrial", "phase": "Ricognizione", "real": True, "title": "Metasploit · sonda Modbus", "source": MSF_SOURCE, "run": msf_industrial,
      "expect": "Moduli SCADA Modbus di Metasploit verso la porta 502 di lab-01: IndustrialProtocolProbe. "
                "Usa il container Metasploit del laboratorio (make lab-up-msf se è fermo) e la porta 502 aperta."},
-    {"id": "full-night", "title": "La notte completa (in sequenza)", "source": "più indirizzi", "run": full_night,
+    {"id": "full-night", "phase": "Tutto", "real": False, "title": "La notte completa (in sequenza)", "source": "più indirizzi", "run": full_night,
      "expect": "Scansione, protocolli industriali, sito, exploit, modulo contatti, l'intrusione, cosa fa dentro e la backdoor: circa tre minuti."},
 ]
 
@@ -437,6 +437,7 @@ def describe():
     msf_ok = metasploit_available()
     return [{"id": s["id"], "title": s["title"], "source": s["source"], "web": s.get("web", False),
              "msf": s.get("msf", False), "available": msf_ok or not s.get("msf", False),
+             "phase": s.get("phase", "Tutto"), "real": s.get("real", False),
              "place": PERSONAS.get(s["source"], "connessioni domestiche" if s["id"] == "campaign" else "più città"),
              "expect": s["expect"]} for s in SCENARIOS]
 
