@@ -3,7 +3,7 @@
 FROM ubuntu:24.04
 ENV DEBIAN_FRONTEND=noninteractive TZ=Europe/Rome
 RUN apt-get update \
- && apt-get install -y --no-install-recommends python3 python3-pip nmap openssh-client sshpass iproute2 tzdata \
+ && apt-get install -y --no-install-recommends python3 python3-pip nmap openssh-client sshpass iproute2 tzdata wireguard-tools iputils-ping \
  && rm -rf /var/lib/apt/lists/*
 
 # The client for the optional Metasploit container (msfrpcd): the console drives Metasploit over RPC, it is not

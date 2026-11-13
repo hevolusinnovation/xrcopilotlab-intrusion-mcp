@@ -13,5 +13,7 @@ iptables -A INPUT -p tcp --dport 80 -j ACCEPT
 iptables -A INPUT -p tcp -s 10.77.0.0/24 --dport 8091 -j ACCEPT
 # The monitoring page for the Dev Tunnel, from the tunnel container only.
 iptables -A INPUT -p tcp -s 10.77.0.0/24 --dport 8093 -j ACCEPT
+# The VPN (install.sh --with wireguard): WireGuard answers only a known key, so opening the port shows nothing to others.
+iptables -A INPUT -p udp --dport 51820 -j ACCEPT
 iptables -A INPUT -m limit --limit 50/s --limit-burst 200 -j NFLOG --nflog-group 1 --nflog-prefix "[UFW BLOCK] "
 iptables -A INPUT -j DROP

@@ -34,6 +34,7 @@ PERSONAS = {
     "203.0.113.41": "Hanoi, Vietnam",
     "203.0.113.72": "Ashburn, Stati Uniti",
     "203.0.113.30": "Amsterdam, Paesi Bassi",
+    "203.0.113.16": "Bucarest, Romania",
 }
 
 # The Metasploit container's own address on the lab's "internet" network (fixed in docker-compose.yml): Metasploit
@@ -405,6 +406,114 @@ def ai_injection(log):
             ssh_try(src, user, "x", log)
 
 
+# --- the VPN (install.sh --with wireguard on lab-01) ------------------------------------------------------------
+# lab-01 adds an employee, anna-portatile, with xrc-vpn, and leaves her configuration in the volume lab-vpn: the lost
+# laptop the attacker found. The tunnel is made here with the attacker's own WireGuard, from a persona's address.
+
+VPN_PORT = 51820
+STOLEN_CONF = "/lab/vpn/anna-portatile.conf"
+VPN_IFACE = "wgatk"
+
+
+def _wg_conf():
+    """The fields of the stolen configuration, or None when lab-01 has not written it (an old lab-01 image)."""
+    try:
+        with open(STOLEN_CONF) as f:
+            lines = f.read().splitlines()
+    except OSError:
+        return None
+    conf = {}
+    for line in lines:
+        key, sep, value = line.partition("=")
+        if sep and not line.lstrip().startswith("#"):
+            conf.setdefault(key.strip(), value.strip())
+    return conf if {"PrivateKey", "PublicKey", "Address"} <= conf.keys() else None
+
+
+def _tunnel(source, private_key, conf, log, wait=8):
+    """A WireGuard tunnel from `source` to lab-01 with `private_key`: returns the handshake time (0 = none). The
+    packets leave from `source` thanks to a route to lab-01 with that source address, removed at the end."""
+    target = target_for(source)
+    dev = iface_for(source)
+    subprocess.run(["ip", "link", "del", VPN_IFACE], capture_output=True)
+    subprocess.run(["ip", "route", "replace", f"{target}/32", "dev", dev, "src", source], check=True)
+    keys = []
+    try:
+        # wg reads keys from files only: two private files, removed at the end.
+        import tempfile
+        for key in [private_key, conf.get("PresharedKey") or ""]:
+            fd, path = tempfile.mkstemp(prefix="wg-")
+            os.write(fd, (key + "\n").encode())
+            os.close(fd)
+            keys.append(path)
+        subprocess.run(["ip", "link", "add", VPN_IFACE, "type", "wireguard"], check=True, capture_output=True)
+        args = ["wg", "set", VPN_IFACE, "private-key", keys[0], "peer", conf["PublicKey"], "endpoint", f"{target}:{VPN_PORT}",
+                "allowed-ips", "10.88.0.1/32", "persistent-keepalive", "5"]
+        if conf.get("PresharedKey"):
+            args += ["preshared-key", keys[1]]
+        res = subprocess.run(args, capture_output=True, text=True)
+        if res.returncode != 0:
+            log(f"    wg: {res.stderr.strip()}")
+            return 0
+        subprocess.run(["ip", "addr", "add", conf["Address"].split(",")[0].strip(), "dev", VPN_IFACE], check=True)
+        subprocess.run(["ip", "link", "set", VPN_IFACE, "up"], check=True)
+        subprocess.run(["ip", "route", "replace", "10.88.0.1/32", "dev", VPN_IFACE], check=True)
+        log(f"{source} → WireGuard verso {target}:{VPN_PORT} (UDP)")
+        ping = subprocess.run(["ping", "-c", "3", "-W", "2", "10.88.0.1"], capture_output=True, text=True)
+        deadline = time.time() + wait
+        hs = 0
+        while time.time() < deadline:
+            out = subprocess.run(["wg", "show", VPN_IFACE, "latest-handshakes"], capture_output=True, text=True).stdout.split()
+            hs = int(out[1]) if len(out) >= 2 else 0
+            if hs:
+                break
+            time.sleep(1)
+        answered = " 0 received" not in ping.stdout
+        log(f"    handshake: {'RIUSCITO' if hs else 'nessuna risposta'}; ping al gateway VPN 10.88.0.1: {'risponde' if answered else 'nessuna risposta'}")
+        return hs
+    finally:
+        for path in keys:
+            os.unlink(path)
+        subprocess.run(["ip", "link", "del", VPN_IFACE], capture_output=True)
+        subprocess.run(["ip", "route", "del", f"{target}/32", "dev", dev, "src", source], capture_output=True)
+
+
+def vpn_scan(log):
+    src = "203.0.113.6"
+    log(f"{src} → nmap -sU -p {VPN_PORT} (la porta di WireGuard)")
+    r = subprocess.run(["nmap", "-n", "-Pn", "-sU", "-S", src, "-e", iface_for(src), "--max-retries", "1", "-p", str(VPN_PORT), target_for(src)],
+                       capture_output=True, text=True, timeout=120)
+    state = next((l.split()[1] for l in r.stdout.splitlines() if l.startswith(f"{VPN_PORT}/udp")), "?")
+    log(f"    {VPN_PORT}/udp: {state}")
+    log("    nessuna risposta: WireGuard non risponde a chi non ha una chiave, la porta sembra chiusa come tutte le altre")
+
+
+def _no_vpn(log):
+    log(f"manca {STOLEN_CONF}: lab-01 non ha ancora la VPN (make lab-up ricostruisce le immagini)")
+
+
+def vpn_wrong_key(log):
+    src = "203.0.113.6"
+    conf = _wg_conf()
+    if conf is None:
+        return _no_vpn(log)
+    log("l'attaccante conosce l'indirizzo e la chiave pubblica del server, ma ha una chiave sua, che il server non conosce")
+    key = subprocess.run(["wg", "genkey"], capture_output=True, text=True).stdout.strip()
+    _tunnel(src, key, {**conf, "PresharedKey": ""}, log)
+    log("    il server scarta i pacchetti in silenzio: non risponde e non scrive niente nei log")
+
+
+def vpn_stolen(log):
+    src = "203.0.113.16"
+    conf = _wg_conf()
+    if conf is None:
+        return _no_vpn(log)
+    log("la configurazione del portatile di anna (anna-portatile), persa e trovata dall'attaccante, usata da Bucarest")
+    if _tunnel(src, conf["PrivateKey"], conf, log):
+        log("    la VPN la accetta: la chiave è valida. L'attaccante è nella rete del cliente come se fosse anna")
+        log("    entro un minuto la pagina di lab-01 mostra anna-portatile collegata da Bucarest e propone: sudo xrc-vpn revoke anna-portatile")
+
+
 def full_night(log):
     # The order of a real intrusion: recon, then noisy attacks that fail2ban bans, then the patient intruder that
     # stays under the threshold and gets in, then what it does inside and the call home.
@@ -455,6 +564,16 @@ SCENARIOS = [
     {"msf": True, "id": "msf-industrial", "phase": "Ricognizione", "real": True, "title": "Metasploit · sonda Modbus", "source": MSF_SOURCE, "run": msf_industrial,
      "expect": "Moduli SCADA Modbus di Metasploit verso la porta 502 di lab-01: IndustrialProtocolProbe. "
                "Usa il container Metasploit del laboratorio (make lab-up-msf se è fermo) e la porta 502 aperta."},
+    {"id": "vpn-scan", "phase": "VPN", "real": False, "title": "Cerca la VPN", "source": "203.0.113.6", "run": vpn_scan,
+     "expect": "La porta UDP 51820 di lab-01 non risponde («open|filtered»): WireGuard ignora chi non ha una chiave. "
+               "Nei log non c'è nulla da vedere, ed è giusto così."},
+    {"id": "vpn-wrong-key", "phase": "VPN", "real": False, "title": "Bussa alla VPN con una chiave sconosciuta", "source": "203.0.113.6", "run": vpn_wrong_key,
+     "expect": "L'attaccante conosce indirizzo e chiave pubblica del server, ma la sua chiave non è tra quelle del cliente: nessun "
+               "handshake, nessuna risposta. Il server non registra tentativi falliti: la pagina non cambia."},
+    {"id": "vpn-stolen", "phase": "VPN", "real": False, "title": "La chiave di un dipendente usata da un altro Paese", "source": "203.0.113.16", "run": vpn_stolen,
+     "expect": "Il file VPN del portatile di anna, perso, usato da Bucarest: la VPN lo accetta e l'attaccante è nella rete. Entro un "
+               "minuto la pagina di lab-01 mostra anna-portatile da Bucarest in evidenza e «Cosa migliorare» propone, gravità alta, "
+               "sudo xrc-vpn revoke anna-portatile."},
     {"web": True, "id": "ai-injection", "phase": "Inganno dell'AI", "real": False, "title": "Istruzioni nascoste per l'assistente", "source": "203.0.113.30", "run": ai_injection,
      "expect": "Indirizzi di pagina, user agent e nomi utente SSH scritti per l'AI che legge i log («ignora le istruzioni precedenti», "
                "token di ruolo, testo invisibile in caratteri Unicode tag): AiPromptInjection, gravità alta. L'assistente li cita come prova, "

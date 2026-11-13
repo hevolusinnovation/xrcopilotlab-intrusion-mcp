@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# Lab only: an employee of the customer, anna-portatile, added to the VPN as the customer adds anyone (xrc-vpn add).
+# Her configuration file goes to the volume lab-vpn, which the attacker can read: it is the lost laptop of the
+# scenario «La chiave di un dipendente usata da un altro Paese». Made again when lab-01 has a new key (a new container).
+set -euo pipefail
+umask 077
+OUT=/var/lib/lab-vpn/anna-portatile.conf
+PEER=/etc/xrcopilotlab-vpn/peers/anna-portatile
+install -d -m 0700 /var/lib/lab-vpn
+if [[ -f "$PEER" && -s "$OUT" ]]; then exit 0; fi
+[[ -f "$PEER" ]] && xrc-vpn revoke anna-portatile >/dev/null
+xrc-vpn add anna-portatile --conf > "$OUT.tmp"
+mv -f "$OUT.tmp" "$OUT"

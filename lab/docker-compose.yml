@@ -25,6 +25,8 @@ services:
       - /sys/fs/cgroup:/sys/fs/cgroup:rw
       # The tunnel's public address, written by the tunnel container: the package shows it on its page.
       - tunnel-state:/var/lib/xrcopilotlab-intrusion-mcp/tunnel:ro
+      # The VPN configuration of an employee (lab-vpn-user), which the attacker "steals" in a VPN scenario.
+      - lab-vpn:/var/lib/lab-vpn
     environment:
       LAB_API_KEY: ${LAB_API_KEY:?run make lab-up, which creates lab/.env}
       # The hidden production key, used (its hash) when a domain is set; never shown on the page.
@@ -57,6 +59,9 @@ services:
       MSF_RPC_HOST: metasploit
       MSF_RPC_PORT: "55553"
       MSF_RPC_PASSWORD: ${MSF_RPC_PASSWORD:-labmsf}
+    volumes:
+      # The employee's VPN configuration written by lab-01: the lost laptop of the VPN scenarios (read-only here).
+      - lab-vpn:/lab/vpn:ro
     ports:
       - "127.0.0.1:8090:8090"
     networks:
@@ -121,6 +126,8 @@ volumes:
   tunnel-login: {}
   # The tunnel's current address (one file), shared with lab-01.
   tunnel-state: {}
+  # lab-01 writes an employee's VPN configuration here; the attacker reads it (the "stolen laptop").
+  lab-vpn: {}
 
 networks:
   # Docker gives its own addresses from the /28 at the top; the attackers' addresses are added below it.
