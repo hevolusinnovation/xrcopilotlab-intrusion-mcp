@@ -93,7 +93,8 @@ public class VpnTests
         Assert.Equal("sudo ./install.sh --with wireguard", without.Fix);
 
         var with = PostureChecks.Evaluate(Facts(withVpn: true, rdp), Quiet(), vpn: Vpn()).Single(f => f.Id == "exposed-service-3389");
-        Assert.Null(with.Fix);
+        // UFW is on in Facts(): the fix allows the port from the VPN subnet and the on-site LAN, and denies the rest.
+        Assert.Equal("sudo ufw allow from 10.88.0.0/24 to any port 3389 && sudo ufw allow from 192.168.1.0/24 to any port 3389 && sudo ufw deny 3389", with.Fix);
         Assert.Contains("The VPN is already here", with.Recommendation, StringComparison.Ordinal);
     }
 

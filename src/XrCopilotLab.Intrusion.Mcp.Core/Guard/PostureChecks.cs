@@ -100,15 +100,34 @@ public static class PostureChecks
         var vpnOn = Active("wireguard") && vpn is { Up: true };
         var behindVpn = vpnOn ? " The VPN is already here: close the port to the internet and let the people who need it connect through the VPN."
                               : " A VPN lets the people who need it keep reaching it from outside.";
-        var vpnFix = vpnOn ? null : "sudo ./install.sh --with wireguard";
+        // When the VPN is up AND UFW is on, the concrete fix closes the port to the internet and allows it only from the
+        // VPN's own network and the on-site LANs it joins — so remote staff (via the VPN) and people in the office keep
+        // reaching it, nobody else does. Only when UFW is "blocking": this package never enables UFW, so otherwise the
+        // rules would not take effect. (UFW also does not cover ports Docker publishes with -p: bind-to-internal still applies.)
+        var ufwBlocking = g.TryGetValue("ufw", out var ufwG) && ufwG.Mode == "blocking";
+        var allowFrom = new List<string>();
+        if (vpn is not null)
+        {
+            allowFrom.Add(string.IsNullOrWhiteSpace(vpn.Subnet) ? "10.88.0.0/24" : vpn.Subnet);
+            allowFrom.AddRange(vpn.Lan);
+        }
+        if (vpnOn && !ufwBlocking)
+            behindVpn += " Turn UFW on first (this package never does it for you), then close the port and allow the VPN.";
+        string? VpnFix(int port)
+        {
+            if (!vpnOn) return "sudo ./install.sh --with wireguard";
+            if (!ufwBlocking) return null;  // the rules would not take effect until UFW is enabled, and we never enable it
+            var allows = string.Join(" && ", allowFrom.Where(n => !string.IsNullOrWhiteSpace(n)).Select(n => $"sudo ufw allow from {n} to any port {port}"));
+            return $"{allows} && sudo ufw deny {port}";
+        }
         foreach (var p in facts.Listening.Where(p => p.Public && AttackCatalog.IndustrialPorts.ContainsKey(p.Port)).DistinctBy(p => p.Port))
             findings.Add(new($"exposed-industrial-{p.Port}", nameof(Severity.Critical), "industrial", $"{AttackCatalog.IndustrialPorts[p.Port]} is open to the network",
                 $"Port {p.Port} listens on {p.Address}. Industrial protocols have no password: whoever reaches the port can send commands to the plant.",
-                "Never publish it on the internet: reach it only through a VPN, from the plant's own network." + behindVpn, vpnFix));
+                "Never publish it on the internet: reach it only through a VPN, from the plant's own network." + behindVpn, VpnFix(p.Port)));
         foreach (var p in facts.Listening.Where(p => p.Public && RiskyPorts.ContainsKey(p.Port)).DistinctBy(p => p.Port))
             findings.Add(new($"exposed-service-{p.Port}", nameof(Severity.High), "network", $"{RiskyPorts[p.Port]} is open to the network",
                 $"Port {p.Port} listens on {p.Address}.",
-                "Bind it to 127.0.0.1 or to the internal network only." + behindVpn, vpnFix));
+                "Bind it to 127.0.0.1 or to the internal network only." + behindVpn, VpnFix(p.Port)));
         if (Has(nameof(AttackType.IndustrialProtocolProbe)))
             findings.Add(new("industrial-probes", nameof(Severity.Medium), "industrial", "Someone is looking for plant systems",
                 $"{Addresses(nameof(AttackType.IndustrialProtocolProbe))} address(es) tried industrial ports (Modbus, S7, IEC 104…) in the last {period}.",
