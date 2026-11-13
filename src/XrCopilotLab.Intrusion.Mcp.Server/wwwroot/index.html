@@ -129,6 +129,7 @@ body.map-only main { grid-template-rows: 1fr 300px; }
           <option value="168">ultima settimana</option>
         </select>
         <span id="updated"></span>
+        <span id="attribution" class="muted" style="margin-left:auto"></span>
         <span class="error" id="error"></span>
       </div>
       <table>
@@ -361,6 +362,10 @@ async function refresh() {
     const bannedIps = new Set((banned.banned || []).map(b => b.ip));
     drawStats(summary); drawMap(summary, bannedIps); drawTable(summary, bannedIps);
     $("updated").textContent = "aggiornato alle " + new Date().toLocaleTimeString("it-IT");
+    const attr = summary.geoAttribution;
+    $("attribution").textContent = /documentation addresses|RFC 5737|Simulated/i.test(attr || "")
+      ? "Dati di laboratorio · indirizzi di documentazione (RFC 5737), posizioni d'esempio"
+      : (attr || "");
     $("error").textContent = "";
   } catch (e) {
     $("error").textContent = "il server non risponde (" + e + ")";

@@ -384,9 +384,14 @@ def msf_industrial(log):
 
 
 def full_night(log):
+    # The order of a real intrusion: recon, then noisy attacks that fail2ban bans, then the patient intruder that
+    # stays under the threshold and gets in, then what it does inside and the call home.
     for title, fn in [("Scansione delle porte", port_scan), ("Protocolli industriali", industrial_probe),
-                      ("Scansione del sito", web_scan), ("Exploit web", web_exploit), ("Attacco nascosto nel modulo", hidden_post),
-                      ("Intrusione", intrusion),
+                      ("Scansione del sito", web_scan),
+                      ("Forza bruta SSH veloce", ssh_fast), ("Forza bruta sull'area riservata", web_login),
+                      ("Flood di richieste", flood),
+                      ("Exploit web", web_exploit), ("Attacco nascosto nel modulo", hidden_post),
+                      ("Intrusione lenta", intrusion),
                       ("Dentro il server", inside), ("Backdoor", backdoor)]:
         log(f"— {title} —")
         fn(log)
@@ -429,7 +434,7 @@ SCENARIOS = [
      "expect": "Moduli SCADA Modbus di Metasploit verso la porta 502 di lab-01: IndustrialProtocolProbe. "
                "Usa il container Metasploit del laboratorio (make lab-up-msf se è fermo) e la porta 502 aperta."},
     {"id": "full-night", "phase": "Tutto", "real": False, "title": "La notte completa (in sequenza)", "source": "più indirizzi", "run": full_night,
-     "expect": "Scansione, protocolli industriali, sito, exploit, modulo contatti, l'intrusione, cosa fa dentro e la backdoor: circa tre minuti."},
+     "expect": "Tutta la sequenza: ricognizione, gli attacchi rumorosi che fail2ban banna, l'intruso lento che invece entra, cosa fa dentro e la backdoor. Circa quattro minuti."},
 ]
 
 
