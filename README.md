@@ -286,11 +286,11 @@ processor (`uname -m` on the server: `x86_64` → x64, `aarch64` → arm64):
 From the command line, and straight to the server:
 
 ```bash
-gh release download v0.5.3 -R hevolusinnovation/xrcopilotlab-intrusion-mcp -p '*linux-x64.tar.gz' -p SHA256SUMS
-scp xrcopilotlab-intrusion-mcp-0.5.3-linux-x64.tar.gz SHA256SUMS admin@<server>:/tmp/
+gh release download v0.6.0 -R hevolusinnovation/xrcopilotlab-intrusion-mcp -p '*linux-x64.tar.gz' -p SHA256SUMS
+scp xrcopilotlab-intrusion-mcp-0.6.0-linux-x64.tar.gz SHA256SUMS admin@<server>:/tmp/
 ```
 
-Or build it from this repository: `make package VERSION=0.5.3` (add `RID=linux-arm64` for ARM); the file lands in
+Or build it from this repository: `make package VERSION=0.6.0` (add `RID=linux-arm64` for ARM); the file lands in
 `out/`.
 
 ### 2. Install it
@@ -300,8 +300,8 @@ On the server (Debian or Ubuntu, with fail2ban already running):
 ```bash
 cd /tmp
 sha256sum -c SHA256SUMS --ignore-missing
-tar -xzf xrcopilotlab-intrusion-mcp-0.5.3-linux-x64.tar.gz
-cd xrcopilotlab-intrusion-mcp-0.5.3-linux-x64
+tar -xzf xrcopilotlab-intrusion-mcp-0.6.0-linux-x64.tar.gz
+cd xrcopilotlab-intrusion-mcp-0.6.0-linux-x64
 sudo ./install.sh
 ```
 
