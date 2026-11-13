@@ -1,7 +1,7 @@
-# Added by the Makefile when lab/.env sets PUBLIC_DOMAIN: lab-01's API (8091) and monitoring page (8093) on this
-# machine's ports, plain HTTP, for the reverse proxy (TLS) the domain points to. No Dev Tunnel in this mode.
+# Added by the Makefile when lab/.env sets PUBLIC_DOMAIN: the monitoring page (8093) on this machine's ports, plain
+# HTTP, for the reverse proxy (TLS) the domain points to. The API (8091) is the server's own port, which the Makefile
+# then binds on every interface (SERVER_API_BIND). No Dev Tunnel in this mode.
 services:
   tunnel:
     ports:
-      - "8091:8091"
       - "8093:8093"

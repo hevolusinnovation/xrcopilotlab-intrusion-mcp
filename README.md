@@ -172,8 +172,10 @@ mistake can lock everyone out of SSH.
 
 To see the toolkit at work without a customer's server, `make up` starts a small lab on your computer, all in Docker:
 
-- **`lab-01`** (container `intrusion-lab-01`), a fake company server (Ubuntu, "Alveo Energia" in Turin) with SSH, a website, fail2ban, a firewall, Suricata and Falco,
-  and **the same toolkit package a customer installs**, installed by the same `install.sh`;
+- **`server`** (container `intrusion-lab-01`, host `lab-01`), a fake company server (Ubuntu, "Alveo Energia" in Turin) with SSH, a website, fail2ban, a firewall, Suricata, Falco and ModSecurity,
+  and **the same toolkit package a customer installs**, installed by the same `install.sh`; its API is also on
+  **http://localhost:8091** (`/api`, `/mcp`, with the `X-API-Key` in `lab/.env`), to try a client from the Mac;
+- **`metasploit`** (container `intrusion-lab-metasploit`), a real attack engine the console drives for three of the attacks;
 - **`attacker`** (container `intrusion-lab-attacker`), which attacks `lab-01` when you press a button, and serves the console on
   **http://localhost:8090**: only the attacks, the tunnel and the server to test;
 - **`tunnel`** (container `intrusion-lab-tunnel`), which gives `lab-01` a public HTTPS address, so XRCopilotLab can call it (see
@@ -539,8 +541,8 @@ https://<id>-8093.<region>.devtunnels.ms/       monitoring page (map and attacks
 | `make lab-restart` | Stops and starts again, rebuilding what changed |
 | `make lab-rebuild` | Rebuilds the images from scratch and restarts |
 | `make lab-ps` | Which containers are running, and whether they are healthy |
-| `make lab-logs` | Follows the logs; `SVC=lab-01`, `attacker` or `tunnel` for one container |
-| `make lab-shell` | Opens a shell in `lab-01` (or `SVC=…`); same as `docker exec -it intrusion-lab-01 bash` |
+| `make lab-logs` | Follows the logs; `SVC=server`, `attacker`, `tunnel` or `metasploit` for one container |
+| `make lab-shell` | Opens a shell in the server `lab-01` (or `SVC=…`); same as `docker exec -it intrusion-lab-01 bash` |
 | `make lab-open` | Opens the console in the browser |
 | `make lab-reset` | Stops the lab and deletes everything, tunnel login included |
 | `make build` / `make test` | Builds the solution / runs the unit tests |

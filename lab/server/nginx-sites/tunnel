@@ -7,6 +7,8 @@ server {
     error_log  /var/log/nginx/tunnel-error.log;
 
     allow 10.77.0.0/24;
+    # The Mac (http://localhost:8091), through Docker's published port on the "mac" network.
+    allow 10.78.0.0/24;
     deny  all;
     # XRCopilotLab's own API/MCP calls are not web attacks: the WAF must not inspect them.
     modsecurity off;

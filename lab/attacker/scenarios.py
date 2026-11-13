@@ -155,8 +155,8 @@ def nmap(source, args, log):
     log(f"    porte aperte trovate: {', '.join(open_ports) if open_ports else 'nessuna'}")
 
 
-# --- Metasploit (opt-in) ----------------------------------------------------------------------------------------
-# A real attack engine, in its own container (the official image, started with  make lab-up-msf). The console drives
+# --- Metasploit ------------------------------------------------------------------------------------------------
+# A real attack engine, in its own container (the official image, started with the lab; make lab-up-msf restarts it). The console drives
 # it over msfrpcd: nothing is installed here but the small pymetasploit3 client. Unlike the hand-written scenarios,
 # Metasploit does not spoof the source address — lab-01's guardians see the attack coming from the Metasploit
 # container's own lab address, which is exactly what we want to test. Still lab-only: these scenarios are not marked
@@ -415,13 +415,13 @@ SCENARIOS = [
      "expect": "12 indirizzi, 2 tentativi ciascuno sull'account scada: nessun ban, una campagna DistributedSshBruteForce."},
     {"msf": True, "id": "msf-web", "title": "Metasploit · scansione web", "source": "203.0.113.9", "run": msf_web,
      "expect": "Moduli http di Metasploit contro lab-01 (versione, robots, cartelle): un attacco vero, non scritto a mano. "
-               "Suricata e ModSecurity lo vedono: WebVulnerabilityScan. Richiede il container Metasploit (make lab-up-msf)."},
+               "Suricata e ModSecurity lo vedono: WebVulnerabilityScan. Usa il container Metasploit del laboratorio (make lab-up-msf se è fermo)."},
     {"msf": True, "id": "msf-ssh", "title": "Metasploit · forza bruta SSH", "source": "203.0.113.20", "run": msf_ssh,
      "expect": "Il modulo ssh_login di Metasploit prova più password su lab-01: fail2ban banna l'attaccante. "
-               "Richiede il container Metasploit (make lab-up-msf)."},
+               "Usa il container Metasploit del laboratorio (make lab-up-msf se è fermo)."},
     {"msf": True, "id": "msf-industrial", "title": "Metasploit · sonda Modbus", "source": "203.0.113.7", "run": msf_industrial,
      "expect": "Moduli SCADA Modbus di Metasploit verso la porta 502 di lab-01: IndustrialProtocolProbe. "
-               "Richiede il container Metasploit (make lab-up-msf) e la porta 502 aperta."},
+               "Usa il container Metasploit del laboratorio (make lab-up-msf se è fermo) e la porta 502 aperta."},
     {"id": "full-night", "title": "La notte completa (in sequenza)", "source": "più indirizzi", "run": full_night,
      "expect": "Scansione, protocolli industriali, sito, exploit, modulo contatti, l'intrusione, cosa fa dentro e la backdoor: circa tre minuti."},
 ]

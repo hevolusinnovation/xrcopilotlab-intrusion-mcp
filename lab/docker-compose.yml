@@ -1,15 +1,17 @@
-# The intrusion lab: lab-01 (an Ubuntu server with the customer package installed), the attacker, which also serves
-# the console on http://localhost:8090, and the tunnel that gives lab-01's API a public address (Dev Tunnels).
+# The intrusion lab: the server lab-01 (service "server": an Ubuntu server with the customer package installed, its
+# API on http://localhost:8091), the attacker, which also serves the console on http://localhost:8090, Metasploit,
+# and the tunnel that gives lab-01's API a public address (Dev Tunnels).
 # Three networks with documentation addresses (RFC 5737): every attacker address gets an invented city, as in the
-# simulated mode. None of them reaches the internet.
+# simulated mode. None of them reaches the internet; the server's own "mac" network, for its published API, does.
 #   make lab-up    /    make lab-down    /    make lab-reset
-# Fixed container names (intrusion-lab-01, intrusion-lab-attacker, intrusion-lab-tunnel), so `docker exec` and
+# Fixed container names (intrusion-lab-01, intrusion-lab-attacker, intrusion-lab-tunnel, intrusion-lab-metasploit), so `docker exec` and
 # `docker logs` work without the compose suffix; the services keep their short names for `make lab-shell SVC=…`.
 
 name: intrusion-lab
 
 services:
-  lab-01:
+  # The customer's server. Service "server" (Docker Desktop shows it so), container intrusion-lab-01, host lab-01.
+  server:
     container_name: intrusion-lab-01
     build:
       context: ..
@@ -36,6 +38,12 @@ services:
       internet: { ipv4_address: 203.0.113.250 }
       homes:    { ipv4_address: 192.0.2.250 }
       tunnel:   { ipv4_address: 10.77.0.20 }
+      # The toolkit's API (/api, /mcp, X-API-Key on every call) on the Mac: http://localhost:8091. Its own network, the
+      # only one of this server with a way out (Docker publishes ports from non-internal networks only). With
+      # PUBLIC_DOMAIN the Makefile binds it on every interface, for the domain's reverse proxy.
+      mac:      { ipv4_address: 10.78.0.20 }
+    ports:
+      - "${SERVER_API_BIND:-127.0.0.1}:8091:8091"
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8470/healthz"]
       interval: 10s
@@ -52,7 +60,7 @@ services:
       TARGET_IT: 198.51.100.20
       TARGET_INTERNET: 203.0.113.250
       TARGET_HOMES: 192.0.2.250
-      # The optional Metasploit container (started with make lab-up-msf): the console drives it over msfrpcd. When it
+      # The Metasploit container (started with the lab): the console drives it over msfrpcd. When it
       # is not running the three "Metasploit · …" scenarios stay disabled.
       MSF_RPC_HOST: metasploit
       MSF_RPC_PORT: "55553"
@@ -65,7 +73,7 @@ services:
       homes:    {}
       console:  {}
     depends_on:
-      lab-01: { condition: service_healthy }
+      server: { condition: service_healthy }
 
   # The lab's public address (Microsoft Dev Tunnels): login and address from the console, nothing on the Mac.
   tunnel:
@@ -86,16 +94,15 @@ services:
       tunnel:  { ipv4_address: 10.77.0.30 }
       console: {}
     depends_on:
-      lab-01: { condition: service_healthy }
+      server: { condition: service_healthy }
 
-  # Metasploit, a real attack engine, in its own container (official image, ~2 GB): optional, started only with the
-  # "metasploit" profile (make lab-up-msf). It exposes msfrpcd on the lab's internal networks; the console drives it
+  # Metasploit, a real attack engine, in its own container (official image, ~2 GB): part of the lab, started with
+  # make lab-up (make lab-down-msf stops it alone). It exposes msfrpcd on the lab's internal networks; the console drives it
   # over RPC. On the same it/internet/homes networks as the attacker, so it reaches lab-01 and the console reaches it.
   # Nothing leaves the lab. When it is not running, the three "Metasploit · …" scenarios stay disabled in the console.
   metasploit:
     container_name: intrusion-lab-metasploit
     image: metasploitframework/metasploit-framework:latest
-    profiles: ["metasploit"]
     hostname: metasploit
     entrypoint: ["./msfrpcd"]
     command: ["-U", "msf", "-P", "${MSF_RPC_PASSWORD:-labmsf}", "-a", "0.0.0.0", "-p", "55553", "-S", "-f"]
@@ -104,7 +111,7 @@ services:
       internet: {}
       homes:    {}
     depends_on:
-      lab-01: { condition: service_healthy }
+      server: { condition: service_healthy }
 
 volumes:
   # The Dev Tunnels login and the tunnel id: kept by make lab-down, so the address does not change.
@@ -129,3 +136,6 @@ networks:
     ipam: { config: [ { subnet: 10.77.0.0/24 } ] }
   # The only network with a way out: it publishes the console on the Mac's localhost. The attacks never use it.
   console: {}
+  # The server's API on the Mac (port 8091): nginx and the firewall accept 8091 from here, never 8093 (the page).
+  mac:
+    ipam: { config: [ { subnet: 10.78.0.0/24 } ] }

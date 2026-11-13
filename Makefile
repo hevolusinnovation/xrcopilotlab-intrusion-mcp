@@ -16,11 +16,11 @@
 #   make lab-down                              # stops the lab (keeps the tunnel login: same public address)
 #   make lab-restart                           # lab-down + lab-up, rebuilding the images
 #   make lab-rebuild                           # rebuilds the images from scratch (no cache) and restarts the lab
-#   make lab-up-msf                            # lab-up + the Metasploit container (official image, ~2 GB), for its opt-in scenarios
+#   make lab-up-msf                            # (re)starts the Metasploit container alone (it also starts with lab-up)
 #   make lab-down-msf                          # stops the Metasploit container, leaves the rest of the lab running
 #   make lab-ps                                # state and health of the lab's containers
-#   make lab-logs     [SVC=tunnel]             # follows the logs (all containers, or one: lab-01|attacker|tunnel)
-#   make lab-shell    [SVC=lab-01]             # shell in a lab container
+#   make lab-logs     [SVC=tunnel]             # follows the logs (all containers, or one: server|attacker|tunnel|metasploit)
+#   make lab-shell    [SVC=server]             # shell in a lab container
 #   make lab-open                              # opens the console in the browser
 #   make lab-reset                             # stops the lab and deletes all its state, tunnel login included
 #   make key                                   # prints the SHA-256 of a key read from the terminal (never the key)
@@ -38,11 +38,11 @@ APP     ?= hev-intrusion-mcp
 IMAGE   := $(ACR)/xrcopilotlab-intrusion-mcp:$(TAG)
 SERVER  := src/XrCopilotLab.Intrusion.Mcp.Server/XrCopilotLab.Intrusion.Mcp.Server.csproj
 RID     ?= linux-x64
-SVC     ?= lab-01
+SVC     ?= server
 # lab/.env (see lab/.env.example): with PUBLIC_DOMAIN set, the lab publishes its API and page for that domain instead
 # of opening a Dev Tunnel.
 -include lab/.env
-LAB     := docker compose -f lab/docker-compose.yml $(if $(strip $(PUBLIC_DOMAIN)),-f lab/docker-compose.domain.yml) --env-file lab/.env
+LAB     := SERVER_API_BIND=$(if $(strip $(PUBLIC_DOMAIN)),0.0.0.0,127.0.0.1) docker compose -f lab/docker-compose.yml $(if $(strip $(PUBLIC_DOMAIN)),-f lab/docker-compose.domain.yml) --env-file lab/.env
 
 .PHONY: help build test run docker-build docker-push deploy smoke package key up down \
         lab-build lab-up lab-down lab-restart lab-rebuild lab-ps lab-logs lab-shell lab-open lab-reset \
@@ -101,16 +101,17 @@ lab-build: lab/.env
 
 lab-up: lab/.env
 	$(LAB) up -d --build
-	@echo "console: http://localhost:8090 · $(if $(strip $(PUBLIC_DOMAIN)),domain: https://$(PUBLIC_DOMAIN),map and attacks: through the Dev Tunnel (Microsoft login))"
+	@echo "console: http://localhost:8090 · API: http://localhost:8091/api (X-API-Key) · $(if $(strip $(PUBLIC_DOMAIN)),domain: https://$(PUBLIC_DOMAIN),map and attacks: through the Dev Tunnel (Microsoft login))"
 
 # Keeps the Dev Tunnels login and the tunnel id (volume tunnel-login): the public address stays the same.
 lab-down: lab/.env
 	$(LAB) down
 
-# The optional Metasploit container (official image, ~2 GB): the "metasploit" compose profile. First run pulls the
-# image and msfrpcd takes ~30 s to answer; the console's "Metasploit · …" scenarios light up when it does.
+# The Metasploit container (official image, ~2 GB) starts with lab-up; this (re)starts it alone, e.g. after
+# lab-down-msf. First run pulls the image and msfrpcd takes ~30 s to answer; the console's "Metasploit · …" scenarios
+# light up when it does.
 lab-up-msf: lab/.env
-	$(LAB) --profile metasploit up -d --build
+	$(LAB) up -d metasploit
 	@echo "Metasploit container up (msfrpcd); console: http://localhost:8090"
 
 lab-down-msf: lab/.env

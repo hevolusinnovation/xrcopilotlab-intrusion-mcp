@@ -26,9 +26,9 @@ The `make` commands use the service names (`make lab-shell SVC=attacker`); plain
 
 | Service (container) | What | Notes |
 |---|---|---|
-| `lab-01` (`intrusion-lab-01`) | Ubuntu 24.04 with systemd: sshd (password login, user `operatore`, in the `sudo` group), nginx (site, `/admin/` with basic auth, the package's API under `/intrusion-mcp/`), fail2ban (`sshd`, `nginx-http-auth`, `nginx-botsearch`, `nginx-limit-req`, `recidive`, times shortened), a UFW-like firewall, **Suricata 8** with the ET Open rules (installed by the package's own `install.sh --with suricata` at build, the only moment lab-01 reaches the internet; it listens on all four interfaces with `--pcap=any -k none`), **Falco 0.45** with the modern eBPF probe (same `install.sh --with falco`; two container-only rules are turned off in `/etc/falco/rules.d/lab.yaml`, since lab-01 is itself a container), **ModSecurity 3 + OWASP CRS** in nginx (`install.sh --with modsecurity`, detection only; the toolkit's own API and the monitoring page are excluded), the package's read-only **monitoring page** (opened through the Dev Tunnel, port 8093; the package's own 8471 site stays unused inside the container), the package (`xrcopilotlab-intrusion-mcp.service`, logs mode) | privileged: systemd as PID 1, iptables. A lab container, never a pattern for production |
-| `attacker` (`intrusion-lab-attacker`) | nmap, ssh, Python: fixed scenarios against `lab-01`, the console, a **"Server da testare"** field that runs the web scenarios against another server once its API key proves you can already read it, and (when the Metasploit container is up) three opt-in **Metasploit** scenarios it drives over msfrpcd | its lab networks are `internal`: no attack reaches the internet |
-| `metasploit` (`intrusion-lab-metasploit`) | **opt-in**, official Metasploit image running `msfrpcd`; the console drives it. Started with `make lab-up-msf` (compose profile `metasploit`) | on the same `internal` networks as the attacker; reaches `lab-01` only, never the internet |
+| `server` (`intrusion-lab-01`, host `lab-01`) | Ubuntu 24.04 with systemd: sshd (password login, user `operatore`, in the `sudo` group), nginx (site, `/admin/` with basic auth, the package's API under `/intrusion-mcp/`), fail2ban (`sshd`, `nginx-http-auth`, `nginx-botsearch`, `nginx-limit-req`, `recidive`, times shortened), a UFW-like firewall, **Suricata 8** with the ET Open rules (installed by the package's own `install.sh --with suricata` at build, the only moment lab-01 reaches the internet; it listens on all four interfaces with `--pcap=any -k none`), **Falco 0.45** with the modern eBPF probe (same `install.sh --with falco`; two container-only rules are turned off in `/etc/falco/rules.d/lab.yaml`, since lab-01 is itself a container), **ModSecurity 3 + OWASP CRS** in nginx (`install.sh --with modsecurity`, detection only; the toolkit's own API and the monitoring page are excluded), the package's read-only **monitoring page** (opened through the Dev Tunnel, port 8093; the package's own 8471 site stays unused inside the container), the package (`xrcopilotlab-intrusion-mcp.service`, logs mode); its API on the Mac at **http://localhost:8091** (`/api`, `/mcp`, `X-API-Key` from `lab/.env`) | privileged: systemd as PID 1, iptables. A lab container, never a pattern for production. Besides the lab's internal networks it has its own `mac` network (10.78.0.0/24), the only way Docker can publish 8091: through it the server also reaches the internet. nginx and the firewall accept 8091 from it, never the page's 8093 |
+| `attacker` (`intrusion-lab-attacker`) | nmap, ssh, Python: fixed scenarios against `lab-01`, the console, a **"Server da testare"** field that runs the web scenarios against another server once its API key proves you can already read it, and (when the Metasploit container answers) three **Metasploit** scenarios it drives over msfrpcd | its lab networks are `internal`: no attack reaches the internet |
+| `metasploit` (`intrusion-lab-metasploit`) | official Metasploit image running `msfrpcd`; the console drives it. Starts with `make lab-up`; `make lab-down-msf` stops it alone, `make lab-up-msf` starts it again | on the same `internal` networks as the attacker; reaches `lab-01` only, never the internet |
 | `tunnel` (`intrusion-lab-tunnel`) | Dev Tunnels CLI, socat, a small controller driven by the console | the only container that goes out to the internet, for the tunnel |
 
 UFW logs through the kernel LOG target, which a container cannot read: the lab's firewall uses NFLOG, ulogd2 and
@@ -80,16 +80,16 @@ address goes to DB-IP. So the map has cities, and no real address is ever involv
 | L'intruso dentro il server | 198.51.100.213 (Chișinău) | Falco: Search Private Keys, Read sensitive file untrusted (`sudo cat /etc/shadow`), XRC SSH authorized keys changed, a "miner" (`xmrig` with a `stratum+tcp://` pool), Clear Log Activities (`wtmp`). All tied to 198.51.100.213 (`ssh-session`): SensitiveFileAccess, Persistence, CryptoMining, LogTampering, Critical |
 | Backdoor che chiama casa | 203.0.113.66 (Moscow) | lab-01 calls the attacker's controller: CommandAndControl, Critical (Suricata: the lab's own rule and ET Open's `ET MALWARE Generic Request to gate.php Dotted-Quad`) |
 
-### Metasploit scenarios (opt-in)
+### Metasploit scenarios
 
 To prove the guardians catch a **real** attack engine, not only our hand-written requests, the lab can run
 [Metasploit](https://docs.metasploit.com/docs/using-metasploit/getting-started/nightly-installers.html) in its **own
-container** (the official image, ~2 GB). It is **off by default** (a separate compose profile); start it alongside the
-lab with:
+container** (the official image, ~2 GB). It starts with the lab (`make lab-up` pulls the image on the first run;
+msfrpcd answers after ~30 s):
 
 ```bash
-make lab-up-msf      # pulls the image on the first run; msfrpcd answers after ~30 s
 make lab-down-msf    # stops just the Metasploit container, leaves the rest running
+make lab-up-msf      # starts it again
 ```
 
 The console drives the container over **msfrpcd** (the attacker image only carries the small `pymetasploit3` client).
