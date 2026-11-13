@@ -55,6 +55,9 @@ server {
     location = /index.html { proxy_pass http://127.0.0.1:8470; }
     location = /hevolus-logo.svg { proxy_pass http://127.0.0.1:8470; }
     location /vendor/ { proxy_pass http://127.0.0.1:8470; }
+    # The Dev Tunnel controls (Microsoft login, create, the test key) live on this page: driven through the lab's
+    # tunnel container. Lab only — a real server has no tunnel container, so these paths simply do not answer.
+    location /api/tunnel/ { proxy_pass http://10.77.0.30:8092/; }
     location /api/ {
         limit_except GET { deny all; }
         include /etc/nginx/xrcopilotlab-dashboard/key.conf;

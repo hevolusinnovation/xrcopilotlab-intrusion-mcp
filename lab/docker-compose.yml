@@ -27,6 +27,8 @@ services:
       - tunnel-state:/var/lib/xrcopilotlab-intrusion-mcp/tunnel:ro
     environment:
       LAB_API_KEY: ${LAB_API_KEY:?run make lab-up, which creates lab/.env}
+      # The hidden production key, used (its hash) when a domain is set; never shown on the page.
+      PROD_API_KEY: ${PROD_API_KEY:-}
       # Set: the package says https://<domain> is XRCopilotLab's address (Connection:PublicUrl).
       PUBLIC_DOMAIN: ${PUBLIC_DOMAIN:-}
       # The site on the monitoring page (lab/.env): its name and its place on the map. Empty: the host name only.
@@ -75,9 +77,16 @@ services:
     build:
       context: tunnel
     hostname: tunnel
+    # The only container that publishes a local port for lab-01's page: lab-01 stays on internal networks (no internet),
+    # and localhost:8089 reaches its monitoring page through here (socat → lab-01:8093). The page's Dev Tunnel controls
+    # and its test key are driven through this container's controller (lab-01 nginx proxies /api/tunnel/ to it).
+    ports:
+      - "127.0.0.1:8089:8089"
     environment:
       LAB_API: 10.77.0.20:8091
       LAB_PAGE: 10.77.0.20:8093
+      # The test key, shown and copyable on lab-01's page (served here via the controller's /key, lab only).
+      LAB_API_KEY: ${LAB_API_KEY:?run make lab-up, which creates lab/.env}
       # Set (lab/.env): no Dev Tunnel; lab-01's ports are published for the domain (lab/docker-compose.domain.yml).
       PUBLIC_DOMAIN: ${PUBLIC_DOMAIN:-}
       PUBLIC_PAGE_PORT: ${PUBLIC_PAGE_PORT:-8443}

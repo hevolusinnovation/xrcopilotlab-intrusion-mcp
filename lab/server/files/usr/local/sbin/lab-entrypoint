@@ -2,9 +2,13 @@
 # Writes the hash of the lab key (LAB_API_KEY, from lab/.env) where install.sh would, then hands over to systemd.
 # systemd does not pass the container's environment to the services: this is the bridge.
 set -euo pipefail
-if [[ -n "${LAB_API_KEY:-}" ]]; then
+# The active key: with a domain (production) it is the hidden PROD_API_KEY, never shown on the page; without a domain
+# (test) it is LAB_API_KEY, which lab-01's page shows and copies. Only its hash is stored.
+ACTIVE_KEY="${LAB_API_KEY:-}"
+[[ -n "${PUBLIC_DOMAIN:-}" && -n "${PROD_API_KEY:-}" ]] && ACTIVE_KEY="$PROD_API_KEY"
+if [[ -n "$ACTIVE_KEY" ]]; then
   install -d -m 0750 -g xrcopilot-intrusion /etc/xrcopilotlab-intrusion-mcp
-  printf 'ApiKeys__Hash=%s\n' "$(printf '%s' "$LAB_API_KEY" | sha256sum | cut -d' ' -f1)" > /etc/xrcopilotlab-intrusion-mcp/env
+  printf 'ApiKeys__Hash=%s\n' "$(printf '%s' "$ACTIVE_KEY" | sha256sum | cut -d' ' -f1)" > /etc/xrcopilotlab-intrusion-mcp/env
   chgrp xrcopilot-intrusion /etc/xrcopilotlab-intrusion-mcp/env && chmod 0640 /etc/xrcopilotlab-intrusion-mcp/env
 fi
 # Suricata's HOME_NET: lab-01's addresses of this run (install.sh wrote the ones of the image build).

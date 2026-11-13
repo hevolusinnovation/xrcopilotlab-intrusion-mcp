@@ -90,8 +90,8 @@ key:
 
 # The lab key lives in lab/.env (git-ignored), created on the first run; the console sends it, the server keeps its hash.
 lab/.env:
-	@sed "s/^LAB_API_KEY=.*/LAB_API_KEY=$$(openssl rand -hex 32)/" lab/.env.example > $@
-	@echo "created lab/.env with a new lab key (PUBLIC_DOMAIN empty: Dev Tunnel)"
+	@sed -e "s/^LAB_API_KEY=.*/LAB_API_KEY=$$(openssl rand -hex 32)/" -e "s/^PROD_API_KEY=.*/PROD_API_KEY=$$(openssl rand -hex 32)/" lab/.env.example > $@
+	@echo "created lab/.env with new keys (PUBLIC_DOMAIN empty: Dev Tunnel, test key shown on the page)"
 
 up: lab-up
 down: lab-down
@@ -101,7 +101,7 @@ lab-build: lab/.env
 
 lab-up: lab/.env
 	$(LAB) up -d --build
-	@echo "console: http://localhost:8090 · $(if $(strip $(PUBLIC_DOMAIN)),monitoring page: https://$(PUBLIC_DOMAIN),monitoring page: open the Dev Tunnel from the console (Microsoft login))"
+	@echo "console (attacchi): http://localhost:8090 · pagina del server (mappa + Dev Tunnel + URL/chiave): http://localhost:8089"
 
 # Keeps the Dev Tunnels login and the tunnel id (volume tunnel-login): the public address stays the same.
 lab-down: lab/.env

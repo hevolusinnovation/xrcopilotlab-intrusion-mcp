@@ -56,15 +56,10 @@ input { background: var(--bg); color: var(--text); border: 1px solid var(--line)
 <div class="page">
   <header>
     <h1>Attaccante<small>Strumento di test: lancia attacchi reali contro un server protetto dal toolkit e guarda cosa rileva. Bersaglio: lab-01 · Alveo Energia (azienda sintetica).</small></h1>
-    <span class="muted" style="font-size:12px;max-width:320px;text-align:right">La mappa e gli attacchi sono sulla pagina di monitoraggio del server, raggiungibile dal Dev Tunnel qui accanto (o dal dominio).</span>
+    <span class="muted" style="font-size:12px;max-width:340px;text-align:right">Il Dev Tunnel, gli URL e la chiave per XRCopilotLab sono sulla pagina del server (<a href="http://localhost:8089/" target="_blank" rel="noopener">localhost:8089</a>). Qui incolli l'indirizzo e la chiave del server da attaccare.</span>
   </header>
 
   <div class="side">
-    <div>
-      <h2>Collegamento a XRCopilotLab</h2>
-      <div class="tunnel" id="tunnel"><span class="muted">Controllo del tunnel…</span></div>
-    </div>
-
     <div>
       <h2>Server da testare</h2>
       <div class="tunnel" id="target">
@@ -192,83 +187,6 @@ async function refreshRuns() {
 
 loadScenarios().then(refreshTarget);
 setInterval(refreshRuns, 1500);
-// --- Tunnel: the lab's public address (Microsoft Dev Tunnels), for the XRCopilotLab connection ---------------
-let tunnelPhase = null;
-async function refreshTunnel() {
-  const t = await fetch("/api/tunnel/status").then(r => r.ok ? r.json() : null).catch(() => null);
-  const box = $("tunnel");
-  if (!t) { box.innerHTML = `<span class="error">Il container del tunnel non risponde.</span>`; return; }
-  if (t.phase === tunnelPhase && (t.phase === "online" || t.phase === "domain") && box.dataset.url === t.url) return;  // keep the copy buttons stable
-  tunnelPhase = t.phase;
-  box.dataset.url = t.url || "";
-  const user = t.user ? ` · ${esc(t.user)}` : "";
-  if (t.phase === "logged-out") {
-    box.innerHTML = `<div class="state"><b class="off">Non collegato</b></div>
-      <div class="muted" style="font-size:12px">Per dare a lab-01 un indirizzo pubblico serve un account Microsoft (Entra ID Hevolus, Microsoft o GitHub). Il servizio è Microsoft Dev Tunnels, senza costi.</div>
-      ${t.error ? `<div class="error">${esc(t.error)}</div>` : ""}
-      <div><button class="btn" onclick="tunnelAction('login')">Accedi con l'account Microsoft</button></div>`;
-  } else if (t.phase === "login-pending") {
-    box.innerHTML = t.login
-      ? `<div class="state"><b class="off">Accesso in corso</b></div>
-         <div>Apri <a href="${esc(t.login.url)}" target="_blank" rel="noopener">${esc(t.login.url)}</a> e inserisci il codice:</div>
-         <div class="field"><span class="code">${esc(t.login.code)}</span><button class="btn ghost" onclick="copy('${esc(t.login.code)}', this)">Copia</button></div>
-         <div class="muted" style="font-size:12px">Questa pagina si aggiorna da sola quando l'accesso è completato.</div>`
-      : `<div class="state"><b class="off">Richiesta del codice…</b></div>`;
-  } else if (t.phase === "online") {
-    box.innerHTML = `<div class="state"><b class="on">● Online</b>${user} · dalle ${esc(t.since || "")} · indirizzo di test, temporaneo</div>
-      ${addresses(t, "si apre con l'account Microsoft")}
-      <div><button class="btn ghost" onclick="tunnelAction('restart')">Riavvia</button> <button class="btn ghost" onclick="tunnelAction('logout')">Esci</button></div>`;
-  } else if (t.phase === "domain") {
-    box.innerHTML = `<div class="state"><b class="on">● Dominio</b> · ${esc(t.url.replace("https://", ""))} · indirizzo stabile (lab/.env)</div>
-      ${addresses(t, "chi la raggiunge lo decide il proxy davanti al dominio")}`;
-  } else if (t.phase === "error") {
-    box.innerHTML = `<div class="state"><b class="err">Tunnel chiuso</b>${user}</div><div class="error">${esc(t.error || "")}</div>
-      <div><button class="btn" onclick="tunnelAction('restart')">Riapri il tunnel</button> <button class="btn ghost" onclick="tunnelAction('logout')">Esci</button></div>`;
-  } else {
-    box.innerHTML = `<div class="state"><b class="off">Apertura del tunnel…</b>${user}</div>`;
-  }
-}
-
-// The addresses to give XRCopilotLab, the key, the monitoring page and the check: the same for a tunnel and a domain.
-function addresses(t, pageNote) {
-  return `<div><div class="label">Indirizzo della connessione (blueprint, tool HTTP)</div>
-        <div class="field"><code>${esc(t.url)}/api</code><button class="btn ghost" onclick="copy('${esc(t.url)}/api', this)">Copia</button></div></div>
-      <div><div class="label">Indirizzo MCP</div>
-        <div class="field"><code>${esc(t.url)}/mcp</code><button class="btn ghost" onclick="copy('${esc(t.url)}/mcp', this)">Copia</button></div></div>
-      <div><div class="label">Intestazione X-API-Key</div>
-        <div class="field"><code>••••••••••••••••</code><button class="btn ghost" onclick="copyKey(this)">Copia la chiave</button></div></div>
-      ${t.pageUrl ? `<div><div class="label">Pagina di monitoraggio (mappa, attacchi e guardiani) · ${esc(pageNote)}</div>
-        <div class="field"><code>${esc(t.pageUrl)}</code><a class="btn ghost" href="${esc(t.pageUrl)}/" target="_blank" rel="noopener">Apri</a></div></div>` : ""}
-      <div class="field"><button class="btn" onclick="checkTunnel(this)">Verifica dall'indirizzo pubblico</button><span id="tunnel-check" class="muted" style="font-size:12px"></span></div>`;
-}
-
-async function tunnelAction(action) {
-  tunnelPhase = null;
-  await fetch(`/api/tunnel/${action}`, { method: "POST" }).catch(() => null);
-  refreshTunnel();
-}
-
-async function copy(text, button) {
-  await navigator.clipboard.writeText(text);
-  const old = button.textContent; button.textContent = "Copiato"; setTimeout(() => button.textContent = old, 1500);
-}
-
-async function copyKey(button) {
-  const r = await fetch("/api/tunnel/key").then(r => r.json());
-  copy(r.key, button);
-}
-
-async function checkTunnel(button) {
-  button.disabled = true; $("tunnel-check").textContent = "verifica in corso…";
-  const r = await fetch("/api/tunnel/check").then(r => r.json()).catch(() => ({ ok: false, error: "nessuna risposta" }));
-  $("tunnel-check").innerHTML = r.ok
-    ? `<span style="color:var(--ok)">funziona: risponde ${esc(r.host)} (${esc((r.detectors || []).join(", "))})</span>`
-    : `<span class="error">${esc(r.error)}</span>`;
-  button.disabled = false;
-}
-
-refreshTunnel();
-setInterval(refreshTunnel, 2000);
 </script>
 </body>
 </html>

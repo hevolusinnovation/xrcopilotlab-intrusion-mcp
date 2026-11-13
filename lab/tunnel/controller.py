@@ -32,6 +32,8 @@ LAB_API = os.environ.get("LAB_API", "10.77.0.20:8091")
 LAB_PAGE = os.environ.get("LAB_PAGE", "10.77.0.20:8093")
 DOMAIN = os.environ.get("PUBLIC_DOMAIN", "").strip().strip("/")
 PAGE_PUBLIC_PORT = os.environ.get("PUBLIC_PAGE_PORT", "8443").strip()
+LOCAL_PAGE_PORT = 8089   # published on this container (localhost:8089): local access to lab-01's page
+LAB_API_KEY = os.environ.get("LAB_API_KEY", "")  # the test key, shown on lab-01's page (test mode only)
 ID_FILE = "/root/tunnel-id"
 URL_FILE = os.environ.get("TUNNEL_URL_FILE", "/state/url")
 DEVICE = re.compile(r"open the page (?P<url>https://\S+) and enter the code (?P<code>[A-Z0-9-]+)")
@@ -163,6 +165,8 @@ def boot():
     # lab-01's ports, reachable through this container's localhost: devtunnel hosts local ports only.
     subprocess.Popen(["socat", f"TCP-LISTEN:{PORT},fork,reuseaddr", f"TCP:{LAB_API}"])
     subprocess.Popen(["socat", f"TCP-LISTEN:{PAGE_PORT},fork,reuseaddr", f"TCP:{LAB_PAGE}"])
+    # Local access to lab-01's page (localhost:8089 → lab-01:8093): lab-01 itself publishes nothing.
+    subprocess.Popen(["socat", f"TCP-LISTEN:{LOCAL_PAGE_PORT},fork,reuseaddr", f"TCP:{LAB_PAGE}"])
     if DOMAIN:
         page = f"https://{DOMAIN}" + ("" if PAGE_PUBLIC_PORT in ("", "443") else f":{PAGE_PUBLIC_PORT}")
         set_state(phase="domain", url=f"https://{DOMAIN}", pageUrl=page, since=time.strftime("%H:%M:%S"))
@@ -187,10 +191,34 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
+    def _check(self):
+        """Calls the package through the public address, as XRCopilotLab will: proves the whole path works."""
+        with lock:
+            url = state["url"] if state["phase"] == "online" else None
+        if not url:
+            return self._send(200, {"ok": False, "error": "il tunnel non è aperto"})
+        import urllib.request, urllib.error
+        try:
+            req = urllib.request.Request(url + "/api/status", headers={"X-API-Key": LAB_API_KEY})
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                status = json.loads(resp.read())
+            return self._send(200, {"ok": True, "host": status.get("host"),
+                                    "detectors": [d["detector"] for d in status.get("detectors", [])]})
+        except urllib.error.HTTPError as ex:
+            return self._send(200, {"ok": False, "error": f"risposta {ex.code} dall'indirizzo pubblico"})
+        except OSError as ex:
+            return self._send(200, {"ok": False, "error": f"indirizzo pubblico non raggiungibile: {ex}"})
+
     def do_GET(self):
         if self.path == "/status":
             with lock:
                 return self._send(200, dict(state))
+        if self.path == "/key":
+            # The test key, for lab-01's page to show and copy (test mode only). Reachable through lab-01's own nginx,
+            # which only the page's visitors reach; a real server has no tunnel container and keeps only the hash.
+            return self._send(200, {"key": LAB_API_KEY})
+        if self.path == "/check":
+            return self._check()
         return self._send(404, {"error": "not found"})
 
     def do_POST(self):

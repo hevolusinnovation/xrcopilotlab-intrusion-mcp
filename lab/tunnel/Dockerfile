@@ -11,5 +11,5 @@ RUN apt-get update \
 COPY controller.py /tunnel/
 # devtunnel keeps its login in ./DevTunnels: run from /root, the tunnel-login volume, so the login survives make lab-down.
 WORKDIR /root
-EXPOSE 8092
+EXPOSE 8092 8089
 CMD ["python3", "-u", "/tunnel/controller.py"]
