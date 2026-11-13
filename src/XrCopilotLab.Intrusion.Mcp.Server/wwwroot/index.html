@@ -224,7 +224,7 @@ L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
 const layer = L.layerGroup().addTo(map);
 let target = null, targetMarker = null;
 const seen = new Set();
-let firstLoad = true;
+let firstLoad = true, framed = false;
 
 function arc(from, to) {
   const [lat1, lon1] = from, [lat2, lon2] = to, points = [];
@@ -253,6 +253,13 @@ function drawMap(summary, bannedIps) {
       `${p.attempts} tentativi · gravità ${esc(SEVERITY[p.severity] || p.severity)}${bannedIps.has(p.ip) ? "<br><b>bannato da fail2ban</b>" : ""}`);
   }
   if (fresh.length) map.flyTo([fresh[0].latitude, fresh[0].longitude], Math.max(map.getZoom(), 3), { duration: 1.2 });
+  // The first time there is something to show: the server and its attackers in one view, not the whole world.
+  if (!framed && (summary.mapPoints || []).length) {
+    const corners = summary.mapPoints.map(p => [p.latitude, p.longitude]);
+    if (target) corners.push(target);
+    map.fitBounds(corners, { padding: [40, 40], maxZoom: 5 });
+    framed = true;
+  }
   firstLoad = false;
 }
 
