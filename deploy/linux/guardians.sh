@@ -94,7 +94,13 @@ suricata_ppa() {
 suricata_configure() {
   local iface home
   iface="${SURICATA_INTERFACE:-$(ip -o route show default 2>/dev/null | awk '{print $5; exit}')}"
-  [[ -n "$iface" ]] || { echo "suricata: no default route: set SURICATA_INTERFACE and run again" >&2; return 1; }
+  # No default route (a server on internal networks only): the first interface that is up and has an IPv4 address,
+  # not loopback. Said, so it can be changed with SURICATA_INTERFACE.
+  if [[ -z "$iface" ]]; then
+    iface="$(ip -o -4 addr show up 2>/dev/null | awk '$2 != "lo" { print $2; exit }')"
+    [[ -n "$iface" ]] && echo "suricata: no default route: listening on $iface, the first interface with an address (SURICATA_INTERFACE=… to choose another)"
+  fi
+  [[ -n "$iface" ]] || { echo "suricata: no network interface with an address: set SURICATA_INTERFACE and run again" >&2; return 1; }
   # HOME_NET: this server's addresses and the private ranges. With the default (private ranges only) the rules that
   # protect $HOME_NET never fire on a server with a public address.
   home="$(hostname -I 2>/dev/null | tr ' ' '\n' | grep -v '^$' | grep -v ':' | sed 's|$|/32|' | paste -sd, -)"
