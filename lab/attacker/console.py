@@ -10,6 +10,7 @@ an external server only the web-layer scenarios run, from this container's own a
 """
 import json
 import os
+import re
 import threading
 import urllib.error
 import urllib.parse
@@ -101,9 +102,8 @@ class Handler(BaseHTTPRequestHandler):
         raw, key = str(body.get("url", "")).strip(), str(body.get("key", "")).strip()
         if not raw or not key:
             return self._send(400, {"error": "servono l'indirizzo e la chiave del server"})
-        base = raw.rstrip("/")
-        if not base.endswith("/api"):
-            base += "/api"
+        # Any of the addresses the page shows works: the server's base, its …/api or its …/mcp (listed first).
+        base = re.sub(r"/(api|mcp)$", "", raw.rstrip("/")) + "/api"
         parsed = urllib.parse.urlsplit(base)
         if parsed.scheme not in ("http", "https") or not parsed.hostname:
             return self._send(400, {"error": "l'indirizzo deve essere http(s)://…"})
@@ -114,7 +114,10 @@ class Handler(BaseHTTPRequestHandler):
         except urllib.error.HTTPError as ex:
             msg = "chiave rifiutata dal server" if ex.code in (401, 403) else f"il server risponde {ex.code}"
             return self._send(400, {"error": msg})
-        except (OSError, json.JSONDecodeError) as ex:
+        except json.JSONDecodeError:
+            return self._send(400, {"error": "a questo indirizzo non risponde l'API del toolkit: usa l'indirizzo MCP o API "
+                                             "(nel Dev Tunnel quello con -8091, non la pagina di monitoraggio -8093)"})
+        except OSError as ex:
             return self._send(400, {"error": f"il server non risponde: {ex}"})
         with _target_lock:
             external = {"api": base + "/", "key": key, "host": status.get("host", parsed.hostname), "web": parsed.hostname}
