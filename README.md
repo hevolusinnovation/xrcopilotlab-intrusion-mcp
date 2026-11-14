@@ -1,50 +1,260 @@
 # xrcopilotlab-intrusion-mcp
 
-**In plain words:** a small program, installed on a customer's Linux server, that tells an XRCopilotLab agent who is
-trying to break into that server. The agent can then answer questions like *"Is anyone attacking us tonight?"*,
-*"Where do the attacks come from?"*, *"Did anybody actually get in?"*.
+**In plain words:** a small program that runs on a company's Linux server and tells an
+XRCopilotLab AI agent who is trying to break into that server. The agent can then answer
+questions like *"Is anyone attacking us tonight?"*, *"Where do the attacks come from?"*, *"Did anybody actually get
+in?"*, *"What should we fix first?"*.
 
-It only **reads** and never changes anything. The server already has its own guards (fail2ban, the UFW firewall,
-nginx, CrowdSec, Suricata, Falco): they block or watch the attackers and write what they saw in their logs. This
-program reads those logs, understands what kind of attack each line is, finds the city each address comes from, ties
-what an intruder did *inside* the server to the address they came from, and answers the agent. It also comes with a
-read-only **monitoring page** and, for the agent, the server's security **configuration and a list of what to fix**.
+It only **reads**. The server's own security programs (we call them *guardians*: fail2ban, the firewall, nginx,
+CrowdSec, Suricata, Falco, ModSecurity, the VPN) block or watch the attackers and write what they see in their logs.
+This program reads those logs, works out what kind of attack each line is and where it comes from, and answers the
+agent. The company also gets a **monitoring page** with a world map of the attacks, and an optional **VPN** for its
+own people.
 
-![The monitoring page: numbers, map and table of the attacks](docs/images/monitoring.jpg)
+![The monitoring page: numbers, alerts, guardians, the map of the attackers and the table](docs/images/monitoring.jpg)
 
-*The monitoring page (here on the Docker lab's server, after `make lab-up` and a round of attacks): on the left the
-numbers, what went wrong, how XRCopilotLab reaches the server and the guardians; on the right the map of the attackers
-and the table of what the toolkit saw. Addresses in this picture are examples.*
+*The monitoring page of the lab's test server, after one night of attacks. Left: the numbers, the red alerts (the
+server is calling a malware controller, an intruder got in, someone tried to fool the AI) and the guardians. Right:
+where the attackers are, and what each one did. All addresses are test addresses with invented cities.*
 
 ```mermaid
 flowchart LR
-  A[Attackers] -->|try to get in| S[Customer's server]
-  S -->|fail2ban, sshd, UFW, nginx, CrowdSec,<br/>Suricata, Falco, ModSecurity logs| T[Intrusion toolkit<br/>reads the logs]
-  T -->|/api or /mcp<br/>X-API-Key| X[XRCopilotLab agent]
-  T -->|monitoring page<br/>HTTPS, password| H[The customer]
-  X -->|answers| P[The person asking]
+  A[Attackers] -->|try to get in| S[The company's server]
+  S -->|the guardians write<br/>what they see in their logs| T[This toolkit<br/>reads the logs]
+  T -->|"questions and answers<br/>/api or /mcp, with a key"| X[XRCopilotLab agent]
+  T -->|monitoring page<br/>map, alerts, what to fix| H[The company]
+  X -->|answers in plain words| P[The person asking]
+  E[Employees and branch offices] -.->|VPN, optional| S
 ```
+
+## Start here
+
+| You want to… | Go to |
+|---|---|
+| See what it does in two minutes | [A two-minute tour](#a-two-minute-tour) |
+| Understand how it works | [The big picture](#the-big-picture) and [How it works](#how-it-works-architecture) |
+| Try it on your laptop, with real attacks | [Quick start: the lab](#quick-start-the-lab-on-your-laptop) |
+| Install it on a customer's server | [Quick start: a customer's server](#quick-start-a-customers-server), then [the details](#install-the-toolkit-on-a-customers-server) |
+| Give the customer's people a VPN | [The VPN](#the-vpn-step-by-step-the-customers-administrator); for the customer, in Italian: [docs/guida-vpn.md](docs/guida-vpn.md) |
+| Connect it to XRCopilotLab | [Register it in XRCopilotLab](#register-it-in-xrcopilotlab) |
+| Know what a setting or a variable does | [Every setting explained](#every-setting-explained) |
+| Know what a program or a tool is for | [Every tool explained](#every-tool-explained) |
+| Fix something that does not work | [When something does not work](#when-something-does-not-work) |
 
 ## Contents
 
+- [A two-minute tour](#a-two-minute-tour) · [The big picture](#the-big-picture)
+- Quick start: [the lab](#quick-start-the-lab-on-your-laptop) · [a customer's server](#quick-start-a-customers-server)
 - [How it works (architecture)](#how-it-works-architecture)
 - [What it reads: the security packages](#what-it-reads-the-security-packages)
   ([what could come next](#more-guardians-what-could-come-next), [full analysis](docs/security-tools.md))
 - [The test console (Docker lab)](#the-test-console-docker-lab)
 - [Install the toolkit on a customer's server](#install-the-toolkit-on-a-customers-server)
-  (incl. [the VPN for the customer's people and sites](#the-vpn-step-by-step-the-customers-administrator) and
-  [the monitoring page](#5-the-monitoring-page))
+  (incl. [the VPN](#the-vpn-step-by-step-the-customers-administrator) and [the monitoring page](#5-the-monitoring-page))
 - [The lab on a domain (stable address)](#the-lab-on-a-domain-stable-address), or else
   [a public test address for XRCopilotLab (dynamic URL)](#a-public-test-address-for-xrcopilotlab-dynamic-url)
 - [Commands (make)](#commands-make)
 - [Protecting the AI agent: prompt injection through the logs](#protecting-the-ai-agent-prompt-injection-through-the-logs)
   and [guarding the customer's own AI](#guarding-the-customers-own-ai)
-- [Tools](#tools), [Attack types](#attack-types), [The simulated host](#the-simulated-host),
+- [The agent's tools](#tools), [Attack types](#attack-types), [The simulated host](#the-simulated-host),
   [Authentication](#authentication), [Configuration](#configuration)
+- [Every setting explained](#every-setting-explained) · [Every tool explained](#every-tool-explained) ·
+  [When something does not work](#when-something-does-not-work)
 - [Register it in XRCopilotLab](#register-it-in-xrcopilotlab)
 
 ---
 
+## A two-minute tour
+
+Everything below was recorded on the **Docker lab** that comes with this repository: a fake company server and an
+attacker, on your laptop, that cannot reach anything outside.
+
+**1. An attack, from the attacker's side.** You press a button in the attack console; the attacker scans the server,
+tries four passwords slowly (too slowly for fail2ban to notice), then logs in with the right one.
+
+![The attack console while an intrusion runs: scan, four wrong passwords, then the login](docs/images/attack-console.gif)
+
+**2. The same night, from the company's side.** While the attacks run, the monitoring page fills up: each attacker
+appears on the map at its city, with a line to the server, and in the table with what it did. The numbers at the top
+right count attempts, addresses, bans, web attacks, actions inside the server and firewall blocks.
+
+![The monitoring page filling up during a night of attacks](docs/images/night.gif)
+
+**3. A stolen VPN key.** An employee's laptop is lost; its VPN file is used from Bucharest. The VPN lets it in (the key
+is valid), but within a minute the page shows the employee connected from an unexpected country, and proposes the
+command that revokes the key.
+
+![A VPN key used from an unexpected country: before, the attack, after](docs/images/vpn-stolen-key.gif)
+
+And this is what the XRCopilotLab agent gets: the same facts, as answers to its questions (`intrusion_summary`,
+`intrusion_attempts`, `intrusion_posture`… see [the agent's tools](#tools)), so it can tell the person what happened
+and what to do.
+
+---
+
+## The big picture
+
+### Who does what
+
+```mermaid
+flowchart TB
+  subgraph Company[The company]
+    ADM[Administrator<br/>installs, adds VPN users,<br/>applies the fixes]
+    PEOPLE[Employees and branches<br/>use the VPN]
+    BOSS["Whoever asks the agent<br/>are we under attack?"]
+  end
+  subgraph Server[The company's server]
+    G[Guardians<br/>block or watch, write logs]
+    T[This toolkit<br/>reads, never changes anything]
+    PAGE[Monitoring page]
+  end
+  subgraph Hevolus[Hevolus / XRCopilotLab]
+    AGENT[XRCopilotLab agent]
+  end
+  ADM -->|install.sh, xrc-vpn| Server
+  PEOPLE -->|VPN| G
+  G --> T
+  T --> PAGE
+  T -->|"/api, /mcp + key"| AGENT
+  BOSS -->|questions| AGENT
+  AGENT -->|answers, proposals| BOSS
+  PAGE --> ADM
+```
+
+The toolkit never bans, blocks or changes anything on its own: the guardians do the blocking, and every fix it
+proposes is a command for a person to run. The agent can **propose** (revoke a VPN key, close a port); a person
+**decides**.
+
+### One night in the lab, in numbers
+
+What the guardians reported on the lab's server after one run of *La notte completa* and the two AI attacks (last two
+hours):
+
+```mermaid
+pie showData
+  title What each guardian saw (one lab night)
+  "Firewall: blocked connections" : 483
+  "nginx: suspicious web requests" : 319
+  "Suricata: network alerts" : 36
+  "SSH: wrong passwords and logins" : 29
+  "ModSecurity: web attacks in the body" : 23
+  "CrowdSec: attack patterns" : 16
+  "Text written to fool an AI" : 12
+```
+
+The 12 addresses of that night, by kind of attack (an address can do more than one):
+
+```mermaid
+xychart-beta
+  title "Attacking addresses by kind of attack"
+  x-axis ["Web exploit", "Port scan", "Site scan", "SSH brute force", "Fool the AI", "Look for AI", "Login after failures", "Web login", "Flood", "Malware controller", "Industrial probe"]
+  y-axis "Addresses" 0 --> 5
+  bar [4, 4, 3, 3, 2, 2, 1, 1, 1, 1, 1]
+```
+
+### The night of an intrusion, minute by minute
+
+The simulated host (and the lab's *La notte completa*) tells the story of a real intrusion. The agent could have
+acted at 00.31 or at 01.25, long before the intruder got in:
+
+```mermaid
+timeline
+  title The intruder from Chișinău (simulated host)
+  00.31 : Port scan : the firewall logs it
+  00.52 : One password every 3 minutes or so : too slow for fail2ban
+  01.25 : CrowdSec recognises a slow brute force : nothing enforces it
+  02.50 : The right password : LoginAfterFailures, critical
+  after the login : Inside : Falco sees /etc/shadow read, an SSH key added, a miner, logs wiped
+  15-25 minutes later : The server calls a malware controller : Suricata, every ten minutes until morning
+```
+
+### How serious is it
+
+```mermaid
+flowchart LR
+  L[Low<br/>a few stray packets,<br/>an unused VPN key] --> M[Medium<br/>a ban, a scan, a campaign,<br/>someone looking for AI services]
+  M --> H[High<br/>web exploit, industrial probe,<br/>text written for the AI,<br/>VPN key from another country]
+  H --> C[Critical<br/>someone got in,<br/>the server calls a malware controller,<br/>a miner, logs wiped]
+```
+
+### What the guardians cost
+
+Memory measured in the lab (Ubuntu 24.04). The toolkit itself is small; Suricata is the one to plan for:
+
+```mermaid
+xychart-beta
+  title "Memory per guardian, measured in the lab (MB)"
+  x-axis ["Suricata (all ET Open rules)", "Falco", "ModSecurity (per nginx worker)"]
+  y-axis "MB" 0 --> 1600
+  bar [1500, 230, 17]
+```
+
+The whole lab server, with every guardian on, used about **2.1 GB** of memory after a night of attacks.
+
+---
+
+## Quick start: the lab on your laptop
+
+**What you need:** Docker Desktop (Mac, Windows or Linux) with at least **8 GB of memory** for Docker (the lab's
+server alone uses about 2 GB), `make`, `git`, and some free disk (the Metasploit image alone is about 2 GB). The first
+start downloads and builds everything, so it takes a while; later starts are quick.
+
+```bash
+git clone https://github.com/hevolusinnovation/xrcopilotlab-intrusion-mcp.git
+cd xrcopilotlab-intrusion-mcp
+make up            # builds and starts the lab; creates lab/.env with a new key the first time
+```
+
+Then open:
+
+| Address | What it is |
+|---|---|
+| **http://localhost:8090** | The **attack console**: press a card to run an attack against the test server |
+| **http://localhost:8089** | The test server's **monitoring page**: map, alerts, guardians, what to fix, the VPN, and the box that connects the lab to XRCopilotLab |
+
+Start with **La notte completa** (about four minutes) and watch the page. `make down` stops the lab; `make lab-reset`
+deletes everything. All the commands: [Commands (make)](#commands-make). What runs inside: [The test console](#the-test-console-docker-lab).
+
+## Quick start: a customer's server
+
+**What you need:** a Debian or Ubuntu server (the lab runs Ubuntu 24.04; Falco needs a kernel with BTF, as on Ubuntu
+22.04 and later), `sudo`, and a key of at least
+24 characters that XRCopilotLab will send. Memory depends on the guardians you add: the toolkit alone is light;
+Suricata wants about 1.5 GB more.
+
+```bash
+# 1. on your computer: download the package for the server's processor and copy it there
+gh release download -R hevolusinnovation/xrcopilotlab-intrusion-mcp -p '*linux-x64.tar.gz' -p SHA256SUMS
+scp xrcopilotlab-intrusion-mcp-*-linux-x64.tar.gz SHA256SUMS admin@<server>:/tmp/
+
+# 2. on the server: check, unpack, install (add the guardians the server does not have yet)
+cd /tmp && sha256sum -c SHA256SUMS --ignore-missing
+tar -xzf xrcopilotlab-intrusion-mcp-*-linux-x64.tar.gz && cd xrcopilotlab-intrusion-mcp-*-linux-x64
+sudo ./install.sh --with fail2ban,crowdsec,falco,modsecurity
+
+# 3. check it answers
+curl -s http://127.0.0.1:8470/healthz
+```
+
+```mermaid
+flowchart TB
+  A[sudo ./install.sh] --> B{Right processor?}
+  B -->|no| X[Stops: use the other package]
+  B -->|yes| C[libicu, if missing]
+  C --> D["nginx + monitoring page<br/>unless --no-dashboard"]
+  D --> E["Guardians of --with<br/>detection only, never UFW"]
+  E --> F["Program in /opt, user xrcopilot-intrusion<br/>read-only on /var/log"]
+  F --> G[Key: only its SHA-256 is kept]
+  G --> H["Service started, /healthz checked"]
+  H --> I["Prints: the monitoring page password once,<br/>the nginx block to publish the API"]
+```
+
+Then publish the API through the server's nginx ([Where it answers](#3-where-it-answers)), register it in
+XRCopilotLab ([Register it](#register-it-in-xrcopilotlab)), and open the monitoring page on
+`https://<server>:8471` from the office network. Everything in detail: [Install the toolkit on a customer's
+server](#install-the-toolkit-on-a-customers-server).
+
+---
 ## How it works (architecture)
 
 ```mermaid
@@ -151,7 +361,7 @@ A detector the host does not have is simply absent from the answers.
 | Mode | Where it runs | What it reads | Use |
 |---|---|---|---|
 | `simulated` | Our Azure Container App `hev-intrusion-mcp` | A synthetic host generated in memory | Demos (ALVEO) |
-| `logs` | The customer's host, next to its detectors | The eight logs above | Production |
+| `logs` | The customer's host, next to its detectors | The logs above | Production |
 
 Two faces, same key, same answers: **MCP** on `/mcp` (for whoever registers the server in XRCopilotLab by hand) and
 **REST** on `/api` (for a blueprint, which provisions it as a `kind: builder` server with no manual step).
@@ -195,21 +405,23 @@ To see the toolkit at work without a customer's server, `make up` starts a small
   the `tunnel` container (the Dev Tunnel, or the customer's domain): its own networks never leave the lab;
 - **`metasploit`** (container `intrusion-lab-metasploit`), a real attack engine the console drives for three of the attacks;
 - **`attacker`** (container `intrusion-lab-attacker`), which attacks `lab-01` when you press a button, and serves the console on
-  **http://localhost:8090**: only the attacks, the tunnel and the server to test;
+  **http://localhost:8090**: the attacks, and a field to point them at another server under test;
 - **`tunnel`** (container `intrusion-lab-tunnel`), which gives `lab-01` a public HTTPS address, so XRCopilotLab can call it (see
-  [below](#a-public-test-address-for-xrcopilotlab-dynamic-url)).
+  [below](#a-public-test-address-for-xrcopilotlab-dynamic-url)), and forwards `lab-01`'s monitoring page to
+  **http://localhost:8089** on your laptop.
 
-![The attack console: XRCopilotLab connection, server to test, attack buttons and what the attacker is doing](docs/images/console.jpg)
+![The attack console: the server to test, and the attacks grouped by phase of an intrusion](docs/images/console.jpg)
 
 The attacks never leave the lab: all addresses are "documentation" addresses (RFC 5737) that no real computer uses,
 and each one gets an invented city so that the map has something to show.
 
 What the toolkit sees (the numbers, the red box, the map and the table below) is on `lab-01`'s own **monitoring page**,
-the same a customer gets (see [The monitoring page](#5-the-monitoring-page)), with the Hevolus logo at the top. The
-server is not published on a local port: the page opens **through the Dev Tunnel**, with your Microsoft account (the
-console shows its address once the tunnel is online), or on the **customer's domain** when `PUBLIC_DOMAIN` is set (see
-[below](#a-public-test-address-for-xrcopilotlab-dynamic-url)). No password of its own. `…/?view=map` shows the map
-alone, for a wall screen.
+the same a customer gets (see [The monitoring page](#5-the-monitoring-page)), with the Hevolus logo at the top. On your
+laptop it opens on **http://localhost:8089** (the `tunnel` container forwards it: `lab-01` itself publishes no port);
+from elsewhere, **through the Dev Tunnel** with your Microsoft account, or on the **customer's domain** when
+`PUBLIC_DOMAIN` is set (see [below](#a-public-test-address-for-xrcopilotlab-dynamic-url)). No password of its own.
+`…/?view=map` shows the map alone, for a wall screen. The page also holds the box **Come ti raggiunge XRCopilotLab**,
+which opens the Dev Tunnel and shows the addresses and the key to give XRCopilotLab.
 
 ### The numbers
 
@@ -351,7 +563,7 @@ install and never asks twice:
 | User, folders, `libicu` | created only if missing |
 
 **The server's place on the map is automatic:** the toolkit geolocates the server's own **public IP** (one call to
-`ipapi.co`, no local geo database needed for the marker, no company name). It is approximate — the city of the public
+`ipwho.is`, or `ipapi.co` if that fails; no local geo database needed for the marker, no company name). It is approximate — the city of the public
 IP / ISP, which for a cloud server is the data center, not the office.
 
 **The public address for XRCopilotLab** (optional) is given as a variable:
@@ -550,16 +762,17 @@ Without `PUBLIC_DOMAIN` (the default), the lab gets a temporary public address f
 `tunnel` container creates one with **Microsoft Dev Tunnels**, free, and you do everything from the console: nothing to
 install on the Mac.
 
-![The XRCopilotLab connection box, with the public addresses](docs/images/tunnel.jpg)
+![The box "Come ti raggiunge XRCopilotLab" on lab-01's page, with the public addresses](docs/images/tunnel.jpg)
 
 *Addresses and account in this picture are examples.*
 
 ### How the address is created
 
-1. In the console, box **Collegamento a XRCopilotLab**, click **Accedi con l'account Microsoft**.
-2. The console shows a Microsoft link (`https://microsoft.com/devicelogin`) and a **code**: open the link, enter the
+1. On `lab-01`'s page (**http://localhost:8089**), box **Come ti raggiunge XRCopilotLab**, click **Accedi con
+   l'account Microsoft**.
+2. The page shows a Microsoft link (`https://microsoft.com/devicelogin`) and a **code**: open the link, enter the
    code and sign in with your Hevolus (Entra ID), Microsoft or GitHub account.
-3. The console notices the login by itself; the `tunnel` container creates a tunnel and opens it. After a few seconds
+3. The page notices the login by itself; the `tunnel` container creates a tunnel and opens it. After a few seconds
    the box says **● Online** and shows the addresses.
 4. Copy the addresses and the key with the **Copia** buttons, and paste them in XRCopilotLab.
 5. **Verifica dall'indirizzo pubblico** calls `lab-01` through the public address, as XRCopilotLab will: if it says
@@ -589,7 +802,7 @@ sequenceDiagram
 ```
 https://<id>-8091.<region>.devtunnels.ms/api    connection with HTTP tools (blueprint)
 https://<id>-8091.<region>.devtunnels.ms/mcp    MCP server registered by hand
-X-API-Key: <the lab key>                        header, from "Copia la chiave"
+X-API-Key: <the lab key>                        header, from the Copia button next to the key
 https://<id>-8093.<region>.devtunnels.ms/       monitoring page (map and attacks), Microsoft login
 ```
 
@@ -611,7 +824,7 @@ https://<id>-8093.<region>.devtunnels.ms/       monitoring page (map and attacks
 - The API port (8091) has anonymous access (XRCopilotLab cannot sign in to Microsoft), but **every call still needs the key**.
 - The monitoring page (port 8093) has no anonymous access: Dev Tunnels asks for the Microsoft login and lets in only
   the account that opened the tunnel and its Entra tenant (Hevolus). It only reads.
-- The key is in `lab/.env` (never committed); the browser never sees it unless you press *Copia la chiave*.
+- The key is in `lab/.env` (never committed); it is shown on the page only to be copied into XRCopilotLab.
 - Dev Tunnels is for development and tests (limits: 5 GB of traffic and 10 tunnels per user per month). **Never use
   it for a customer's server**: there, the toolkit is published by the customer's nginx, as described above.
 
@@ -632,6 +845,7 @@ https://<id>-8093.<region>.devtunnels.ms/       monitoring page (map and attacks
 | `make lab-logs` | Follows the logs; `SVC=server`, `attacker`, `tunnel` or `metasploit` for one container |
 | `make lab-shell` | Opens a shell in the server `lab-01` (or `SVC=…`); same as `docker exec -it intrusion-lab-server bash` |
 | `make lab-open` | Opens the console in the browser |
+| `make lab-up-msf` / `make lab-down-msf` | Starts / stops the Metasploit container alone (it starts with `make up`) |
 | `make lab-reset` | Stops the lab and deletes everything, tunnel login included |
 | `make build` / `make test` | Builds the solution / runs the unit tests |
 | `make run` | The toolkit on your Mac, simulated mode, on http://localhost:5290 (needs `INTRUSION_MCP_API_KEY`) |
@@ -769,7 +983,7 @@ person's approval).
 
 ## Tools
 
-All tools are read-only (`readOnlyHint: true`). Every answer carries `simulated` and the geolocation attribution;
+These are the **agent's tools**: what XRCopilotLab can ask. All tools are read-only (`readOnlyHint: true`). Every answer carries `simulated` and the geolocation attribution;
 those that can carry the attackers' text (attempts, ip detail, suspicious logins, summary, host activity) also carry
 `untrusted`: which fields are that text, and a note for the AI (see
 [Protecting the AI agent](#protecting-the-ai-agent-prompt-injection-through-the-logs)). The MCP server sends the same
@@ -929,7 +1143,7 @@ configured; `/livez` answers when the process is up. 120 calls per minute per ke
 | `Logs:FalcoFiles` | `/var/log/falco/events.json*` | Falco JSON file output: alerts of priority Notice and above |
 | `Logs:ModSecurityFiles` | `/var/log/modsecurity/audit.json*` | ModSecurity JSON audit log: web attacks the CRS would block |
 | `Logs:VpnStateFile` | `/run/xrcopilotlab-vpn/state.json` | Who is connected to the VPN, written every minute by `xrc-vpn state` (no key in it) |
-| `Site:LocationUrl` | `https://ipapi.co/json/` | Service that returns the server's own public-IP location, to place it on the map (city/country, no name). `Site:LocationFile` reads the location from a file instead, for a server with no outbound access or the lab |
+| `Site:LocationUrls` | `https://ipwho.is/`, `https://ipapi.co/json/` | Services that return the server's own public-IP location, tried in order, to place it on the map (city/country, no name). `Site:LocationFile` reads the location from a file instead, for a server with no outbound access or the lab |
 | `Connection:PublicUrl` | — | The customer's own public address for XRCopilotLab (`https://guardiano.cliente.it/intrusion-mcp`; `PUBLIC_URL` at install). When set, it is the address; without it a test tunnel gives a temporary one |
 | `Connection:TunnelUrlFile` | `/var/lib/.../tunnel/url` | Where a test tunnel writes its temporary public address |
 | `Logs:LocalAddresses` | the interfaces' addresses | The server's own addresses, to tell an attack coming in from a connection the server opened |
@@ -947,6 +1161,190 @@ column order (`ip_start,ip_end,continent,country,stateprov,city,latitude,longitu
 and has not yet been checked against a downloaded file.
 
 ---
+
+---
+
+## Every setting explained
+
+There are four places where something can be set. Most people only ever touch the first two.
+
+```mermaid
+flowchart LR
+  A["lab/.env<br/>the lab on your laptop"] --> L[Docker lab]
+  B[Variables and options<br/>of install.sh] --> S[Customer's server]
+  S --> C["Files install.sh writes<br/>/etc/xrcopilotlab-intrusion-mcp, /etc/xrcopilotlab-vpn"]
+  S --> D[appsettings.Production.json<br/>what the toolkit reads]
+  E[Environment of make<br/>developers] --> R[make run, package, deploy]
+```
+
+### `lab/.env`: the lab on your laptop
+
+`make up` creates `lab/.env` the first time, from [`lab/.env.example`](lab/.env.example), with new keys. It is never
+committed (it holds the keys). Change it, then `make lab-restart`.
+
+| Variable | Example | What it is, in plain words | When to change it |
+|---|---|---|---|
+| `LAB_API_KEY` | `lab-key-7f3c…` (made by `make up`) | The **test key**: the password XRCopilotLab sends in the `X-API-Key` header to read the lab's server. The server keeps only its fingerprint (SHA-256). It is shown, with a *Copia* button, on the lab's page next to the Dev Tunnel address, so you can paste it into XRCopilotLab. The attack console uses it too, to check a server under test | Never, unless it leaked: delete the line and run `make up` to get a new one |
+| `PROD_API_KEY` | `prod-key-…` (made by `make up`) | The **production key**, used instead of the test key when `PUBLIC_DOMAIN` is set. Never shown on the page: give it to XRCopilotLab yourself, and keep it secret | Same as above |
+| `PUBLIC_DOMAIN` | `intrusion-lab.example.com` | The lab's own **internet name**, when the lab runs on a server with a domain. Set: no Dev Tunnel; the lab's API and page are published on that name through *your* reverse proxy (see [The lab on a domain](#the-lab-on-a-domain-stable-address)). Empty (the default): the page offers a Microsoft Dev Tunnel, a temporary test address | Only when DNS, TLS proxy and firewall are already in place |
+| `PUBLIC_PAGE_PORT` | `8443` | With `PUBLIC_DOMAIN`: the public port of the monitoring page (`https://<domain>:8443/`) | If 8443 is taken on your proxy |
+| `MSF_RPC_PASSWORD` | `labmsf` (default, not in the file) | The password between the attack console and the Metasploit container. Both are on the lab's internal networks only | Optional; add it to `lab/.env` if you want another one |
+
+The lab's containers also get fixed settings from `lab/docker-compose.yml` (nothing to change): the attacker's
+targets (`TARGET_IT` 198.51.100.20, `TARGET_INTERNET` 203.0.113.250, `TARGET_HOMES` 192.0.2.250: the server's three
+addresses), where Metasploit answers (`MSF_RPC_HOST`, `MSF_RPC_PORT`), and where the tunnel finds the server's API and
+page (`LAB_API` 10.77.0.20:8091, `LAB_PAGE` 10.77.0.20:8093).
+
+### `install.sh`: options and variables on a customer's server
+
+Options, after `sudo ./install.sh`:
+
+| Option | What it does |
+|---|---|
+| *(none)* | Installs or updates the toolkit and the monitoring page; asks for the key the first time |
+| `--with a,b,c` | Also installs and configures these guardians: `fail2ban`, `crowdsec`, `suricata`, `falco`, `modsecurity`, `wireguard`. All in detection mode; UFW is never switched on |
+| `--new-key` | Replaces the stored key (the old one stops working at once) |
+| `--no-dashboard` | No monitoring page (and no nginx site for it) |
+| `--no-start` | Installs everything but starts nothing: for a disk image prepared in advance (the VPN key is then made at the first start) |
+
+Variables, given before the command (`sudo VAR=value ./install.sh …`). All optional:
+
+| Variable | Default | What it is |
+|---|---|---|
+| `INTRUSION_MCP_API_KEY` | asked on the terminal | The key XRCopilotLab will send (24 characters or more). Useful for an unattended install; only its SHA-256 is stored |
+| `PUBLIC_URL` | — | The address XRCopilotLab uses, on the customer's own domain, `https://…` (e.g. `https://guardiano.cliente.it/intrusion-mcp`). Shown on the page and to the agent. Without it: a test tunnel, or none |
+| `DASHBOARD_PORT` | `8471` | Port of the monitoring page (HTTPS). Not 80 or 443, so the customer's sites are not touched |
+| `DASHBOARD_ALLOW` | loopback and private networks | Who may open the page: addresses or networks separated by spaces (`"192.168.1.0/24 10.8.0.0/24"`) |
+| `DASHBOARD_PASSWORD` | made up and printed once | The password of the user `admin` on the page, at the first install |
+| `SURICATA_INTERFACE` | the default route's interface | The network card Suricata listens on |
+| `VPN_ENDPOINT` | — | The office's public IPv4, IPv6 or name, for the VPN users (`xrc-vpn endpoint` later, if unknown now) |
+| `VPN_PORT` | `51820` | The VPN's UDP port; the office router forwards it to this server |
+| `VPN_SUBNET` | `10.88.0.0/24` | The VPN's own IPv4 network: a /24 no site uses |
+| `VPN_SUBNET6` | made at the first start | The VPN's own IPv6 network (a ULA /64), or `off` |
+| `VPN_LAN` | the default route's networks | The internal networks the VPN opens, IPv4 and IPv6, comma separated |
+| `VPN_DNS` | — | A DNS server for the VPN users (the office's) |
+
+### What `install.sh` writes on the server
+
+You normally never edit these: run `install.sh` again with other values instead. They are listed so you know what
+is where.
+
+| File | Contains | Readable by |
+|---|---|---|
+| `/opt/xrcopilotlab-intrusion-mcp/` | The program, `appsettings.Production.json`, `geo/` (the optional DB-IP file), `VERSION` | everyone (no secrets) |
+| `/etc/xrcopilotlab-intrusion-mcp/env` | `ApiKeys__Hash`: the SHA-256 of XRCopilotLab's key | root and the service |
+| `/etc/xrcopilotlab-intrusion-mcp/dashboard.env` | `ApiKeys__Keys__0__Id=dashboard`, `ApiKeys__Keys__0__Hash`: the fingerprint of the page's own key (the page reads the API through nginx, which adds that key; the browser never sees it) | root and the service |
+| `/etc/xrcopilotlab-intrusion-mcp/site.env` | `Connection__PublicUrl`, from `PUBLIC_URL` | root and the service |
+| `/etc/nginx/xrcopilotlab-dashboard/` | The page's certificate, its password file (`htpasswd`, user `admin`) and the page's key for nginx (`key.conf`) | root, nginx |
+| `/etc/systemd/system/xrcopilotlab-intrusion-mcp.service` | The service: runs as the user `xrcopilot-intrusion`, read-only system, `/var/log` read-only, no privileges | everyone |
+| `/etc/xrcopilotlab-vpn/vpn.env` | With `--with wireguard`: `WG_ENDPOINT`, `WG_PORT`, `WG_SUBNET`, `WG_SUBNET6`, `WG_LAN`, `WG_DNS` (the `VPN_*` values above, and what `xrc-vpn endpoint` and `xrc-vpn lan` change) | root |
+| `/etc/xrcopilotlab-vpn/peers/` | One file per VPN user: name, kind, address, **public** key, preshared key, networks behind it, creation date | root only |
+| `/etc/wireguard/wgxrc.key`, `wgxrc.conf` | The VPN server's private key (made at the first start) and its configuration, rebuilt by `xrc-vpn` | root only |
+| `/run/xrcopilotlab-vpn/state.json` | Who is connected to the VPN, every minute, **without any key** | root, group `adm` (the toolkit) |
+| `/etc/sudoers.d/xrcopilotlab-vpn` | The group `vpn-admin` may run `xrc-vpn` (and nothing else) with its own password | root |
+
+The toolkit's own settings are in `/opt/xrcopilotlab-intrusion-mcp/appsettings.Production.json`, kept across updates;
+every key is in [Configuration](#configuration). Any of them can also be given as an environment variable in the
+service, with `__` for each level: `Policy__AllowedCountries__0=IT`, `Logs__TimeZone=Europe/Rome`.
+
+### For developers: `make` and the environment
+
+| Variable | Used by | What it is |
+|---|---|---|
+| `INTRUSION_MCP_API_KEY` | `make run`, `make deploy` | A key of your choice for the local server, or the demo's key from Key Vault. Read from the environment, never written in a file of the repository |
+| `VERSION` | `make package` | The package version (default: the current one, e.g. `0.6.0`) |
+| `RID` | `make package` | `linux-x64` (default) or `linux-arm64` |
+| `TAG` | `make docker-build`, `docker-push`, `deploy` | The demo image's tag (default `dev`) |
+| `SVC` | `make lab-logs`, `make lab-shell` | The lab container: `server` (default for the shell), `attacker`, `tunnel`, `metasploit` |
+
+---
+
+## Every tool explained
+
+### The agent's tools
+
+Ten read-only tools, the same on MCP (`/mcp`) and REST (`/api`): see [the agent's tools](#tools) for what each one
+answers. In one line each:
+
+| Tool | The question it answers |
+|---|---|
+| `intrusion_status` | Is anything happening right now? |
+| `intrusion_summary` | What happened in this period, all in one (numbers, map, top attackers)? |
+| `intrusion_attempts` | Who attacked, most serious first? |
+| `intrusion_ip_detail` | What did this address do, step by step? |
+| `intrusion_banned_ips` | Who is blocked right now? |
+| `intrusion_suspicious_logins` | Did somebody get in who should not have? |
+| `intrusion_host_activity` | What happened *inside* the server after a login? |
+| `intrusion_guardians` | Which guardians are there, are they running, how is SSH set? |
+| `intrusion_vpn` | Who is on the VPN, and from where? |
+| `intrusion_posture` | What should we fix, most urgent first, with the command? |
+
+### The programs on the customer's server
+
+| Program | What it is for, in plain words | Installed by | Licence |
+|---|---|---|---|
+| **This toolkit** | Reads the guardians' logs and answers the agent and the page | `install.sh` | Hevolus |
+| **nginx** | The web server; publishes the toolkit's API with TLS and the monitoring page | the customer, or `install.sh` for the page | BSD-2 |
+| **fail2ban** | Bans for a while an address that gets the password wrong too many times | `--with fail2ban` | GPL-2 |
+| **UFW** | The firewall: closed ports stay closed. The toolkit reads it, **never** switches it on | the customer | GPL-3 |
+| **CrowdSec** | Recognises attack patterns fail2ban misses (very slow brute force, scans); detection only | `--with crowdsec` | MIT |
+| **Suricata** + ET Open rules | Checks all network traffic against known attacks; sees the server calling a malware controller | `--with suricata` | GPL-2; rules: ET Open (free) |
+| **Falco** | Watches what programs do inside the server (eBPF), after a break-in | `--with falco` | Apache-2.0 |
+| **ModSecurity** + **OWASP CRS** | Web firewall inside nginx: reads whole requests, bodies included; detection only | `--with modsecurity` | Apache-2.0 |
+| **WireGuard** + `qrencode` | The VPN for the customer's people and branches; QR codes for the phone app | `--with wireguard` | GPL-2 / LGPL-2.1 |
+| **xrc-vpn** | The command the customer uses to add, revoke and reissue VPN users | `--with wireguard` | Hevolus |
+| **DB-IP Lite** (optional) | Puts each address on a city, offline | downloaded by the customer | CC BY 4.0 |
+| **systemd**, **iptables/ip6tables** | Run the services; route the VPN to the internal network | the distribution | — |
+
+### Inside the toolkit and its page
+
+| Part | What it is for | Licence |
+|---|---|---|
+| .NET 10 | The runtime, packed into one file: nothing to install on the server | MIT |
+| ModelContextProtocol SDK (2.2) | The MCP server XRCopilotLab talks to | Apache-2.0 |
+| OpenTelemetry, Azure Monitor | Traces and metrics of the demo on Azure | Apache-2.0 / MIT |
+| Leaflet | The map on the monitoring page (bundled, no external call) | BSD-2 |
+| Natural Earth | Country borders and city names on the map (bundled) | public domain |
+| ipwho.is, ipapi.co | Where the server itself is on the map (its own public IP); `Site:LocationFile` avoids the call | free tiers |
+
+### The lab
+
+| Program | What it is for |
+|---|---|
+| **Docker**, Docker Compose | Run the four lab containers on your laptop |
+| **Ubuntu 24.04** + systemd | The test server `lab-01`, set up like a customer's |
+| **nmap**, **ssh/sshpass**, Python | The attacker's hand-written attacks (port scans, passwords, web requests) |
+| **Metasploit** (official image) | A real attack engine, driven by the console over its RPC (`pymetasploit3`) |
+| **wireguard-tools**, ping | The VPN attacks: an unknown key, a stolen key |
+| **Microsoft Dev Tunnels** CLI, socat | A temporary public HTTPS address for the lab, so XRCopilotLab in the cloud can reach your laptop |
+| ulogd2, rsyslog | Write the lab firewall's drops in UFW's own format, so the real parser reads them |
+
+### Development
+
+| Tool | Used for |
+|---|---|
+| .NET 10 SDK, xUnit | Build and tests (`make build`, `make test`) |
+| `gh` (GitHub CLI) | Releases and downloads |
+| Azure Container Registry and Container Apps, `az` | The demo in simulated mode (`make deploy`) |
+
+---
+
+## When something does not work
+
+| What you see | What to check |
+|---|---|
+| `install.sh` stops: *this package is for linux-x64, this server is linux-arm64* | Download the other package (`uname -m`: `x86_64` → x64, `aarch64` → arm64) |
+| `curl http://127.0.0.1:8470/healthz` answers **503** | No key stored: run `sudo ./install.sh` again (it asks for it) |
+| The service does not start | `journalctl -u xrcopilotlab-intrusion-mcp -n 50` |
+| A guardian shows **log non leggibile** on the page | Run `sudo ./install.sh --with <that guardian>`: it makes the log readable by the group `adm` |
+| XRCopilotLab gets **401** | The key it sends is not the one installed: `sudo ./install.sh --new-key` and register the new one |
+| The map has no cities | The DB-IP file is missing: [Cities on the map](#5-the-monitoring-page) |
+| The monitoring page does not open | It answers only from the networks in `DASHBOARD_ALLOW` (default: private ones), on port 8471 |
+| `install.sh --with modsecurity` stops | `nginx -t` failed before or after: nginx was left as it was; the message says why |
+| A VPN user never connects | The router's port forwarding (UDP 51820), the address (`xrc-vpn show`), a line without public IPv4 (use IPv6): see [docs/guida-vpn.md](docs/guida-vpn.md) |
+| The lab: **make up** fails building `server` | A guardian's repository is down: run `make up` again later |
+| The lab: the page shows nothing after an attack | Wait a few seconds (the page refreshes every 5 s), and check the period (*ultime 24 ore*) |
+| The lab: Metasploit cards are greyed out | The Metasploit container is still starting (about 30 s), or stopped: `make lab-up-msf` |
 
 ## Build, test, run locally
 
