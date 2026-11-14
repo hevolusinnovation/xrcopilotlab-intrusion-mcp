@@ -475,7 +475,11 @@ async function refreshRuns() {
   const atBottom = box.scrollTop + box.clientHeight >= box.scrollHeight - 4;
   const statusText = T[lang].status[last.status] || last.status;
   const head = `<span class="t">${esc(last.started)}</span> <span class="run-line">▶ ${esc(runTitle(last))} — ${esc(statusText)}</span>\n`;
-  const lines = last.log.map(l => `<span class="t">${esc(l.t)}</span> <span class="${classify(l.msg)}">${esc(l.msg)}</span>`).join("\n");
+  const lines = last.log.map(l => {
+    const txt = lang === "en" ? (l.msg_en || l.msg) : l.msg;
+    const cls = l.cls != null ? l.cls : classify(l.msg);   // backend tags the class; classify() is the fallback
+    return `<span class="t">${esc(l.t)}</span> <span class="${cls}">${esc(txt)}</span>`;
+  }).join("\n");
   box.innerHTML = head + lines + `\n<span class="cursor"></span>`;
   if (atBottom) box.scrollTop = box.scrollHeight;
 }
