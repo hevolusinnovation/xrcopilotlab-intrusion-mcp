@@ -4,7 +4,7 @@
   "demoVpnUsers": ["anna-portatile"],
   "demo": [
     "The account operatore (sudo) logs in over SSH with a password the lab's scenarios guess",
-    "The sample site of Alveo Energia, with /admin/ behind a password the lab's scenarios guess",
+    "The sample site of \"Alveo Energia\", a made-up company (not a real one), with /admin/ behind a password the lab's scenarios guess",
     "fail2ban and the rate limits are shortened so that the scenarios trigger them in seconds"
   ]
 }
