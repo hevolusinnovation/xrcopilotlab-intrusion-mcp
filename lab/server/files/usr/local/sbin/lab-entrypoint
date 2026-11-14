@@ -20,7 +20,8 @@ fi
 # the tunnel container (which has internet) writes the location to the shared volume, and the toolkit reads it here.
 # With a domain, that is XRCopilotLab's address (Connection:PublicUrl) instead of a tunnel's.
 {
-  printf 'Site__LocationFile=/var/lib/xrcopilotlab-intrusion-mcp/tunnel/location.json\n'
+  printf 'Site__LocationFile=/var/lib/lab-tunnel/location.json\n'
+  printf 'Connection__TunnelUrlFile=/var/lib/lab-tunnel/url\n'
   if [[ -n "${PUBLIC_DOMAIN:-}" ]]; then printf 'Connection__PublicUrl=https://%s\n' "$PUBLIC_DOMAIN"; fi
 } > /etc/xrcopilotlab-intrusion-mcp/site.env
 chgrp xrcopilot-intrusion /etc/xrcopilotlab-intrusion-mcp/site.env && chmod 0640 /etc/xrcopilotlab-intrusion-mcp/site.env

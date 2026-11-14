@@ -23,8 +23,9 @@ services:
     tmpfs: [/run, /run/lock]
     volumes:
       - /sys/fs/cgroup:/sys/fs/cgroup:rw
-      # The tunnel's public address, written by the tunnel container: the package shows it on its page.
-      - tunnel-state:/var/lib/xrcopilotlab-intrusion-mcp/tunnel:ro
+      # The tunnel's public address, written by the tunnel container: the package shows it on its page. Outside the
+      # package's StateDirectory: a read-only mount inside it makes systemd fail to set it up (status 238).
+      - tunnel-state:/var/lib/lab-tunnel:ro
       # The VPN configuration of an employee (lab-vpn-user), which the attacker "steals" in a VPN scenario.
       - lab-vpn:/var/lib/lab-vpn
     environment:
