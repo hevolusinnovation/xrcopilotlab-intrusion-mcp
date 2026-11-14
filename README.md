@@ -657,11 +657,11 @@ processor (`uname -m` on the server: `x86_64` → x64, `aarch64` → arm64):
 From the command line, and straight to the server:
 
 ```bash
-gh release download v0.7.0 -R hevolusinnovation/xrcopilotlab-intrusion-mcp -p '*linux-x64.tar.gz' -p SHA256SUMS
-scp xrcopilotlab-intrusion-mcp-0.7.0-linux-x64.tar.gz SHA256SUMS admin@<server>:/tmp/
+gh release download v0.7.1 -R hevolusinnovation/xrcopilotlab-intrusion-mcp -p '*linux-x64.tar.gz' -p SHA256SUMS
+scp xrcopilotlab-intrusion-mcp-0.7.1-linux-x64.tar.gz SHA256SUMS admin@<server>:/tmp/
 ```
 
-Or build it from this repository: `make package VERSION=0.7.0` (add `RID=linux-arm64` for ARM); the file lands in
+Or build it from this repository: `make package VERSION=0.7.1` (add `RID=linux-arm64` for ARM); the file lands in
 `out/`.
 
 ### 2. Install it
@@ -671,8 +671,8 @@ On the server (Debian or Ubuntu, with fail2ban already running):
 ```bash
 cd /tmp
 sha256sum -c SHA256SUMS --ignore-missing
-tar -xzf xrcopilotlab-intrusion-mcp-0.7.0-linux-x64.tar.gz
-cd xrcopilotlab-intrusion-mcp-0.7.0-linux-x64
+tar -xzf xrcopilotlab-intrusion-mcp-0.7.1-linux-x64.tar.gz
+cd xrcopilotlab-intrusion-mcp-0.7.1-linux-x64
 sudo ./install.sh
 ```
 
@@ -1290,7 +1290,7 @@ service, with `__` for each level: `Policy__AllowedCountries__0=IT`, `Logs__Time
 | Variable | Used by | What it is |
 |---|---|---|
 | `INTRUSION_MCP_API_KEY` | `make run`, `make deploy` | A key of your choice for the local server, or the demo's key from Key Vault. Read from the environment, never written in a file of the repository |
-| `VERSION` | `make package` | The package version (default: the current one, e.g. `0.7.0`) |
+| `VERSION` | `make package` | The package version (default: the current one, e.g. `0.7.1`) |
 | `RID` | `make package` | `linux-x64` (default) or `linux-arm64` |
 | `TAG` | `make docker-build`, `docker-push`, `deploy` | The demo image's tag (default `dev`) |
 | `SVC` | `make lab-logs`, `make lab-shell` | The lab container: `server` (default for the shell), `attacker`, `tunnel`, `metasploit` |
