@@ -617,13 +617,72 @@ SCENARIOS = [
 ]
 
 
+# English (title, expect) for the console UI. The Italian lives in SCENARIOS above; the live attack log stays Italian.
+SCENARIOS_EN = {
+    "port-scan": ("Port scan", "The firewall logs the attempts on closed ports: PortScan, medium severity."),
+    "industrial": ("Industrial protocol probe", "Modbus, S7, IEC 104, DNP3, BACnet…: IndustrialProtocolProbe, high severity."),
+    "ssh-fast": ("Fast SSH brute force", "After 5 attempts fail2ban bans the address: the last attempts get no answer."),
+    "intrusion": ("Slow intrusion and successful login", "A scan, 4 wrong passwords below the threshold, then the login: LoginAfterFailures, critical severity."),
+    "inside": ("The intruder inside the server", "Falco sees what it does after login: reads /etc/shadow, adds an SSH key, starts a miner, wipes wtmp. All tied to its address, critical severity."),
+    "backdoor": ("Backdoor that calls home", "After login, lab-01 calls the control server: Suricata sees it, CommandAndControl, critical severity."),
+    "web-scan": ("Website scan", "Requests to .env, .git, WordPress, phpMyAdmin: WebVulnerabilityScan, nginx-botsearch ban."),
+    "web-exploit": ("Web exploit attempts", "SQL injection, path traversal, PHPUnit, command injection, Log4Shell: WebExploitAttempt, high severity."),
+    "hidden-post": ("Attack hidden in the contact form", "SQL injection, XSS and commands in the POST body: the nginx log shows only «POST /contatti.html 200»; "
+                    "ModSecurity sees them: WebExploitAttempt, high severity. The first message is legitimate and must not be flagged."),
+    "web-login": ("Brute force on the reserved area", "Wrong passwords on /admin/: WebLoginBruteForce, nginx-http-auth ban."),
+    "flood": ("Request flood", "nginx rate-limits the requests (429): RequestFlood, nginx-limit-req ban."),
+    "campaign": ("Distributed campaign on one account", "12 addresses, 2 attempts each on the scada account: no ban, a DistributedSshBruteForce campaign."),
+    "msf-web": ("Metasploit · web scan", "Metasploit http modules against lab-01 (version, robots, directories): a real attack, not hand-written. "
+                "Suricata and ModSecurity see it: WebVulnerabilityScan. Uses the lab's Metasploit container (make lab-up-msf if it is stopped)."),
+    "msf-ssh": ("Metasploit · SSH brute force", "Metasploit's ssh_login module tries several passwords on lab-01: fail2ban bans the attacker "
+                "(for a few minutes also the other Metasploit scenarios, which start from the same address). "
+                "Uses the lab's Metasploit container (make lab-up-msf if it is stopped)."),
+    "msf-industrial": ("Metasploit · Modbus probe", "Metasploit's SCADA Modbus modules against lab-01's port 502: IndustrialProtocolProbe. "
+                       "Uses the lab's Metasploit container (make lab-up-msf if it is stopped) and port 502 open."),
+    "vpn-scan": ("Look for the VPN", "lab-01's UDP port 51820 does not answer («open|filtered»): WireGuard ignores anyone without a key. "
+                 "There is nothing to see in the logs, and that is as it should be."),
+    "vpn-wrong-key": ("Knock on the VPN with an unknown key", "The attacker knows the server's address and public key, but its key is not among the "
+                      "customer's: no handshake, no answer. The server logs no failed attempts: the page does not change."),
+    "vpn-stolen": ("An employee's key used from another country", "anna's lost laptop VPN file, used from Bucharest: the VPN accepts it and the attacker is "
+                   "on the network. Within a minute lab-01's page highlights anna-portatile from Bucharest and «What to improve» suggests, high severity, "
+                   "sudo xrc-vpn revoke anna-portatile."),
+    "ai-injection": ("Hidden instructions for the assistant", "Page addresses, user agents and SSH usernames written for the AI that reads the logs («ignore "
+                     "previous instructions», role tokens, invisible text in Unicode tag characters): AiPromptInjection, high severity. The assistant quotes "
+                     "them as evidence, does not execute them, and the numbers stay the ones computed by the package."),
+    "ai-hunt": ("Hunt for AI services and the chatbot", "Requests to Ollama, OpenAI-compatible APIs, MCP and Gradio (404) and their ports "
+                "(11434, 1234, 7860, 8188, 6333, 19530): AiServiceProbe. Then a message to the chatbot and one to the contact form written to take over "
+                "the model: the nginx log sees only «POST», ModSecurity reads the body: AiPromptInjection, high severity."),
+    "full-night": ("The full night (in sequence)", "The whole sequence: recon, the noisy attacks that fail2ban bans, the slow intruder that gets in, "
+                   "what it does inside and the backdoor. About four minutes."),
+}
+
+# City/country tokens that differ in English; anything not listed passes through unchanged.
+_PLACE_EN = {
+    "Mosca": "Moscow", "Seul": "Seoul", "San Pietroburgo": "Saint Petersburg", "San Paolo": "São Paulo", "Bucarest": "Bucharest",
+    "Moldavia": "Moldova", "Corea del Sud": "South Korea", "Stati Uniti": "United States", "Brasile": "Brazil", "Cina": "China",
+    "Paesi Bassi": "Netherlands", "connessioni domestiche": "home connections", "più città": "multiple cities",
+}
+_SOURCE_EN = {"più indirizzi": "multiple addresses"}
+
+
+def _place_en(place):
+    return ", ".join(_PLACE_EN.get(part, part) for part in place.split(", "))
+
+
 def describe():
     msf_ok = metasploit_available()
-    return [{"id": s["id"], "title": s["title"], "source": s["source"], "web": s.get("web", False),
-             "msf": s.get("msf", False), "available": msf_ok or not s.get("msf", False),
-             "phase": s.get("phase", "Tutto"), "real": s.get("real", False),
-             "place": PERSONAS.get(s["source"], "connessioni domestiche" if s["id"] == "campaign" else "più città"),
-             "expect": s["expect"]} for s in SCENARIOS]
+    out = []
+    for s in SCENARIOS:
+        place = PERSONAS.get(s["source"], "connessioni domestiche" if s["id"] == "campaign" else "più città")
+        title_en, expect_en = SCENARIOS_EN.get(s["id"], (s["title"], s["expect"]))
+        out.append({"id": s["id"], "title": s["title"], "title_en": title_en,
+                    "source": s["source"], "source_en": _SOURCE_EN.get(s["source"], s["source"]),
+                    "web": s.get("web", False), "msf": s.get("msf", False),
+                    "available": msf_ok or not s.get("msf", False),
+                    "phase": s.get("phase", "Tutto"), "real": s.get("real", False),
+                    "place": place, "place_en": _place_en(place),
+                    "expect": s["expect"], "expect_en": expect_en})
+    return out
 
 
 def web_endpoint_of(target):
