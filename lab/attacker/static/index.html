@@ -64,6 +64,13 @@ body::after {
 .brief .tag { font: 700 10px ui-monospace, Menlo, monospace; letter-spacing: .2em; color: var(--cyan); text-transform: uppercase; }
 .brief p { margin-top: 5px; color: #cdddea; max-width: 94ch; }
 .brief b { color: var(--text); }
+.brief details { margin-top: 9px; border-top: 1px solid var(--line); padding-top: 9px; }
+.brief summary { cursor: pointer; color: var(--cyan); font: 600 12px ui-monospace, Menlo, monospace; letter-spacing: .03em; list-style: none; }
+.brief summary::-webkit-details-marker { display: none; }
+.brief summary::before { content: "▸ "; }
+.brief details[open] summary::before { content: "▾ "; }
+.brief details ul { margin: 9px 0 0; padding-left: 20px; display: flex; flex-direction: column; gap: 7px; }
+.brief details li { color: #cdddea; line-height: 1.55; max-width: 94ch; }
 
 /* ── layout ──────────────────────────────────────────────────────────── */
 .grid { margin-top: 18px; display: grid; grid-template-columns: 340px 1fr; gap: 18px; align-items: start; }
@@ -175,7 +182,7 @@ input:focus { outline: none; border-color: var(--cyan-dim); box-shadow: 0 0 0 2p
       </h1>
     </div>
     <div class="meta">
-      <div><span class="k">Bersaglio</span>lab-01 · Alveo Energia</div>
+      <div><span class="k">Bersaglio</span>lab-01 · "Alveo Energia" (finta azienda)</div>
       <div><span class="k">Orario missione</span><span class="clock" id="clock">--:--:--</span></div>
     </div>
   </div>
@@ -183,10 +190,19 @@ input:focus { outline: none; border-color: var(--cyan-dim); box-shadow: 0 0 0 2p
   <div class="brief">
     <span class="tag">⚠ Briefing</span>
     <p>Questi <b>non sono attacchi finti</b>. Sono gli stessi strumenti dei veri criminali informatici — <b>Metasploit</b>,
-    <b>nmap</b>, forza bruta SSH, exploit web — lanciati contro un bersaglio di laboratorio. Servono a vedere, dal vivo, cosa il
-    toolkit riesce a <b>rilevare e fermare</b>. Gli attacchi sono in ordine: come in una vera intrusione, parti dall'alto e scendi.
-    La pagina di monitoraggio del server (la mappa e gli attacchi ricevuti) è su
-    <a href="http://localhost:8089/" target="_blank" rel="noopener">localhost:8089</a>.</p>
+    <b>nmap</b>, forza bruta SSH, exploit web — lanciati contro un bersaglio di laboratorio (<b>lab-01</b>, la finta azienda
+    "Alveo Energia"). Servono a vedere, dal vivo, cosa il toolkit riesce a <b>rilevare e fermare</b>. Gli attacchi sono in
+    ordine: come in una vera intrusione, parti dall'alto e scendi. La mappa e gli attacchi ricevuti sono sulla pagina di
+    monitoraggio del server, su <a href="http://localhost:8089/" target="_blank" rel="noopener">localhost:8089</a>.</p>
+    <details>
+      <summary>Come funzionano gli attacchi, e perché la mappa mostra città in tutto il mondo</summary>
+      <ul>
+        <li><b>Strumenti veri, traffico vero.</b> nmap, Metasploit, forza bruta SSH ed exploit web generano pacchetti reali verso lab-01: non c'è niente di simulato nell'attacco.</li>
+        <li><b>Bersaglio vero.</b> lab-01 è un server reale con il toolkit e le difese attive — fail2ban, Falco, Suricata, ModSecurity, limiti di nginx: sono queste a rilevare e bloccare.</li>
+        <li><b>Indirizzo di partenza finto.</b> Gli attacchi partono da indirizzi di documentazione (RFC 5737), che su internet non esistono. Il toolkit assegna a ciascuno una città inventata: per questo sulla mappa vedi IP sparsi per il mondo. <b>L'origine geografica è finta, l'attacco è reale.</b></li>
+        <li><b>Eccezione Metasploit.</b> Metasploit non falsifica l'indirizzo: parte dall'indirizzo del suo container (sulla mappa, Ashburn), come lo vedrebbero le difese di un vero server.</li>
+      </ul>
+    </details>
   </div>
 
   <div class="grid">
