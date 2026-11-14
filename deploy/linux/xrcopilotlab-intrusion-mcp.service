@@ -23,6 +23,12 @@ EnvironmentFile=-/etc/xrcopilotlab-intrusion-mcp/site.env
 Restart=on-failure
 RestartSec=5
 
+# The server's own state, the only thing it writes: the advice a person approved in the SOC process and sent back
+# (/api/advice), kept so it survives a restart. systemd makes /var/lib/xrcopilotlab-intrusion-mcp and sets $STATE_DIRECTORY,
+# writable even with ProtectSystem=strict.
+StateDirectory=xrcopilotlab-intrusion-mcp
+StateDirectoryMode=0750
+
 # Hardening: read-only system, no privilege escalation, only the network it needs.
 NoNewPrivileges=true
 ProtectSystem=strict

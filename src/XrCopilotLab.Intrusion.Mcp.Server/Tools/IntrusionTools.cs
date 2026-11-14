@@ -1,7 +1,9 @@
 using System.ComponentModel;
 using ModelContextProtocol.Server;
+using XrCopilotLab.Intrusion.Mcp.Core.Advice;
 using XrCopilotLab.Intrusion.Mcp.Core.Guard;
 using XrCopilotLab.Intrusion.Mcp.Core.Queries;
+using XrCopilotLab.Intrusion.Mcp.Server.Advice;
 
 namespace XrCopilotLab.Intrusion.Mcp.Server.Tools;
 
@@ -10,7 +12,7 @@ namespace XrCopilotLab.Intrusion.Mcp.Server.Tools;
 /// simulated host) and never ban, unban or change anything. Every answer says whether the data is simulated.
 /// </summary>
 [McpServerToolType]
-public sealed class IntrusionTools(IntrusionQueries queries, GuardQueries guard, TimeProvider clock)
+public sealed class IntrusionTools(IntrusionQueries queries, GuardQueries guard, AdviceStore advice, TimeProvider clock)
 {
     private const string SlotHelp =
         "For a scheduled round: the last complete slot of this many minutes aligned to the clock (30 at 10:47 = 10:00-10:30), " +
@@ -155,4 +157,14 @@ public sealed class IntrusionTools(IntrusionQueries queries, GuardQueries guard,
         var now = clock.GetUtcNow();
         return guard.Posture(now, queries.Resolve(now, hours ?? GuardQueries.DefaultPostureHours, since, until));
     }
+
+    [McpServerTool(Name = "intrusion_advice", ReadOnly = true),
+     Description(
+        "The hardening advice a person approved in the SOC process and sent to this server, newest first: the finding it " +
+        "came from, the address, the severity, the recommendation and its fix command, who approved it and when, and " +
+        "whether it is still to do or marked done. This server only shows it: it never applies a recommendation and never " +
+        "runs a command. Use it to tell the user what has already been decided (\"already sent on …\").")]
+    public IReadOnlyList<AdviceItem> Advice(
+        [Description("Only advice received in the last this many hours. Null = everything kept (up to 500).")] int? hours = null)
+        => advice.List(clock.GetUtcNow(), hours);
 }

@@ -139,9 +139,15 @@ body.map-only main { grid-template-rows: 1fr 300px; }
       <div class="findings" id="findings"><span class="muted">…</span></div>
     </div>
 
+    <div id="advice-box" hidden>
+      <h2>Da sistemare <span class="muted" style="text-transform:none;letter-spacing:0">· approvati dall'analista</span></h2>
+      <div class="findings" id="advice"></div>
+    </div>
+
     <div class="muted" style="font-size:12px">
       Questa pagina legge soltanto: non banna, non blocca e non cambia niente sul server. I comandi suggeriti vanno
-      eseguiti da chi amministra il server.
+      eseguiti da chi amministra il server. I consigli in «Da sistemare» sono quelli che un analista ha approvato nel
+      processo SOC e inviati qui: il server li mostra soltanto, non li applica.
     </div>
   </aside>
 
@@ -513,6 +519,39 @@ function drawFindings(p) {
   $("findings").innerHTML = items.length ? items.join("") : `<span class="muted">Niente da segnalare.</span>`;
 }
 
+// What a person approved in the SOC process and sent back (/api/advice). Shown only, never applied. Every field is
+// text chosen upstream, so it is escaped here and never put into the page as HTML.
+function drawAdvice(list) {
+  const items = (list || []).map(a => {
+    const done = a.status === "done";
+    const from = a.findingId ? "dal controllo " + a.findingId : "inviato dal processo SOC";
+    return `<div class="finding ${esc(a.severity)}"${done ? ' style="opacity:.55"' : ""}>
+      <b>${esc(a.title)}</b>
+      <p>${esc(a.recommendation)}</p>
+      ${a.command ? `<code>${esc(a.command)}</code>` : ""}
+      <details><summary>approvato da ${esc(a.approvedBy)} · ${esc(ago(a.approvedAt))}${a.ip ? " · " + esc(a.ip) : ""} · gravità ${esc(SEVERITY[a.severity] || a.severity)}</summary>${esc(from)}</details>
+      <div style="margin-top:6px">${done
+        ? `<span class="muted" style="font-size:12px">✓ fatto${a.doneAt ? " · " + esc(ago(a.doneAt)) : ""}</span>`
+        : `<button class="advice-done" data-id="${esc(a.id)}" style="font-size:12px;padding:3px 8px;cursor:pointer">segna fatto</button>`}</div>
+    </div>`;
+  });
+  $("advice-box").hidden = !items.length;
+  $("advice").innerHTML = items.join("");
+}
+
+// Mark one advice done from the page. This updates the advice list only; it never touches the host.
+async function adviceDone(id) {
+  const r = await fetch("api/advice/" + encodeURIComponent(id) + "/done", { method: "POST", headers: key ? { "X-API-Key": key } : {} });
+  if (r.status === 401) { $("login").classList.add("on"); throw "chiave mancante"; }
+  if (!r.ok) throw r.status;
+}
+$("advice").addEventListener("click", async (e) => {
+  const btn = e.target.closest(".advice-done");
+  if (!btn) return;
+  btn.disabled = true;
+  try { await adviceDone(btn.dataset.id); await refreshGuard(); } catch { btn.disabled = false; }
+});
+
 async function refresh() {
   try {
     const hours = $("hours").value;
@@ -532,8 +571,8 @@ async function refresh() {
 
 async function refreshGuard() {
   try {
-    const [g, p, v] = await Promise.all([api("guardians"), api("posture"), api("vpn").catch(() => ({ installed: false }))]);
-    drawGuardians(g); drawFindings(p); drawVpn(v);
+    const [g, p, v, a] = await Promise.all([api("guardians"), api("posture"), api("vpn").catch(() => ({ installed: false })), api("advice?hours=168").catch(() => [])]);
+    drawGuardians(g); drawFindings(p); drawVpn(v); drawAdvice(a);
   } catch { }
 }
 

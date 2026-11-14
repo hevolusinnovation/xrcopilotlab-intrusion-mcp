@@ -1,5 +1,7 @@
+using XrCopilotLab.Intrusion.Mcp.Core.Advice;
 using XrCopilotLab.Intrusion.Mcp.Core.Guard;
 using XrCopilotLab.Intrusion.Mcp.Core.Queries;
+using XrCopilotLab.Intrusion.Mcp.Server.Advice;
 
 namespace XrCopilotLab.Intrusion.Mcp.Server;
 
@@ -61,6 +63,40 @@ public static class RestApi
             var now = clock.GetUtcNow();
             return g.Posture(now, q.Resolve(now, hours ?? GuardQueries.DefaultPostureHours, since, until));
         });
+
+        // The one write face: the SOC process posts advice a person approved, so the page and the agent can show what
+        // has been decided. It is only stored and shown — the toolkit never applies it or runs a command.
+        var advice = api.MapGroup("/advice");
+
+        advice.MapPost("", (AdviceRequest body, AdviceStore store, TimeProvider clock) =>
+        {
+            try
+            {
+                var (item, created) = store.Upsert(body, clock.GetUtcNow());
+                return Results.Json(
+                    new { id = item.Id, status = created ? "received" : "updated" },
+                    statusCode: created ? StatusCodes.Status201Created : StatusCodes.Status200OK);
+            }
+            catch (AdviceValidationException ex)
+            {
+                return Results.Problem(detail: ex.Message, statusCode: StatusCodes.Status400BadRequest);
+            }
+        }).AddEndpointFilter(RejectOversized);
+
+        advice.MapGet("", (AdviceStore store, TimeProvider clock, int? hours) => store.List(clock.GetUtcNow(), hours));
+
+        advice.MapPost("/{id}/done", (string id, AdviceStore store, TimeProvider clock) =>
+            store.MarkDone(id, clock.GetUtcNow())
+                ? Results.Ok(new { id = id.Trim(), status = AdviceLimits.StatusDone })
+                : Results.NotFound());
+    }
+
+    // 413 for a body over the cap, before the handler runs. The caller is trusted (it has the key); this guards a mistake.
+    private static async ValueTask<object?> RejectOversized(EndpointFilterInvocationContext ctx, EndpointFilterDelegate next)
+    {
+        if (ctx.HttpContext.Request.ContentLength is long len && len > AdviceLimits.MaxBodyBytes)
+            return Results.StatusCode(StatusCodes.Status413PayloadTooLarge);
+        return await next(ctx);
     }
 
     // A builder tool sends an empty value for an argument the model left out: treat it as no filter.

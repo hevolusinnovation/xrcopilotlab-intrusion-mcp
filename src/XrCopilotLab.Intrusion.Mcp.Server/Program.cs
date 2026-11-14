@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.Extensions.Options;
 using OpenTelemetry.Instrumentation.AspNetCore;
 using OpenTelemetry.Trace;
+using XrCopilotLab.Intrusion.Mcp.Core.Advice;
 using XrCopilotLab.Intrusion.Mcp.Core.Analysis;
 using XrCopilotLab.Intrusion.Mcp.Core.Geo;
 using XrCopilotLab.Intrusion.Mcp.Core.Guard;
@@ -12,6 +13,7 @@ using XrCopilotLab.Intrusion.Mcp.Core.Queries;
 using XrCopilotLab.Intrusion.Mcp.Core.Simulation;
 using XrCopilotLab.Intrusion.Mcp.Core.Sources;
 using XrCopilotLab.Intrusion.Mcp.Server;
+using XrCopilotLab.Intrusion.Mcp.Server.Advice;
 using XrCopilotLab.Intrusion.Mcp.Server.Authentication;
 using XrCopilotLab.Intrusion.Mcp.Server.Sources;
 using XrCopilotLab.Intrusion.Mcp.Server.Tools;
@@ -73,6 +75,8 @@ builder.Services.AddSingleton<IntrusionQueries>();
 builder.Services.AddSingleton(builder.Configuration.GetSection(SiteOptions.SectionName).Get<SiteOptions>() ?? new SiteOptions());
 builder.Services.AddSingleton<ISiteLocation, HttpSiteLocation>();
 builder.Services.AddSingleton<GuardQueries>();
+builder.Services.AddSingleton(builder.Configuration.GetSection(AdviceOptions.SectionName).Get<AdviceOptions>() ?? new AdviceOptions());
+builder.Services.AddSingleton<AdviceStore>();
 builder.Services.AddScoped<IntrusionTools>();
 
 // Stateless HTTP transport: nothing is kept between calls, so the Container App of the demo scales to zero.
