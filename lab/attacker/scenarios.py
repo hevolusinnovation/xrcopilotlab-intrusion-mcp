@@ -92,11 +92,19 @@ def ssh_try(source, user, password, log, command="true", script=None):
     target = target_for(source)
     if script is not None:
         command = "bash -s"
-    r = subprocess.run(
-        ["sshpass", "-p", password, "ssh", "-b", source, "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null",
-         "-o", "PreferredAuthentications=password", "-o", "PubkeyAuthentication=no", "-o", "NumberOfPasswordPrompts=1",
-         "-o", "ConnectTimeout=4", "-o", "LogLevel=ERROR", f"{user}@{target}", command],
-        input=script, capture_output=True, text=True, timeout=30)
+    try:
+        r = subprocess.run(
+            ["sshpass", "-p", password, "ssh", "-b", source, "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null",
+             "-o", "PreferredAuthentications=password", "-o", "PubkeyAuthentication=no", "-o", "NumberOfPasswordPrompts=1",
+             "-o", "ConnectTimeout=4", "-o", "ServerAliveInterval=3", "-o", "ServerAliveCountMax=2", "-o", "LogLevel=ERROR",
+             f"{user}@{target}", command],
+            input=script, capture_output=True, text=True, timeout=30)
+    except subprocess.TimeoutExpired:
+        # fail2ban can DROP the address mid-session, after the connection is already open: ConnectTimeout does not apply
+        # and ssh would hang. ServerAlive* cuts it short; if it still times out, it is a block, not a reason to fail the run.
+        log(f"{source} → ssh {user}: nessuna risposta (bloccato da fail2ban o dal firewall)",
+            f"{source} → ssh {user}: no answer (blocked by fail2ban or the firewall)")
+        return "blocked"
     if r.returncode == 0:
         log(f"{source} → ssh {user}: ACCESSO RIUSCITO", f"{source} → ssh {user}: ACCESS GRANTED")
         for line in r.stdout.strip().splitlines()[:4]:
