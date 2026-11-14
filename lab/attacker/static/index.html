@@ -3,91 +3,234 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Laboratorio intrusioni</title>
+<title>Sala operativa · Laboratorio intrusioni</title>
 <style>
 :root {
-  --bg: #0f1419; --panel: #161d24; --line: #26313b; --text: #e6edf3; --muted: #8b98a5;
-  --accent: #4aa3ff; --medium: #e3b341; --critical: #f85149; --ok: #3fb950;
+  --bg: #05080c; --bg2: #070d14; --panel: #0b131c; --panel2: #0e1922; --line: #1c2a38;
+  --text: #e8f1f8; --muted: #7f93a6; --faint: #4c6076;
+  --cyan: #38e1ff; --cyan-dim: #1a7f96;
+  --amber: #ffb84a; --green: #3fe08a; --red: #ff4d57; --red-glow: rgba(255,77,87,.45);
+  --grid: rgba(56,225,255,.045);
 }
 * { box-sizing: border-box; margin: 0; padding: 0; }
-html, body { min-height: 100%; background: var(--bg); color: var(--text); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
-.page { max-width: 1180px; margin: 0 auto; padding: 20px 16px 32px; display: grid; grid-template-columns: 360px 1fr; gap: 20px; align-items: start; }
-header { grid-column: 1 / -1; display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
-h1 { font-size: 18px; font-weight: 600; }
-h1 small { display: block; color: var(--muted); font-size: 12px; font-weight: 400; margin-top: 2px; }
-h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 600; margin-bottom: 8px; }
-.side, .main { display: flex; flex-direction: column; gap: 18px; min-width: 0; }
-.scenarios { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 8px; }
-.scenario { display: flex; flex-direction: column; justify-content: flex-start; text-align: left; background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; cursor: pointer; font: inherit; }
-.scenario:hover:not(:disabled) { border-color: var(--accent); }
-.scenario:disabled { opacity: .45; cursor: default; }
-.scenario.running { border-color: var(--medium); opacity: 1; }
-.scenario b { display: block; font-weight: 600; }
-.scenario span { color: var(--muted); font-size: 12px; }
-.scenario .expect { display: block; margin-top: 3px; font-size: 12px; color: var(--muted); }
-.phase { margin-bottom: 14px; }
-.phase-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 6px; }
-.phase-head .n { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 50%; background: var(--line); color: var(--text); font-size: 11px; font-weight: 700; }
-.phase-head h3 { font-size: 13px; font-weight: 600; }
-.phase-head p { color: var(--muted); font-size: 12px; margin-left: auto; }
-.badge { display: inline-block; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; padding: 1px 6px; border-radius: 10px; margin-left: 6px; vertical-align: 1px; }
-.badge.real { background: rgba(63,185,80,.18); color: var(--ok); }
-.log { background: #0b0f13; border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; min-height: 120px; max-height: 320px; overflow-y: auto; white-space: pre-wrap; }
-.log .t { color: var(--muted); }
-.log .ok { color: var(--critical); font-weight: 600; }
-.muted { color: var(--muted); }
-.error { color: var(--critical); font-size: 12px; }
-input { background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 4px 6px; font: inherit; }
-.tunnel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
-.tunnel .state { font-size: 13px; }
-.tunnel .state b.on { color: var(--ok); } .tunnel .state b.off { color: var(--muted); } .tunnel .state b.err { color: var(--critical); }
-.tunnel .code { font: 600 20px ui-monospace, Menlo, monospace; letter-spacing: .12em; }
-.tunnel .field { display: flex; gap: 6px; align-items: center; }
-.tunnel .field code { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; background: #0b0f13; border: 1px solid var(--line); border-radius: 6px; padding: 4px 6px; font-size: 12px; }
-.tunnel .label { color: var(--muted); font-size: 11px; }
-.btn { background: var(--accent); color: #0b0f13; border: 0; border-radius: 6px; padding: 5px 10px; font: 600 12px system-ui, sans-serif; cursor: pointer; text-decoration: none; display: inline-block; }
-.btn.ghost { background: transparent; color: var(--text); border: 1px solid var(--line); }
-.btn:disabled { opacity: .5; cursor: default; }
-.tunnel a { color: var(--accent); }
-@media (max-width: 900px) { .page { grid-template-columns: 1fr; } }
+html, body { min-height: 100%; }
+body {
+  background:
+    radial-gradient(1200px 600px at 78% -5%, rgba(56,225,255,.10), transparent 60%),
+    radial-gradient(900px 500px at 10% 110%, rgba(255,77,87,.08), transparent 55%),
+    linear-gradient(180deg, var(--bg2), var(--bg));
+  color: var(--text);
+  font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+  letter-spacing: .1px;
+}
+/* faint tactical grid + scanline, never in the way of the text */
+body::before {
+  content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 0; opacity: .5;
+  background-image: linear-gradient(var(--grid) 1px, transparent 1px), linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+body::after {
+  content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 0;
+  background: repeating-linear-gradient(180deg, rgba(0,0,0,0) 0 2px, rgba(0,0,0,.14) 3px);
+  mix-blend-mode: multiply; animation: scan 9s linear infinite; opacity: .5;
+}
+@keyframes scan { from { transform: translateY(-4px); } to { transform: translateY(4px); } }
+@media (prefers-reduced-motion: reduce) { body::after { animation: none; } }
+
+.page { position: relative; z-index: 1; max-width: 1240px; margin: 0 auto; padding: 18px 16px 40px; }
+
+/* ── header / mission bar ────────────────────────────────────────────── */
+.bar {
+  display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap;
+  border: 1px solid var(--line); border-radius: 12px; padding: 12px 16px;
+  background: linear-gradient(180deg, rgba(56,225,255,.06), rgba(11,19,28,.7));
+  box-shadow: inset 0 0 0 1px rgba(56,225,255,.04);
+}
+.brand { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.live { display: inline-flex; align-items: center; gap: 7px; font: 700 10px/1 ui-monospace, Menlo, monospace;
+  letter-spacing: .18em; color: var(--red); text-transform: uppercase; padding: 5px 9px; border: 1px solid var(--red-glow);
+  border-radius: 999px; background: rgba(255,77,87,.08); white-space: nowrap; }
+.live .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--red); box-shadow: 0 0 10px var(--red); animation: blink 1.4s steps(1) infinite; }
+@keyframes blink { 50% { opacity: .25; } }
+.brand h1 { font: 700 16px/1.1 system-ui, sans-serif; letter-spacing: .02em; }
+.brand h1 small { display: block; color: var(--muted); font: 400 11.5px/1.3 system-ui, sans-serif; letter-spacing: .02em; margin-top: 3px; }
+.meta { display: flex; align-items: center; gap: 18px; font: 500 11px ui-monospace, Menlo, monospace; color: var(--muted); letter-spacing: .08em; text-align: right; }
+.meta .clock { font-size: 19px; color: var(--cyan); letter-spacing: .14em; text-shadow: 0 0 14px rgba(56,225,255,.4); }
+.meta .k { display: block; font-size: 9.5px; color: var(--faint); text-transform: uppercase; letter-spacing: .16em; }
+
+/* ── briefing banner (for non-experts) ───────────────────────────────── */
+.brief { margin-top: 16px; border: 1px solid var(--line); border-left: 3px solid var(--cyan); border-radius: 10px;
+  padding: 13px 16px; background: linear-gradient(90deg, rgba(56,225,255,.06), rgba(11,19,28,.55)); }
+.brief .tag { font: 700 10px ui-monospace, Menlo, monospace; letter-spacing: .2em; color: var(--cyan); text-transform: uppercase; }
+.brief p { margin-top: 5px; color: #cdddea; max-width: 94ch; }
+.brief b { color: var(--text); }
+
+/* ── layout ──────────────────────────────────────────────────────────── */
+.grid { margin-top: 18px; display: grid; grid-template-columns: 340px 1fr; gap: 18px; align-items: start; }
+.side, .main { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.card-box { border: 1px solid var(--line); border-radius: 12px; background: linear-gradient(180deg, var(--panel2), var(--panel)); overflow: hidden; }
+.card-box > h2 { font: 700 10.5px ui-monospace, Menlo, monospace; text-transform: uppercase; letter-spacing: .18em; color: var(--muted);
+  padding: 11px 14px; border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 8px; }
+.card-box > h2 .pip { width: 6px; height: 6px; border-radius: 50%; background: var(--cyan); box-shadow: 0 0 8px var(--cyan); }
+.card-pad { padding: 14px; }
+
+/* ── target lock ─────────────────────────────────────────────────────── */
+.target { display: flex; flex-direction: column; gap: 12px; }
+.reticle { display: grid; grid-template-columns: 54px 1fr; gap: 12px; align-items: center; }
+.scope { position: relative; width: 54px; height: 54px; }
+.scope i { position: absolute; inset: 0; border: 1px solid var(--cyan-dim); border-radius: 50%; }
+.scope i.r2 { inset: 9px; border-color: rgba(56,225,255,.35); }
+.scope i.spin { inset: -3px; border: 1px dashed rgba(56,225,255,.5); border-top-color: var(--cyan); animation: rot 4.5s linear infinite; }
+.scope::before, .scope::after { content: ""; position: absolute; background: rgba(56,225,255,.5); }
+.scope::before { left: 50%; top: 6px; bottom: 6px; width: 1px; transform: translateX(-.5px); }
+.scope::after { top: 50%; left: 6px; right: 6px; height: 1px; transform: translateY(-.5px); }
+.scope b { position: absolute; left: 50%; top: 50%; width: 7px; height: 7px; margin: -3.5px 0 0 -3.5px; border-radius: 50%;
+  background: var(--green); box-shadow: 0 0 10px var(--green); }
+@keyframes rot { to { transform: rotate(360deg); } }
+.lock .state { font: 600 14px system-ui, sans-serif; }
+.lock .state b.on { color: var(--green); text-shadow: 0 0 10px rgba(63,224,138,.4); }
+.lock .state .sub { display: block; color: var(--muted); font: 400 11.5px ui-monospace, Menlo, monospace; letter-spacing: .04em; margin-top: 2px; }
+.label { color: var(--muted); font-size: 11.5px; }
+.field { display: flex; gap: 6px; }
+input { background: #05090d; color: var(--text); border: 1px solid var(--line); border-radius: 7px; padding: 7px 9px;
+  font: 13px ui-monospace, Menlo, monospace; flex: 1; min-width: 0; }
+input:focus { outline: none; border-color: var(--cyan-dim); box-shadow: 0 0 0 2px rgba(56,225,255,.12); }
+.btn { background: linear-gradient(180deg, var(--cyan), #15c3e6); color: #04121a; border: 0; border-radius: 7px; padding: 8px 12px;
+  font: 700 12px system-ui, sans-serif; cursor: pointer; letter-spacing: .02em; white-space: nowrap; }
+.btn:hover { box-shadow: 0 0 16px rgba(56,225,255,.35); }
+.btn.ghost { background: transparent; color: var(--muted); border: 1px solid var(--line); }
+.btn.ghost:hover { color: var(--text); border-color: var(--cyan-dim); box-shadow: none; }
+.btn:disabled { opacity: .45; cursor: default; box-shadow: none; }
+#target-msg { font-size: 11.5px; }
+#target-msg .ok { color: var(--green); } #target-msg .err { color: var(--red); }
+.sidenote { color: var(--muted); font-size: 11.5px; line-height: 1.55; }
+.sidenote a, .brief a { color: var(--cyan); }
+
+/* ── kill chain ──────────────────────────────────────────────────────── */
+.chain-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-bottom: 4px; }
+.chain-head h2 { font: 700 12px system-ui, sans-serif; text-transform: uppercase; letter-spacing: .1em; color: var(--text); }
+.chain-head .err { color: var(--red); font: 500 12px system-ui; letter-spacing: 0; text-transform: none; }
+.legend { display: flex; gap: 14px; font: 500 10.5px ui-monospace, Menlo, monospace; color: var(--muted); letter-spacing: .04em; flex-wrap: wrap; }
+.legend span { display: inline-flex; align-items: center; gap: 5px; }
+.legend i { width: 9px; height: 9px; border-radius: 2px; }
+.legend i.hit { background: var(--red); box-shadow: 0 0 6px var(--red-glow); } .legend i.block { background: var(--green); }
+
+.phase { position: relative; padding: 0 0 6px 46px; }
+.phase::before { content: ""; position: absolute; left: 15px; top: 30px; bottom: -12px; width: 2px;
+  background: linear-gradient(180deg, var(--cyan-dim), rgba(56,225,255,.06)); }
+.phase:last-child::before { display: none; }
+.phase .n { position: absolute; left: 0; top: 2px; width: 32px; height: 32px; border-radius: 9px;
+  display: flex; align-items: center; justify-content: center; font: 800 14px ui-monospace, Menlo, monospace;
+  color: var(--cyan); background: var(--panel2); border: 1px solid var(--cyan-dim); box-shadow: 0 0 0 4px var(--bg), inset 0 0 12px rgba(56,225,255,.12); }
+.phase-head { margin-bottom: 9px; }
+.phase-head h3 { font: 700 14px system-ui, sans-serif; }
+.phase-head p { color: var(--muted); font-size: 12px; margin-top: 2px; max-width: 80ch; }
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(248px, 1fr)); gap: 9px; }
+
+.scenario { position: relative; text-align: left; display: flex; flex-direction: column; gap: 4px; cursor: pointer; font: inherit;
+  color: var(--text); background: linear-gradient(180deg, rgba(14,25,34,.9), rgba(9,16,23,.9)); border: 1px solid var(--line);
+  border-radius: 10px; padding: 11px 12px; transition: border-color .15s, box-shadow .15s, transform .15s; }
+.scenario:hover:not(:disabled) { border-color: var(--cyan-dim); box-shadow: 0 0 0 1px rgba(56,225,255,.18), 0 6px 20px rgba(0,0,0,.4); transform: translateY(-1px); }
+.scenario:disabled { opacity: .4; cursor: default; }
+.scenario .title { font: 700 13px system-ui, sans-serif; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.scenario .origin { font: 500 11px ui-monospace, Menlo, monospace; color: var(--faint); letter-spacing: .03em; }
+.scenario .expect { font-size: 11.5px; color: var(--muted); line-height: 1.5; margin-top: 2px; }
+.scenario .expect::before { content: "▸ "; color: var(--cyan-dim); }
+.scenario.running { border-color: var(--amber); box-shadow: 0 0 0 1px var(--amber), 0 0 24px rgba(255,184,74,.25); }
+.scenario.running::after { content: "IN AZIONE"; position: absolute; top: 10px; right: 10px; font: 800 9px ui-monospace, Menlo, monospace;
+  letter-spacing: .14em; color: var(--amber); animation: blink 1s steps(1) infinite; }
+.badge { font: 800 9px ui-monospace, Menlo, monospace; letter-spacing: .1em; text-transform: uppercase; padding: 2px 6px; border-radius: 5px; }
+.badge.real { color: var(--amber); background: rgba(255,184,74,.12); border: 1px solid rgba(255,184,74,.4); }
+
+/* ── live feed / terminal ────────────────────────────────────────────── */
+.feed-top { display: flex; align-items: center; gap: 8px; }
+.feed-top .dots { display: flex; gap: 5px; }
+.feed-top .dots i { width: 9px; height: 9px; border-radius: 50%; background: #2a3a48; }
+.feed-top .dots i:nth-child(1) { background: #ff5f57; } .feed-top .dots i:nth-child(2) { background: #febc2e; } .feed-top .dots i:nth-child(3) { background: #28c840; }
+.feed-status { margin-left: auto; font: 600 10.5px ui-monospace, Menlo, monospace; letter-spacing: .08em; color: var(--muted); display: flex; align-items: center; gap: 7px; }
+.feed-status .spin { width: 11px; height: 11px; border: 2px solid rgba(255,184,74,.3); border-top-color: var(--amber); border-radius: 50%; animation: rot .8s linear infinite; }
+.feed-status.go { color: var(--amber); } .feed-status.done { color: var(--green); } .feed-status.err { color: var(--red); }
+.log { background: #03070b; border-top: 1px solid var(--line); padding: 12px 14px;
+  font: 12.5px/1.65 ui-monospace, SFMono-Regular, Menlo, monospace; min-height: 240px; max-height: 440px; overflow-y: auto; white-space: pre-wrap; }
+.log .run-line { color: var(--cyan); font-weight: 600; }
+.log .t { color: var(--faint); }
+.log .hit { color: var(--red); font-weight: 700; text-shadow: 0 0 10px var(--red-glow); }
+.log .block { color: var(--green); }
+.log .msf { color: var(--cyan); }
+.log .err { color: var(--red); }
+.log .cursor { display: inline-block; width: 8px; height: 14px; background: var(--cyan); vertical-align: -2px; animation: blink 1s steps(1) infinite; box-shadow: 0 0 8px var(--cyan); }
+.log::-webkit-scrollbar { width: 9px; } .log::-webkit-scrollbar-thumb { background: #16222e; border-radius: 9px; }
+
+@media (max-width: 920px) { .grid { grid-template-columns: 1fr; } .meta { display: none; } }
 </style>
 </head>
 <body>
 <div class="page">
-  <header>
-    <h1>Attaccante<small>Strumento di test: lancia attacchi reali contro un server protetto dal toolkit e guarda cosa rileva. Bersaglio: lab-01 · Alveo Energia (azienda sintetica).</small></h1>
-    <span class="muted" style="font-size:12px;max-width:340px;text-align:right">Il Dev Tunnel, gli URL e la chiave per XRCopilotLab sono sulla pagina del server (<a href="http://localhost:8089/" target="_blank" rel="noopener">localhost:8089</a>). Qui incolli l'indirizzo e la chiave del server da attaccare.</span>
-  </header>
 
-  <div class="side">
-    <div>
-      <h2>Server da testare</h2>
-      <div class="tunnel" id="target">
-        <div class="state" id="target-state"><b class="on">● lab-01</b> · laboratorio</div>
-        <div class="label">Per provare un altro server con il pacchetto installato: il suo indirizzo API e la sua chiave. La chiave prova che amministri quel server.</div>
-        <div class="field"><input id="target-url" placeholder="indirizzo MCP o API del server (…/mcp o …/api)" style="flex:1;min-width:0"></div>
-        <div class="field"><input id="target-key" type="password" placeholder="chiave API del server" style="flex:1;min-width:0"></div>
-        <div class="field"><button class="btn" id="target-set">Verifica e usa</button><button class="btn ghost" id="target-clear">Torna a lab-01</button></div>
-        <span id="target-msg" class="muted" style="font-size:12px"></span>
-      </div>
+  <div class="bar">
+    <div class="brand">
+      <span class="live"><span class="dot"></span>Live</span>
+      <h1>Sala operativa · Attacco controllato
+        <small>Lanci gli strumenti dei veri hacker contro un bersaglio di prova e guardi, in diretta, cosa il toolkit rileva e blocca.</small>
+      </h1>
     </div>
-
-    <div class="muted" style="font-size:12px">
-      Senza un server da testare gli attacchi partono solo verso lab-01, dentro la rete del laboratorio, da indirizzi di
-      documentazione (RFC 5737) con città inventate. Verso un server esterno partono dal nostro indirizzo e solo gli
-      attacchi web, e solo dopo che la chiave ha provato che puoi già leggere quel server.
+    <div class="meta">
+      <div><span class="k">Bersaglio</span>lab-01 · Alveo Energia</div>
+      <div><span class="k">Orario missione</span><span class="clock" id="clock">--:--:--</span></div>
     </div>
   </div>
 
-  <div class="main">
-    <div>
-      <h2>Attacchi, nell'ordine di una vera intrusione <span class="error" id="error" style="text-transform:none;letter-spacing:0"></span></h2>
-      <div id="scenarios"></div>
+  <div class="brief">
+    <span class="tag">⚠ Briefing</span>
+    <p>Questi <b>non sono attacchi finti</b>. Sono gli stessi strumenti dei veri criminali informatici — <b>Metasploit</b>,
+    <b>nmap</b>, forza bruta SSH, exploit web — lanciati contro un bersaglio di laboratorio. Servono a vedere, dal vivo, cosa il
+    toolkit riesce a <b>rilevare e fermare</b>. Gli attacchi sono in ordine: come in una vera intrusione, parti dall'alto e scendi.
+    La pagina di monitoraggio del server (la mappa e gli attacchi ricevuti) è su
+    <a href="http://localhost:8089/" target="_blank" rel="noopener">localhost:8089</a>.</p>
+  </div>
+
+  <div class="grid">
+    <div class="side">
+      <div class="card-box">
+        <h2><span class="pip"></span>Bersaglio</h2>
+        <div class="card-pad target">
+          <div class="reticle">
+            <div class="scope"><i></i><i class="r2"></i><i class="spin"></i><b></b></div>
+            <div class="lock">
+              <div class="state" id="target-state"><b class="on">● lab-01</b><span class="sub">laboratorio · agganciato</span></div>
+            </div>
+          </div>
+          <div class="label">Per colpire un altro server con il toolkit installato: il suo indirizzo API e la sua chiave. La chiave prova che amministri quel server.</div>
+          <div class="field"><input id="target-url" placeholder="indirizzo MCP o API (…/mcp o …/api)"></div>
+          <div class="field"><input id="target-key" type="password" placeholder="chiave API del server"></div>
+          <div class="field"><button class="btn" id="target-set">Aggancia</button><button class="btn ghost" id="target-clear">Torna a lab-01</button></div>
+          <span id="target-msg"></span>
+        </div>
+      </div>
+      <div class="sidenote">
+        Senza un bersaglio esterno gli attacchi partono solo verso lab-01, dentro la rete del laboratorio, da indirizzi di
+        documentazione (RFC 5737) con città inventate. Verso un server esterno partono dal nostro indirizzo, solo gli attacchi
+        web, e solo dopo che la chiave ha provato che puoi già leggere quel server.
+      </div>
     </div>
 
-    <div>
-      <h2>Cosa sta facendo l'attaccante</h2>
-      <div class="log" id="log"><span class="muted">Nessun attacco lanciato.</span></div>
+    <div class="main">
+      <div>
+        <div class="chain-head">
+          <h2>Catena d'attacco <span class="err" id="error"></span></h2>
+          <div class="legend">
+            <span><i class="hit"></i> l'attaccante è entrato</span>
+            <span><i class="block"></i> la difesa ha retto</span>
+          </div>
+        </div>
+        <div id="scenarios"></div>
+      </div>
+
+      <div class="card-box">
+        <h2 class="feed-top"><span class="dots"><i></i><i></i><i></i></span>Feed live — cosa sta facendo l'attaccante
+          <span class="feed-status" id="feed-status"></span></h2>
+        <div class="log" id="log"><span class="muted" style="color:var(--muted)">In attesa. Scegli un attacco dalla catena qui sopra.</span><span class="cursor"></span></div>
+      </div>
     </div>
   </div>
 </div>
@@ -98,12 +241,13 @@ const esc = (s) => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<"
 
 let scenarios = [];
 let targetMode = "lab";
-// The phases of an intrusion, in order, with a one-line explanation each.
+
+// The phases of an intrusion, in order, with a one-line plain-language explanation each.
 const PHASES = [
-  ["Ricognizione", "L'attaccante cerca porte aperte, servizi e pagine deboli."],
-  ["Accesso", "Prova a entrare: password, exploit sul sito, flood."],
-  ["Dentro il server", "Una volta dentro, cosa fa l'intruso."],
-  ["Controllo remoto", "Il server compromesso chiama il controllore dell'attaccante."],
+  ["Ricognizione", "L'attaccante cerca porte aperte, servizi e pagine deboli: sta studiando il bersaglio."],
+  ["Accesso", "Prova a entrare: password a raffica, exploit sul sito, flood di richieste."],
+  ["Dentro il server", "Una volta dentro, cosa fa l'intruso: ruba chiavi, lascia una porta aperta, cancella le tracce."],
+  ["Controllo remoto", "Il server compromesso richiama di nascosto il controllore dell'attaccante."],
   ["VPN", "La porta dei dipendenti: invisibile a chi non ha una chiave, ma una chiave rubata entra."],
   ["Inganno dell'AI", "Scrive nei log istruzioni per l'assistente che li legge: prompt injection."],
   ["Tutto", "La sequenza completa, dall'inizio alla fine."],
@@ -111,8 +255,8 @@ const PHASES = [
 
 function card(s) {
   return `<button class="scenario" data-id="${esc(s.id)}" data-web="${s.web ? 1 : 0}" data-available="${s.available ? 1 : 0}">
-      <b>${esc(s.title)}${s.real ? '<span class="badge real">reale</span>' : ''}</b>
-      <span>da ${esc(s.source)} · ${esc(s.place)}</span>
+      <span class="title">${esc(s.title)}${s.real ? '<span class="badge real">Metasploit</span>' : ''}</span>
+      <span class="origin">da ${esc(s.source)} · ${esc(s.place)}</span>
       <span class="expect">${esc(s.expect)}</span>
     </button>`;
 }
@@ -122,10 +266,11 @@ async function loadScenarios() {
   $("scenarios").innerHTML = PHASES.map(([name, desc], i) => {
     const group = scenarios.filter(s => (s.phase || "Tutto") === name);
     if (!group.length) return "";
-    return `<div class="phase">
-      <div class="phase-head"><span class="n">${i + 1}</span><h3>${esc(name)}</h3><p>${esc(desc)}</p></div>
-      <div class="scenarios">${group.map(card).join("")}</div>
-    </div>`;
+    return `<section class="phase">
+      <span class="n">${i + 1}</span>
+      <div class="phase-head"><h3>${esc(name)}</h3><p>${esc(desc)}</p></div>
+      <div class="cards">${group.map(card).join("")}</div>
+    </section>`;
   }).join("");
   $("scenarios").querySelectorAll("button").forEach(b => b.addEventListener("click", () => run(b.dataset.id)));
 }
@@ -133,25 +278,26 @@ async function loadScenarios() {
 async function run(id) {
   const r = await fetch(`/api/scenarios/${encodeURIComponent(id)}/run`, { method: "POST" });
   if (!r.ok) { const e = await r.json().catch(() => ({})); $("error").textContent = e.error || "non avviato"; }
+  else { $("error").textContent = ""; }
   refreshRuns();
 }
 
 // Verify and arm an external server; or go back to lab-01. The attacks against it start only after this succeeds.
 async function setTarget() {
   const url = $("target-url").value.trim(), key = $("target-key").value.trim();
-  if (!url || !key) { $("target-msg").textContent = "servono l'indirizzo e la chiave"; return; }
+  if (!url || !key) { $("target-msg").innerHTML = `<span class="err">servono l'indirizzo e la chiave</span>`; return; }
   $("target-set").disabled = true; $("target-msg").textContent = "verifica in corso…";
   try {
     const r = await fetch("/api/target", { method: "POST", body: JSON.stringify({ url, key }) });
     const d = await r.json();
-    if (!r.ok) { $("target-msg").innerHTML = `<span class="error">${esc(d.error || "non verificato")}</span>`; }
+    if (!r.ok) { $("target-msg").innerHTML = `<span class="err">${esc(d.error || "non verificato")}</span>`; }
     else {
       const note = d.note || d.warning;
-      $("target-msg").innerHTML = `<span style="color:var(--ok)">verificato: ${esc(d.host)} (${esc((d.detectors || []).join(", "))})</span>`
-        + (note ? `<br><span class="${d.warning ? "error" : ""}">${esc(note)}</span>` : "");
+      $("target-msg").innerHTML = `<span class="ok">agganciato: ${esc(d.host)} (${esc((d.detectors || []).join(", "))})</span>`
+        + (note ? `<br><span class="${d.warning ? "err" : ""}">${esc(note)}</span>` : "");
       $("target-key").value = "";
     }
-  } catch { $("target-msg").innerHTML = `<span class="error">nessuna risposta</span>`; }
+  } catch { $("target-msg").innerHTML = `<span class="err">nessuna risposta</span>`; }
   $("target-set").disabled = false;
   refreshTarget();
 }
@@ -164,12 +310,21 @@ async function refreshTarget() {
   if (!t) return;
   targetMode = t.mode;
   $("target-state").innerHTML = t.mode === "external"
-    ? `<b class="on">● ${esc(t.host || "server esterno")}</b> · esterno — solo attacchi web, dal nostro indirizzo`
-    : `<b class="on">● lab-01</b> · laboratorio`;
+    ? `<b class="on">● ${esc(t.host || "server esterno")}</b><span class="sub">esterno · solo attacchi web, dal nostro indirizzo</span>`
+    : `<b class="on">● lab-01</b><span class="sub">laboratorio · agganciato</span>`;
   refreshRuns();
 }
 $("target-set").addEventListener("click", setTarget);
 $("target-clear").addEventListener("click", clearTarget);
+
+// Colour one feed line by what it means for the defender.
+function classify(msg) {
+  if (/ACCESSO RIUSCITO|handshake: RIUSCITO|la VPN la accetta|è nella rete|backdoor attiva/.test(msg)) return "hit";
+  if (/^errore:|\berrore\b/.test(msg)) return "err";
+  if (/rifiutata|nessuna risposta|bloccato|banna|limitato|scarta|non risponde|non registra|ignora chi|404|429|403|401|open\|filtered/.test(msg)) return "block";
+  if (/^\s*\[[+*!\-]\]|\[.+\]|metasploit|moduli|modulo/.test(msg)) return "msf";
+  return "";
+}
 
 async function refreshRuns() {
   const data = await fetch("/api/runs").then(r => r.json()).catch(() => null);
@@ -184,13 +339,25 @@ async function refreshRuns() {
     b.classList.toggle("running", !!running && running.scenario === b.dataset.id);
   });
   const last = data.runs[0];
-  if (!last) return;
+  const fs = $("feed-status");
+  if (!last) { fs.className = "feed-status"; fs.textContent = ""; return; }
+  if (last.status === "in corso") { fs.className = "feed-status go"; fs.innerHTML = `<span class="spin"></span>${esc(last.title).toUpperCase()}`; }
+  else if (last.status === "errore") { fs.className = "feed-status err"; fs.textContent = "✕ ERRORE"; }
+  else { fs.className = "feed-status done"; fs.textContent = "✓ COMPLETATO"; }
+
   const box = $("log");
   const atBottom = box.scrollTop + box.clientHeight >= box.scrollHeight - 4;
-  box.innerHTML = `<span class="t">${esc(last.started)}</span> ${esc(last.title)} — ${esc(last.status)}\n` +
-    last.log.map(l => `<span class="t">${esc(l.t)}</span> <span class="${/ACCESSO RIUSCITO/.test(l.msg) ? "ok" : ""}">${esc(l.msg)}</span>`).join("\n");
+  const head = `<span class="t">${esc(last.started)}</span> <span class="run-line">▶ ${esc(last.title)} — ${esc(last.status)}</span>\n`;
+  const lines = last.log.map(l => `<span class="t">${esc(l.t)}</span> <span class="${classify(l.msg)}">${esc(l.msg)}</span>`).join("\n");
+  box.innerHTML = head + lines + `\n<span class="cursor"></span>`;
   if (atBottom) box.scrollTop = box.scrollHeight;
 }
+
+function tick() {
+  const d = new Date();
+  $("clock").textContent = [d.getHours(), d.getMinutes(), d.getSeconds()].map(n => String(n).padStart(2, "0")).join(":");
+}
+tick(); setInterval(tick, 1000);
 
 loadScenarios().then(refreshTarget);
 setInterval(refreshRuns, 1500);
