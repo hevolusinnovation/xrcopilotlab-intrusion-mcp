@@ -64,7 +64,8 @@ flowchart LR
   [Authentication](#authentication), [Configuration](#configuration)
 - [Every setting explained](#every-setting-explained) · [Every tool explained](#every-tool-explained) ·
   [When something does not work](#when-something-does-not-work)
-- [Register it in XRCopilotLab](#register-it-in-xrcopilotlab)
+- [Register it in XRCopilotLab](#register-it-in-xrcopilotlab) ·
+  [how it reads the alerts, advises and notifies](#how-xrcopilotlab-reads-the-alerts-advises-and-notifies)
 
 ---
 
@@ -1566,6 +1567,33 @@ for the lab, the Container App's address for the demo. Below it is `<base>`.
   `X-API-Key` from a secret of the tag, and an `mcpServers` entry `kind: builder` with one GET tool per route.
 - **By hand**: Administration › MCP, a new server with address `<base>/mcp` and the key in a `X-API-Key`
   header (custom headers), then assign it to the agent; a blueprint then cites it as `kind: existing`.
+
+---
+
+## How XRCopilotLab reads the alerts, advises and notifies
+
+The toolkit only ever **reads** the server — it never bans, unbans or changes anything ([out of scope](#out-of-scope-for-now)).
+Everything that *acts* is a person's decision, taken through XRCopilotLab and Claude. The loop:
+
+1. **Read the alerts.** The agent calls the [ten read-only tools](#the-agents-tools) over `/mcp` or `/api` — above all
+   `intrusion_summary` (the whole period at a glance: numbers, map, top attackers), `intrusion_suspicious_logins` and
+   `intrusion_host_activity` (did anyone get in, and what did they do inside), `intrusion_vpn` (who is on the VPN, and
+   from where) and `intrusion_posture` (what to fix, most urgent first, each with the exact command). The same alerts
+   are on the [monitoring page](#5-the-monitoring-page) for a person to watch.
+2. **Explain.** It turns the raw alerts into plain language for the operator — what happened, from where, how serious —
+   and, thanks to the [prompt-injection guard](#protecting-the-ai-agent-prompt-injection-through-the-logs), without
+   obeying any instruction an attacker may have written into the logs (it quotes such text as evidence, cleaned).
+3. **Advise, only after a yes.** When a person approves a hardening step in the SOC process, XRCopilotLab sends it back
+   to the server with **`POST /api/advice`** (the finding, address, severity, title, the recommendation and its command,
+   who approved it and when). The toolkit keeps it in an inbox and shows it on the monitoring page — marked `received`,
+   then `done` once applied — but it **never runs it**: applying the command stays a human action on the server.
+4. **Notify and report.** In the cyber blueprints (CYBERSOC, ALVEO) orchestrators close the loop: they **notify** a
+   critical finding, send the approved advice with `POST /api/advice`, and write the **SOC report** in the official
+   (Word) format. The map and the attack table feed the same reports.
+
+The connection is set as in [Register it in XRCopilotLab](#register-it-in-xrcopilotlab) above; in the blueprints it
+starts as a placeholder (`toolkit-da-configurare.invalid`, key `DA-CONFIGURARE`), and the real address, key and
+governance host are set by hand on the tenant (Administration › Connections, Governance › Policy).
 
 ---
 
