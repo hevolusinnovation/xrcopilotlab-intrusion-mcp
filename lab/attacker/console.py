@@ -79,7 +79,8 @@ class Handler(BaseHTTPRequestHandler):
             run, error = runner.start(parts[2], current_target())
             return self._send(202, run) if run else self._send(409, {"error": error})
         if len(parts) == 3 and parts[:2] == ["api", "tunnel"] and parts[2] in ("login", "logout", "restart"):
-            return self._forward(f"{TUNNEL}/{parts[2]}", "POST")
+            query = urllib.parse.urlsplit(self.path).query  # login?provider=microsoft|github
+            return self._forward(f"{TUNNEL}/{parts[2]}" + (f"?{query}" if query else ""), "POST")
         if url_path(self.path) == "/api/target":
             return self._set_target()
         if url_path(self.path) == "/api/target/clear":

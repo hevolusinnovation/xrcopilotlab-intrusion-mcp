@@ -39,8 +39,10 @@ rsyslog to write **the same line** to `/var/log/ufw.log`, so the package's parse
 The `tunnel` container gives lab-01's API a public HTTPS address with Microsoft Dev Tunnels, so that a connection
 in XRCopilotLab can call the lab running on a laptop. Nothing is installed on the Mac.
 
-1. In the console, **Collegamento a XRCopilotLab › Accedi con l'account Microsoft**: the console shows Microsoft's
-   link and a code; sign in there with an Entra ID (Hevolus), Microsoft or GitHub account.
+1. On lab-01's page, **Collegamento a XRCopilotLab › Accedi con account Microsoft / Entra ID** or **Accedi con
+   GitHub**: the page shows the link and a code; sign in there with **any** account (if the browser offers one already
+   signed in, choose *Usa un altro account*, or open the link in a private window). Every login starts from a clean
+   cache: the previous account is signed out first.
 2. The tunnel opens by itself (persistent, anonymous access, expires after 30 days unused) and the console shows its
    addresses: `…/api` for a connection with HTTP tools, `…/mcp` for an MCP client, and a button that copies the
    `X-API-Key`.
@@ -53,8 +55,10 @@ What the tunnel reaches, two ports of lab-01 (their own nginx logs; the firewall
   access**: Dev Tunnels asks for the Microsoft login, and lets in only the account that opened the tunnel and the
   users of its Entra tenant (Hevolus). That login is the only way in: the page has no password of its own, and nginx
   adds the page's key. The console shows its address (*Pagina di monitoraggio*) and the button *Mappa e lista degli
-  attacchi*. The access rules are rewritten at every start of the tunnel. The login and the tunnel id live in the `tunnel-login` volume:
-`make lab-down` keeps them (same address next time), `make lab-reset` deletes them.
+  attacchi*. The access rules are rewritten at every start of the tunnel. The login and one tunnel id per account live in the
+`tunnel-login` volume: `make lab-down` keeps them (same account, same address next time), **Esci e cambia account**
+signs out (the tunnel belongs to its account: another account gets its own address, the first gets its own back when
+it signs in again), `make lab-reset` deletes them.
 
 Dev Tunnels has no price list; the limits are 5 GB of traffic and 10 tunnels per user per month. It is a preview
 service for development and tests, not for a customer's server.

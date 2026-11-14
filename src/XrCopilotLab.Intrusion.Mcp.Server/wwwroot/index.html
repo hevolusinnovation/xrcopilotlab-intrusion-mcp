@@ -426,20 +426,26 @@ function staticView(c) {
     <b>Nessun indirizzo pubblico</b>
     <p class="muted" style="font-size:12px;margin-top:4px">Imposta PUBLIC_DOMAIN (produzione) o apri un Dev Tunnel di test.</p></div>`;
 }
+function loginButtons(prefix) {
+  const p = prefix || "Accedi con";
+  return `<div class="btnrow"><button class="btn${prefix ? " ghost" : ""}" onclick="tunnelAction('login?provider=microsoft')">${p} account Microsoft / Entra ID</button>
+    <button class="btn ghost" onclick="tunnelAction('login?provider=github')">${p} GitHub</button></div>`;
+}
 function tunnelView(t) {
   const user = t.user ? ` · ${esc(t.user)}` : "";
   if (t.phase === "logged-out") {
     return `<div class="c-state"><b class="off">Dev Tunnel non collegato</b></div>
-      <p class="muted" style="font-size:12px">Per dare a questo server un indirizzo di test serve un account Microsoft (Entra ID Hevolus, Microsoft o GitHub). Microsoft Dev Tunnels, senza costi.</p>
+      <p class="muted" style="font-size:12px">Per dare a questo server un indirizzo di test serve un account, qualsiasi: Entra ID (aziendale), Microsoft o GitHub. Microsoft Dev Tunnels, senza costi.</p>
       ${t.error ? `<div class="error">${esc(t.error)}</div>` : ""}
-      <div class="btnrow"><button class="btn" onclick="tunnelAction('login')">Accedi con l'account Microsoft</button></div>`;
+      ${loginButtons()}`;
   }
   if (t.phase === "login-pending") {
     return t.login
       ? `<div class="c-state"><b class="off">Accesso in corso</b></div>
          <p style="font-size:12px">Apri <a href="${esc(t.login.url)}" target="_blank" rel="noopener">${esc(t.login.url)}</a> e inserisci il codice:</p>
          <div><span class="code-big">${esc(t.login.code)}</span> <button class="conn-copy" onclick='connCopy(${JSON.stringify(t.login.code)}, this)'>Copia</button></div>
-         <p class="muted" style="font-size:12px">La pagina si aggiorna da sola a login completato.</p>`
+         <p class="muted" style="font-size:12px">Se il browser propone un account già collegato, scegli «Usa un altro account» (o apri il link in una finestra anonima). La pagina si aggiorna da sola a login completato.</p>
+         ${loginButtons("Ricomincia con")}`
       : `<div class="c-state"><b class="off">Richiesta del codice…</b></div>`;
   }
   if (t.phase === "online") {
@@ -449,14 +455,15 @@ function tunnelView(t) {
       <div class="btnrow"><button class="btn" onclick="tunnelCheck(this)">Verifica dall'indirizzo pubblico</button>
         <span id="tunnel-check" class="muted" style="font-size:12px;align-self:center"></span></div>
       <div class="btnrow"><button class="btn ghost" onclick="tunnelAction('restart')">Riavvia</button>
-        <button class="btn ghost" onclick="tunnelAction('logout')">Esci</button></div>`;
+        <button class="btn ghost" onclick="tunnelAction('logout')">Esci e cambia account</button></div>`;
   }
   if (t.phase === "error") {
     return `<div class="c-state"><b class="err">Tunnel chiuso</b>${user}</div><div class="error">${esc(t.error || "")}</div>
       <div class="btnrow"><button class="btn" onclick="tunnelAction('restart')">Riapri il tunnel</button>
-        <button class="btn ghost" onclick="tunnelAction('logout')">Esci</button></div>`;
+        <button class="btn ghost" onclick="tunnelAction('logout')">Esci e cambia account</button></div>`;
   }
-  return `<div class="c-state"><b class="off">Apertura del tunnel…</b>${user}</div>`;
+  return `<div class="c-state"><b class="off">Apertura del tunnel…</b>${user}</div>
+    <div class="btnrow"><button class="btn ghost" onclick="tunnelAction('logout')">Esci e cambia account</button></div>`;
 }
 function renderConnection(c, t) {
   const box = $("connection");

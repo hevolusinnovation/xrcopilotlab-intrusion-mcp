@@ -947,8 +947,8 @@ sequenceDiagram
   participant MS as Microsoft Dev Tunnels
   participant L as lab-01 (toolkit)
   participant X as XRCopilotLab
-  You->>T: Accedi con l'account Microsoft
-  T->>MS: devtunnel user login (device code)
+  You->>T: Accedi (Microsoft / Entra ID or GitHub, any account)
+  T->>MS: devtunnel user login (device code, clean cache)
   MS-->>You: link + code, you sign in
   T->>MS: create tunnel (port 8091, anonymous access)
   MS-->>T: https://<id>-8091.<region>.devtunnels.ms
@@ -977,7 +977,7 @@ https://<id>-8093.<region>.devtunnels.ms/       monitoring page (map and attacks
 |---|---|
 | `make down`, then `make up` | **stays the same**: login and tunnel are kept (Docker volume `tunnel-login`) |
 | Unused for 30 days | expires: the next start creates a new one |
-| **Esci** in the console | closes the tunnel; signing in again with the same account gives back the same address, with another account a new one |
+| **Esci e cambia account** on the page | closes the tunnel and signs out; any account can then sign in (Microsoft / Entra ID or GitHub): each account has its own tunnel, so signing in again with the same account gives back the same address, with another account a new one |
 | `make lab-reset` | is forgotten: the next login creates a new address |
 
 ### Is it safe?

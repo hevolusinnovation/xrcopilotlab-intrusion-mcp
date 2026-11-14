@@ -1,14 +1,16 @@
 """The lab's public address: Microsoft Dev Tunnels, driven from the console.
 
-- Login with a device code (Entra ID / Microsoft account): the console shows the link and the code.
+- Login with a device code, with any account: Entra ID or Microsoft account, or GitHub. The page shows the link and
+  the code. Every login starts from a clean cache, and "Cambia account" signs out and in again: the saved login is
+  only reused until someone chooses another account.
 - Once logged in: a persistent tunnel with two ports, hosted here; socat forwards each to lab-01.
   - 8091, lab-01's API-only port, with anonymous access: XRCopilotLab cannot log in to Dev Tunnels; the package's
     X-API-Key still guards every call.
   - 8093, the monitoring page (map and attacks), with no anonymous access: the browser asks for the Microsoft login,
     and only the tunnel's owner and the users of the owner's Entra tenant get in. No password of its own: this
     login is the only way in.
-- The tunnel id and the login live in /root (a volume): the address stays the same across restarts, until the tunnel
-  is unused for 30 days.
+- The login and one tunnel id per account live in /root (a volume): the address stays the same across restarts, and
+  each account gets its own tunnel back when it signs in again, until the tunnel is unused for 30 days.
 
 With PUBLIC_DOMAIN set (lab/.env) there is no Dev Tunnel: the same two ports are published on the machine, for the
 reverse proxy the domain points to, and the console shows the domain's addresses (phase "domain").
@@ -24,6 +26,7 @@ import re
 import subprocess
 import threading
 import time
+import urllib.parse
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 
 PORT = 8091
@@ -34,7 +37,10 @@ DOMAIN = os.environ.get("PUBLIC_DOMAIN", "").strip().strip("/")
 PAGE_PUBLIC_PORT = os.environ.get("PUBLIC_PAGE_PORT", "8443").strip()
 LOCAL_PAGE_PORT = 8089   # published on this container (localhost:8089): local access to lab-01's page
 LAB_API_KEY = os.environ.get("LAB_API_KEY", "")  # the test key, shown on lab-01's page (test mode only)
-ID_FILE = "/root/tunnel-id"
+ID_DIR = "/root/tunnels"        # one tunnel id per account: a tunnel belongs to the account that created it
+LEGACY_ID_FILE = "/root/tunnel-id"
+TOKEN_DIR = "/root/DevTunnels"  # devtunnel's login cache (it runs from /root)
+PROVIDERS = {"microsoft": "-e", "github": "-g"}
 URL_FILE = os.environ.get("TUNNEL_URL_FILE", "/state/url")
 LOCATION_FILE = os.environ.get("TUNNEL_LOCATION_FILE", "/state/location.json")
 DEVICE = re.compile(r"open the page (?P<url>https://\S+) and enter the code (?P<code>[A-Z0-9-]+)")
@@ -43,6 +49,7 @@ WEB_URL = re.compile(r"https://\S+?-%d\.\S+?devtunnels\.ms\S*" % PORT)
 state = {"phase": "starting", "user": None, "login": None, "url": None, "pageUrl": None, "tunnelId": None, "error": None, "since": None}
 lock = threading.Lock()
 host_process = None
+login_process = None
 
 
 def set_state(**kw):
@@ -78,15 +85,30 @@ def logged_in_user():
     return m.group(1) if code == 0 and m else None
 
 
-def login():
-    """Device-code login: the console shows the link and the code; this waits for the person to finish."""
-    set_state(phase="login-pending", login=None, error=None)
-    p = subprocess.Popen(["devtunnel", "user", "login", "-d", "-e"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+def forget_login():
+    """Signs out and drops the cached tokens, so the next login asks for an account instead of reusing the last one."""
+    devtunnel("user", "logout")
+    if os.path.isdir(TOKEN_DIR):
+        for name in os.listdir(TOKEN_DIR):
+            if name.startswith("devtunnels-tokens"):
+                os.remove(os.path.join(TOKEN_DIR, name))
+
+
+def login(provider="microsoft"):
+    """Device-code login with the chosen provider, from a clean cache: the page shows the link and the code; this waits
+    for the person to finish."""
+    global login_process
+    set_state(phase="login-pending", login=None, error=None, user=None, url=None, pageUrl=None)
+    stop_host()
+    forget_login()
+    p = login_process = subprocess.Popen(["devtunnel", "user", "login", "-d", PROVIDERS[provider]], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     for line in p.stdout:
         m = DEVICE.search(line)
         if m:
             set_state(login={"url": m.group("url"), "code": m.group("code")})
     p.wait()
+    if p is not login_process:
+        return  # replaced by a newer login: that one owns the state
     user = logged_in_user()
     if user:
         set_state(phase="logged-in", user=user, login=None)
@@ -95,8 +117,19 @@ def login():
         set_state(phase="logged-out", login=None, error="accesso non completato: riprova")
 
 
-def ensure_tunnel():
-    """The tunnel of this lab, created once: anonymous access, 30 days of inactivity before it expires."""
+def id_file(user):
+    return os.path.join(ID_DIR, re.sub(r"[^A-Za-z0-9@._-]", "_", user or "unknown"))
+
+
+def ensure_tunnel(user):
+    """The account's tunnel for this lab, created once: anonymous access, 30 days of inactivity before it expires."""
+    os.makedirs(ID_DIR, exist_ok=True)
+    if os.path.exists(LEGACY_ID_FILE):
+        if not os.listdir(ID_DIR):
+            os.replace(LEGACY_ID_FILE, id_file(user))  # the single id of earlier versions: it was this login's
+        else:
+            os.remove(LEGACY_ID_FILE)
+    ID_FILE = id_file(user)
     tunnel_id = open(ID_FILE).read().strip() if os.path.exists(ID_FILE) else None
     if tunnel_id and devtunnel("show", tunnel_id)[0] != 0:
         tunnel_id = None  # expired or deleted: a new one, with a new address
@@ -128,7 +161,7 @@ def start_tunnel():
     global host_process
     try:
         set_state(phase="tunnel-starting", error=None)
-        tunnel_id = ensure_tunnel()
+        tunnel_id = ensure_tunnel(state["user"])
         set_state(tunnelId=tunnel_id)
         host_process = subprocess.Popen(["devtunnel", "host", tunnel_id], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
         threading.Thread(target=watch_host, args=(host_process,), daemon=True).start()
@@ -145,7 +178,7 @@ def watch_host(p):
             url = m.group(0).rstrip("/")
             set_state(phase="online", url=url, pageUrl=url.replace(f"-{PORT}.", f"-{PAGE_PORT}.", 1), since=time.strftime("%H:%M:%S"))
     p.wait()
-    if state["phase"] != "logged-out":
+    if p is host_process:  # not stopped on purpose (restart, logout, another account)
         set_state(phase="error", url=None, pageUrl=None, error="il tunnel si è chiuso: " + " ".join(last[-2:]))
 
 
@@ -158,8 +191,8 @@ def stop_host():
 
 def logout():
     stop_host()
-    devtunnel("user", "logout")
-    set_state(phase="logged-out", user=None, url=None, pageUrl=None, login=None, error=None)
+    forget_login()
+    set_state(phase="logged-out", user=None, url=None, pageUrl=None, tunnelId=None, login=None, error=None)
 
 
 def write_server_location():
@@ -261,15 +294,22 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         if DOMAIN:
             return self._send(409, {"error": "il laboratorio usa il dominio " + DOMAIN + ": nessun tunnel"})
-        if self.path == "/login":
-            if state["phase"] == "login-pending":
+        path, _, query = self.path.partition("?")
+        if path == "/login":
+            provider = urllib.parse.parse_qs(query).get("provider", ["microsoft"])[0]
+            if provider not in PROVIDERS:
+                return self._send(400, {"error": "provider: microsoft o github"})
+            if state["phase"] == "login-pending" and state["login"] is None:
                 return self._send(409, {"error": "accesso già in corso"})
-            threading.Thread(target=login, daemon=True).start()
+            # A code already shown can be replaced (another account or provider): the waiting login is dropped.
+            if login_process and login_process.poll() is None:
+                login_process.terminate()
+            threading.Thread(target=login, args=(provider,), daemon=True).start()
             return self._send(202, {"phase": "login-pending"})
-        if self.path == "/logout":
+        if path == "/logout":
             logout()
             return self._send(200, {"phase": "logged-out"})
-        if self.path == "/restart":
+        if path == "/restart":
             stop_host()
             threading.Thread(target=start_tunnel, daemon=True).start()
             return self._send(202, {"phase": "tunnel-starting"})
