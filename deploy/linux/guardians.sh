@@ -417,10 +417,12 @@ CONF
 # The server's key is made by xrcopilotlab-vpn-init at the first start, never here: an image built with --no-start
 # would otherwise give every customer the same key. Opt-in like the rest, but it is not only a watcher: it opens UDP
 # VPN_PORT and routes the VPN to the internal network (to that network only, never to the internet).
-#   VPN_ENDPOINT  the public IP or name the users connect to (xrc-vpn endpoint later, if unknown now)
-#   VPN_SUBNET    the VPN's own network, a /24 that no site uses (default 10.88.0.0/24)
+#   VPN_ENDPOINT  the public IPv4, IPv6 or name the users connect to (xrc-vpn endpoint later, if unknown now)
+#   VPN_SUBNET    the VPN's own IPv4 network, a /24 that no site uses (default 10.88.0.0/24)
+#   VPN_SUBNET6   its IPv6 network, a /64 (default: a ULA made at the first start, unique to the site), or "off"
 #   VPN_PORT      UDP port (default 51820); the office router forwards it to this server
-#   VPN_LAN       the internal network(s) it opens, comma separated (default: the one of the default route)
+#   VPN_LAN       the internal network(s) it opens, IPv4 and IPv6, comma separated (default: those of the interface
+#                 with the default route; printed at the end of the install, xrc-vpn lan to change them)
 #   VPN_DNS       a DNS server the users get (optional, e.g. the office's 192.168.1.1)
 VPN_DIR=/etc/xrcopilotlab-vpn
 VPN_IFACE=wgxrc
@@ -440,14 +442,15 @@ guardian_wireguard() {
 
   # The settings given now are written; those not given keep what an earlier run wrote.
   local k v var re
-  for k in ENDPOINT SUBNET PORT LAN DNS; do
+  for k in ENDPOINT SUBNET SUBNET6 PORT LAN DNS; do
     var="VPN_$k"; v="${!var:-}"
     [[ -n "$v" ]] || continue
     case "$k" in
       ENDPOINT) re='^[][A-Za-z0-9.:-]{1,260}$'; [[ "$v" =~ $re ]] || { echo "wireguard: VPN_ENDPOINT is not an address or a name" >&2; return 1; } ;;
       SUBNET)   [[ "$v" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.0/24$ ]] || { echo "wireguard: VPN_SUBNET must be a /24 (10.88.0.0/24)" >&2; return 1; } ;;
+      SUBNET6)  [[ "$v" == off || "$v" =~ ^[0-9a-f:]+::/64$ ]] || { echo "wireguard: VPN_SUBNET6 must be a /64 ending in :: (fd12:3456:789a::/64) or off" >&2; return 1; } ;;
       PORT)     [[ "$v" =~ ^[0-9]{1,5}$ ]] || { echo "wireguard: VPN_PORT is not a port" >&2; return 1; } ;;
-      LAN)      [[ "$v" =~ ^[0-9./,]+$ ]] || { echo "wireguard: VPN_LAN must be networks like 192.168.1.0/24" >&2; return 1; } ;;
+      LAN)      [[ "$v" =~ ^[0-9a-fA-F.:/,]+$ ]] || { echo "wireguard: VPN_LAN must be networks like 192.168.1.0/24 or 2001:db8:1::/64" >&2; return 1; } ;;
       DNS)      [[ "$v" =~ ^[0-9a-fA-F.:,]+$ ]] || { echo "wireguard: VPN_DNS must be addresses" >&2; return 1; } ;;
     esac
     touch "$VPN_DIR/vpn.env"
@@ -530,7 +533,10 @@ guardians_start() {
         systemctl daemon-reload
         systemctl restart xrcopilotlab-vpn-init.service
         systemctl restart "wg-quick@$VPN_IFACE"
-        systemctl start xrcopilotlab-vpn-state.timer ;;
+        systemctl start xrcopilotlab-vpn-state.timer
+        # What the VPN opens, found on its own: said now, so a server with more networks is checked at once.
+        /usr/local/sbin/xrc-vpn show | sed 's/^/wireguard: /'
+        [[ -n "${VPN_LAN:-}" ]] || echo "wireguard: the internal network above was found on its own (no VPN_LAN): check it; xrc-vpn lan <networks> changes it" ;;
       *) ;;
     esac
   done

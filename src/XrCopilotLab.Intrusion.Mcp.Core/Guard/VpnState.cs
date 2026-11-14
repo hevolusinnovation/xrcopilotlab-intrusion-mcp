@@ -6,6 +6,7 @@ namespace XrCopilotLab.Intrusion.Mcp.Core.Guard;
 /// The customer's WireGuard VPN as <c>xrc-vpn state</c> writes it (<c>/run/xrcopilotlab-vpn/state.json</c>, every
 /// minute): the users the customer added, and where each one last connected from. It carries no key of any kind.
 /// <c>Endpoint</c> is the public address users connect to, null until the customer sets it (<c>xrc-vpn endpoint</c>).
+/// <c>Subnet6</c>: the VPN's IPv6 network inside the tunnel, null when it is off. <c>Lan</c> mixes IPv4 and IPv6.
 /// </summary>
 public sealed record VpnFacts(
     bool Up,
@@ -14,7 +15,8 @@ public sealed record VpnFacts(
     string Subnet,
     IReadOnlyList<string> Lan,
     DateTimeOffset Updated,
-    IReadOnlyList<VpnPeerFacts> Peers);
+    IReadOnlyList<VpnPeerFacts> Peers,
+    string? Subnet6 = null);
 
 /// <summary>
 /// One VPN user: a person's device or, with <c>Kind</c> <c>router</c>, another site and the networks behind it
@@ -29,7 +31,8 @@ public sealed record VpnPeerFacts(
     string? RemoteIp,
     DateTimeOffset? LastHandshake,
     long Received,
-    long Sent);
+    long Sent,
+    string? Address6 = null);
 
 public static class VpnState
 {
@@ -53,11 +56,11 @@ public static class VpnState
                     if (name is null || address is null) continue;
                     var hs = Long(p, "latestHandshake");
                     peers.Add(new VpnPeerFacts(name, Str(p, "kind") ?? "device", address, Strings(p, "lan"), Time(Long(p, "created")),
-                        RemoteIp(Str(p, "endpoint")), hs > 0 ? Time(hs) : null, Long(p, "received"), Long(p, "sent")));
+                        RemoteIp(Str(p, "endpoint")), hs > 0 ? Time(hs) : null, Long(p, "received"), Long(p, "sent"), Str(p, "address6")));
                 }
             }
             return new VpnFacts(r.TryGetProperty("up", out var up) && up.ValueKind == JsonValueKind.True, (int)Long(r, "port"), Str(r, "endpoint"),
-                Str(r, "subnet") ?? "", Strings(r, "lan"), Time(Long(r, "updated")), peers);
+                Str(r, "subnet") ?? "", Strings(r, "lan"), Time(Long(r, "updated")), peers, Str(r, "subnet6"));
         }
         catch (Exception ex) when (ex is JsonException or InvalidOperationException or ArgumentOutOfRangeException) { return null; }
     }

@@ -381,7 +381,7 @@ sudo ./install.sh --with fail2ban,crowdsec,suricata,falco,modsecurity,wireguard 
 | `falco` | Installs Falco from its own repository with the **modern eBPF probe** (no kernel module, no compiler, nothing to rebuild at a kernel upgrade). Writes alerts as JSON to `/var/log/falco/events.json` (readable by the group `adm`, rotated daily for a week), adds to each alert the SSH client address, the `sudo` user and the process tree (so the toolkit can tie it to the attacker), and adds three rules Falco has not got for a plain server: **SSH key added**, **account created or changed**, **crypto miner started**. It watches; it never kills a process |
 | `modsecurity` | Needs nginx. Installs the ModSecurity v3 nginx module and the OWASP Core Rule Set, in **detection only** (`SecRuleEngine DetectionOnly`): it reads every request, bodies included, and writes the ones the CRS would block to `/var/log/modsecurity/audit.json` (JSON, readable by `adm`, rotated with `copytruncate`), but blocks nothing. Switched on for every site with one file in `conf.d` (a site with `modsecurity off;` stays off); the toolkit's own API and the monitoring page are excluded. `nginx -t` is run before and after: if it fails, the file is removed and nginx is left untouched. The package's own rule loader uses a directive ModSecurity v3 rejects, so the CRS files are included one by one. It also adds `/etc/modsecurity/xrcopilotlab/ai.conf`: three rules (ids 200101-200103) for text written to take over an AI in a request body or query string, see [Guarding the customer's own AI](#guarding-the-customers-own-ai) |
 
-| `wireguard` | Installs WireGuard, `qrencode` (QR codes for the phone app) and the command **`xrc-vpn`**, with which **the customer** manages the users: no user is created by the script, nor ever by Hevolus. The server's key is made at the **first start** (`xrcopilotlab-vpn-init`), never during the install, so an image built with `--no-start` does not give every customer the same key. The VPN (interface `wgxrc`, UDP 51820, network `10.88.0.0/24`) reaches **only the internal network** (the one of the default route, or `VPN_LAN`), never the internet through this server. Creates the group `vpn-admin`, whose members may run `xrc-vpn` (and nothing else) through `sudo` with their own password. Every minute it writes who is connected for the toolkit, without any key. UFW is not touched: if it is on, the script prints the rule to add |
+| `wireguard` | Installs WireGuard, `qrencode` (QR codes for the phone app) and the command **`xrc-vpn`**, with which **the customer** manages the users: no user is created by the script, nor ever by Hevolus. The server's key is made at the **first start** (`xrcopilotlab-vpn-init`), never during the install, so an image built with `--no-start` does not give every customer the same key. The VPN (interface `wgxrc`, UDP 51820, networks `10.88.0.0/24` and an IPv6 ULA /64) reaches **only the internal network** (the one of the default route, printed at the end of the install, or `VPN_LAN`; IPv4 and IPv6), never the internet through this server. Creates the group `vpn-admin`, whose members may run `xrc-vpn` (and nothing else) through `sudo` with their own password. Every minute it writes who is connected for the toolkit, without any key. UFW is not touched: if it is on, the script prints the rule to add |
 
 **Suricata needs memory:** about 1.5 GB with all the ET Open rules (measured in the lab). Install it on servers with
 4 GB or more, or trim the rules first (`/etc/suricata/disable.conf`, then `suricata-update`).
@@ -398,6 +398,8 @@ if `install.sh` installed them: a Suricata or Falco the customer already runs is
 
 #### The VPN, step by step (the customer's administrator)
 
+A guide in Italian for the customer's administrator, in plain words, is in [docs/guida-vpn.md](docs/guida-vpn.md).
+
 ```bash
 sudo VPN_ENDPOINT=vpn.cliente.it ./install.sh --with wireguard     # once; VPN_ENDPOINT can also be set later
 sudo usermod -aG vpn-admin anna                                     # who may manage the users (log in again after)
@@ -407,24 +409,51 @@ xrc-vpn add mario-pc --conf > mario-pc.conf    # a laptop: a file to import, the
 xrc-vpn add sede-milano --pubkey <the router's public key> --lan 192.168.20.0/24   # another site's router
 xrc-vpn list                          # who exists, last connection
 xrc-vpn revoke mario-telefono         # out at once
-xrc-vpn endpoint 93.41.10.7           # change the public address users connect to
+xrc-vpn endpoint 93.41.10.7           # change the public address users connect to (IPv4, IPv6 or a name)
+xrc-vpn lan 192.168.1.0/24            # the internal network(s) the VPN opens, IPv4 and IPv6 (auto = guess again)
+xrc-vpn reissue mario-telefono        # a new configuration after the address or the networks changed
+xrc-vpn show                          # the server's settings, and the networks on the server it does NOT open
 ```
+
+**Which internal network it opens.** Without `VPN_LAN`, the VPN opens the networks of the interface with the default
+route. At the end of the install `install.sh` prints them, with the networks on the server's other interfaces that it
+does **not** open: on a server with more than one network card, check them, and change them with `xrc-vpn lan`.
+
+**After a change** of the public address (`endpoint`) or of the networks (`lan`), the users added before still have
+the old values in their configuration: the command lists them, and `xrc-vpn reissue <name>` gives each a new one. A
+phone or laptop gets a new key and QR (the old configuration stops working at once); a router keeps its own key and
+gets its fields again, preshared key included.
+
+**IPv6.** The public address may be IPv6 (`xrc-vpn endpoint 2001:db8::7`, written as `[2001:db8::7]:51820` in the
+users' configuration): the usual way out when the office line has no public IPv4 of its own (carrier-grade NAT).
+Inside the tunnel every user gets an IPv6 address too, from a ULA /64 made at the first start and unique to the site
+(`VPN_SUBNET6`, or `off`). Internal IPv6 networks go in `VPN_LAN` / `xrc-vpn lan` with the IPv4 ones; forwarding them
+switches on IPv6 forwarding, after telling the server's interfaces to keep accepting router advertisements
+(`accept_ra=2`), so the server does not lose its own IPv6 address.
+
+![The VPN users on the monitoring page, and what to fix](docs/images/vpn.jpg)
+
+*The monitoring page in the simulated mode: four VPN users, `anna-portatile` connected from an unexpected country and
+`luca-vecchio-pc` unused for months, each with the command that revokes it.*
 
 | Variable at install | Default | What it is |
 |---|---|---|
-| `VPN_ENDPOINT` | — | The office's public IP or name; the router must forward UDP `VPN_PORT` to this server |
+| `VPN_ENDPOINT` | — | The office's public IPv4, IPv6 or name; the router must forward UDP `VPN_PORT` to this server |
 | `VPN_PORT` | `51820` | UDP port |
 | `VPN_SUBNET` | `10.88.0.0/24` | The VPN's own network: a /24 no site uses (checked against the internal network) |
-| `VPN_LAN` | the default route's network | The internal network(s) the VPN opens, comma separated |
+| `VPN_SUBNET6` | a ULA /64 made at the first start | The VPN's own IPv6 network, or `off` |
+| `VPN_LAN` | the default route's networks | The internal network(s) the VPN opens, IPv4 and IPv6, comma separated |
 | `VPN_DNS` | — | A DNS server the users get (the office's) |
 
 **The keys.** A phone or laptop gets a key made on the server, shown once (QR or file) and **not kept**: the server
 keeps public keys only. A router, or a PC managed by the customer's IT, makes its own key and gives only its public key
 (`--pubkey`): the private key never leaves the device, and `xrc-vpn` prints the fields to type into the router. Every
-user also gets a preshared key. A lost device: `xrc-vpn revoke <name>`, then add it again with a new key.
+user also gets a preshared key. A lost device: `xrc-vpn reissue <name>` (a new key, the old one stops working), or
+`xrc-vpn revoke <name>` to take it out.
 
-**What the VPN does not do on its own:** forward the port on the office router, or work behind a carrier-grade NAT
-(some mobile and fibre lines have no public IP of their own): check this before promising remote access.
+**What the VPN does not do on its own:** forward the port on the office router, or work behind a carrier-grade NAT on
+IPv4 (some mobile and fibre lines have no public IPv4 of their own; IPv6, when the line has it, is the way out): check
+this before promising remote access.
 
 ### 3. Where it answers
 
@@ -971,7 +1000,7 @@ src/XrCopilotLab.Intrusion.Mcp.Server/   ASP.NET host: MCP tools, REST face, API
   wwwroot/      the monitoring page (static), Leaflet vendored
 tests/                                   parsers, analyzer, geo, the simulated story
 deploy/linux/                            systemd unit, install script, guardians (--with), the monitoring page (dashboard.sh), production settings,
-                                         xrc-vpn (the customer's VPN users: add, revoke, list; state for the toolkit)
+                                         xrc-vpn (the customer's VPN users: add, revoke, reissue, lan, endpoint; state for the toolkit)
 infra/                                   Container App of the demo
 ```
 

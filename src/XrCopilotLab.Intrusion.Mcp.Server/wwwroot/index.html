@@ -493,7 +493,7 @@ function drawVpn(v) {
     : `Accesa su ${v.endpoint} (UDP ${v.port}) · ${v.peers.length} utenti, ${v.connected} collegati ora · si gestiscono con xrc-vpn sul server.`;
   $("vpn-users").innerHTML = (v.peers || []).map(u => {
     const place = u.location && (u.location.city || u.location.country) ? [u.location.city, u.location.country].filter(Boolean).join(", ") : "";
-    return `<div class="vpn-user ${u.expectedCountry ? "" : "away"}" title="${esc(u.address)}${u.remoteIp ? " · da " + esc(u.remoteIp) : ""}">
+    return `<div class="vpn-user ${u.expectedCountry ? "" : "away"}" title="${esc(u.address)}${u.address6 ? " · " + esc(u.address6) : ""}${u.remoteIp ? " · da " + esc(u.remoteIp) : ""}">
       <b>${u.connected ? '<i class="light ok" style="display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:5px"></i>' : ""}${esc(u.name)}${u.kind === "router" ? " · sede" : ""}</b>
       <span>${u.connected ? "collegato" : esc(ago(u.lastHandshake))}${place ? " · " + esc(place) : ""}</span></div>`;
   }).join("");

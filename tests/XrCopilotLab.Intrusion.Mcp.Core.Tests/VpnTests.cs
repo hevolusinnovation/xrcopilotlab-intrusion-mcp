@@ -46,6 +46,24 @@ public class VpnTests
         Assert.Null(nuovo.RemoteIp);
     }
 
+    [Fact]
+    public void The_state_file_carries_the_ipv6_side_too()
+    {
+        // As xrc-vpn writes it with IPv6 on: an IPv6 network inside the tunnel, internal networks of both kinds, a
+        // user that connected to the server's public IPv6 address.
+        var vpn = VpnState.Parse("""
+            {"interface":"wgxrc","up":true,"updated":1794600000,"port":51820,"endpoint":"[2001:db8::2]","subnet":"10.88.0.0/24",
+             "subnet6":"fdec:377e:c6b8::/64","lan":["192.168.50.0/24","2001:db8:50::/64"],
+             "peers":[{"name":"laptop","kind":"device","address":"10.88.0.2","address6":"fdec:377e:c6b8::2","lan":[],"created":1794599000,
+                       "endpoint":"[2001:db8::3]:37160","latestHandshake":1794599990,"received":1,"sent":2}]}
+            """);
+        Assert.NotNull(vpn);
+        Assert.Equal("fdec:377e:c6b8::/64", vpn.Subnet6);
+        Assert.Equal(["192.168.50.0/24", "2001:db8:50::/64"], vpn.Lan);
+        var laptop = Assert.Single(vpn.Peers);
+        Assert.Equal(("fdec:377e:c6b8::2", "2001:db8::3"), (laptop.Address6, laptop.RemoteIp));
+    }
+
     [Theory]
     [InlineData("")]
     [InlineData("{\"interface\":")]

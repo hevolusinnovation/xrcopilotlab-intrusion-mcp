@@ -329,8 +329,15 @@ format and new attack types (about 1–2 weeks), L = a new kind of data or a new
 ### OpenVPN / WireGuard
 - **OpenVPN:** logs to syslog/journal or its own file: `TLS Error`, `AUTH_FAILED`, `TLS handshake failed`.
   `VpnLoginBruteForce` is possible. **Effort S.** Licence GPLv2 (from memory).
-- **WireGuard:** logs **nothing** by design (silent to unauthenticated packets; only kernel dynamic debug). It cannot
-  be integrated in a useful way.
+- **WireGuard:** logs **nothing** by design (silent to unauthenticated packets; only kernel dynamic debug), so it
+  adds no *attacks*. **Done another way (2026-11):** it is not read as a detector but installed as the customer's VPN
+  (`install.sh --with wireguard`), whose users the customer manages with `xrc-vpn`. What it knows about *who is
+  inside* is useful: every minute `xrc-vpn state` writes the users, their last handshake and the public address they
+  came from (from `wg show dump`, with the server's private key and the preshared keys left out) to
+  `/run/xrcopilotlab-vpn/state.json`. The toolkit geolocates those addresses (`intrusion_vpn`) and the posture flags a
+  key used from an unexpected country, keys unused for 60 days, a VPN with no public address, and points services open
+  to the internet (RDP, SMB, Modbus…) to the VPN. IPv4 and IPv6, inside the tunnel and as the public address (useful
+  behind a carrier-grade NAT). See the README and [docs/guida-vpn.md](guida-vpn.md).
 
 ### Other ideas worth one line each
 - **Sudo, su, useradd, passwd and new SSH keys in `auth.log`:** we already read this file. `sudo: … COMMAND=`,
@@ -369,7 +376,7 @@ format and new attack types (about 1–2 weeks), L = a new kind of data or a new
 | Apache logs | Web attacks on Apache | (the server itself) | Combined log | Yes | — | — | (existing) | nginx | S |
 | Postfix/Dovecot | Mail brute force, relay | (yes) | syslog `mail.log` | Yes | — | — | Mail relay attempt | fail2ban mail jails | S |
 | OpenVPN | VPN brute force | GPLv2 (yes) | syslog | Yes | — | — | VPN login brute force | — | S |
-| WireGuard | — | — | Silent by design | — | — | — | — | — | not feasible |
+| WireGuard | The customer's VPN (users, not attacks) | GPLv2 (kernel) / tools (yes) | Silent by design; state from `wg show dump` | `xrc-vpn state`, 0640 `adm`, no key | Very low | Main | Key used from an unexpected country, unused keys | — | **done** (`--with wireguard`) |
 
 ---
 

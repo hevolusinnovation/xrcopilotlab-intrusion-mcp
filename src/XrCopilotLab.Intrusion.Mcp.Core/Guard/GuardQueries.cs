@@ -66,14 +66,15 @@ public sealed record GuardiansResult(string Host, bool Simulated, DateTimeOffset
 /// whether that country is one the customer's people are expected in (<c>Policy:AllowedCountries</c>).
 /// </summary>
 public sealed record VpnPeerStatus(string Name, string Kind, string Address, IReadOnlyList<string> Lan, DateTimeOffset Created, bool Connected,
-    DateTimeOffset? LastHandshake, string? RemoteIp, GeoLocation? Location, bool ExpectedCountry, long Received, long Sent);
+    DateTimeOffset? LastHandshake, string? RemoteIp, GeoLocation? Location, bool ExpectedCountry, long Received, long Sent, string? Address6 = null);
 
 /// <summary>
 /// The customer's VPN: <c>Installed</c> once <c>install.sh --with wireguard</c> set it up, <c>Up</c> while it listens on
 /// UDP <c>Port</c>. The customer adds and revokes the users with <c>xrc-vpn</c>: this is only what they did.
 /// </summary>
 public sealed record VpnResult(string Host, bool Simulated, DateTimeOffset Now, bool Installed, bool Up, int? Port, string? Endpoint, string? Subnet,
-    IReadOnlyList<string> Lan, DateTimeOffset? Updated, int Connected, IReadOnlyList<VpnPeerStatus> Peers, string Note, string? Attribution);
+    IReadOnlyList<string> Lan, DateTimeOffset? Updated, int Connected, IReadOnlyList<VpnPeerStatus> Peers, string Note, string? Attribution,
+    string? Subnet6 = null);
 
 public sealed record SeverityCount(string Severity, int Findings);
 
@@ -132,14 +133,14 @@ public sealed class GuardQueries(IHostInspector inspector, IntrusionQueries intr
         {
             var location = p.RemoteIp is null ? null : geo.Locate(p.RemoteIp);
             return new VpnPeerStatus(p.Name, p.Kind, p.Address, p.Lan, p.Created, VpnState.Connected(p, now), p.LastHandshake, p.RemoteIp, location,
-                policy.IsAllowedCountry(location?.CountryCode), p.Received, p.Sent);
+                policy.IsAllowedCountry(location?.CountryCode), p.Received, p.Sent, p.Address6);
         }).OrderByDescending(p => p.Connected).ThenByDescending(p => p.LastHandshake).ThenBy(p => p.Name, StringComparer.Ordinal).ToList();
         var connected = peers.Count(p => p.Connected);
         var note = !vpn.Up ? "The VPN is installed but its interface is down: nobody can connect."
             : vpn.Endpoint is null ? "Up, but no public address is set: the customer sets it with xrc-vpn endpoint before adding users."
             : $"Up on UDP {vpn.Port}; users connect to {vpn.Endpoint}. {peers.Count} user(s), {connected} connected now.";
         return new VpnResult(intrusions.Host, intrusions.Simulated, now, true, vpn.Up, vpn.Port, vpn.Endpoint, vpn.Subnet, vpn.Lan, vpn.Updated, connected,
-            peers, note, geo.Attribution);
+            peers, note, geo.Attribution, vpn.Subnet6);
     }
 
     /// <summary>The customer's domain wins; a tunnel is the address only when there is no domain.</summary>
