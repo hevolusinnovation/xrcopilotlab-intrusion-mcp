@@ -467,13 +467,13 @@ function drawTable(summary, bannedIps) {
 }
 
 function drawStats(summary) {
-  const t = summary.totals || {};
-  $("s-attempts").textContent = t.attempts ?? 0;
-  $("s-addresses").textContent = t.addresses ?? 0;
-  $("s-banned").textContent = t.currentlyBanned ?? 0;
-  $("s-waf").textContent = t.wafAlerts ?? 0;
-  $("s-host").textContent = t.hostAlerts ?? 0;
-  $("s-blocks").textContent = t.firewallBlocks ?? 0;
+  const tot = summary.totals || {};
+  $("s-attempts").textContent = tot.attempts ?? 0;
+  $("s-addresses").textContent = tot.addresses ?? 0;
+  $("s-banned").textContent = tot.currentlyBanned ?? 0;
+  $("s-waf").textContent = tot.wafAlerts ?? 0;
+  $("s-host").textContent = tot.hostAlerts ?? 0;
+  $("s-blocks").textContent = tot.firewallBlocks ?? 0;
   const parts = [];
   const c2 = (summary.topAttackers || []).find(r => (r.attackTypes || []).includes("CommandAndControl"));
   const where = (l) => `${esc(l?.city || "")}, ${esc(l?.country || "")}`;
@@ -597,18 +597,18 @@ function tunnelView(tn) {
   return `<div class="c-state"><b class="off">${t("opening")}</b>${user}</div>
     <div class="btnrow"><button class="btn ghost" onclick="tunnelAction('logout')">${t("logout")}</button></div>`;
 }
-function renderConnection(c, t) {
+function renderConnection(c, tn) {
   const box = $("connection");
   if (c && c.mode === "domain") { box.innerHTML = domainView(c); return; }   // production: no Dev Tunnel, no key
-  if (t) { box.innerHTML = tunnelView(t); return; }                         // test: the Dev Tunnel lives here
+  if (tn) { box.innerHTML = tunnelView(tn); return; }                         // test: the Dev Tunnel lives here
   box.innerHTML = staticView(c);
 }
 async function refreshConnection() {
-  const t = await fetch("api/tunnel/status").then(r => r.ok ? r.json() : null).catch(() => null);
-  if (t && t.phase === "online" && tunnelKey === null)
+  const tn = await fetch("api/tunnel/status").then(r => r.ok ? r.json() : null).catch(() => null);
+  if (tn && tn.phase === "online" && tunnelKey === null)
     tunnelKey = await fetch("api/tunnel/key").then(r => r.ok ? r.json() : null).then(d => d && d.key).catch(() => null);
-  if (!t || t.phase !== "online") tunnelKey = null;
-  renderConnection(lastConn, t);
+  if (!tn || tn.phase !== "online") tunnelKey = null;
+  renderConnection(lastConn, tn);
 }
 async function tunnelAction(action) {
   tunnelKey = null;
