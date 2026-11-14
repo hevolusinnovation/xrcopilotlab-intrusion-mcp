@@ -118,6 +118,12 @@ body.map-only main { grid-template-rows: 1fr 300px; }
 
     <div class="alert" id="alert"></div>
 
+    <!-- At the top: what the SOC analyst approved and sent here is what the person reading this page acts on. -->
+    <div id="advice-box" hidden>
+      <h2>Da sistemare <span class="muted" id="advice-count" style="text-transform:none;letter-spacing:0"></span></h2>
+      <div class="findings" id="advice"></div>
+    </div>
+
     <div>
       <h2>Come ti raggiunge XRCopilotLab</h2>
       <div class="finding" id="connection"><span class="muted">…</span></div>
@@ -137,11 +143,6 @@ body.map-only main { grid-template-rows: 1fr 300px; }
     <div>
       <h2>Cosa migliorare <span class="muted" style="text-transform:none;letter-spacing:0">· ultimi 7 giorni</span></h2>
       <div class="findings" id="findings"><span class="muted">…</span></div>
-    </div>
-
-    <div id="advice-box" hidden>
-      <h2>Da sistemare <span class="muted" style="text-transform:none;letter-spacing:0">· approvati dall'analista</span></h2>
-      <div class="findings" id="advice"></div>
     </div>
 
     <div class="muted" style="font-size:12px">
@@ -529,7 +530,10 @@ function drawFindings(p) {
 // What a person approved in the SOC process and sent back (/api/advice). Shown only, never applied. Every field is
 // text chosen upstream, so it is escaped here and never put into the page as HTML.
 function drawAdvice(list) {
-  const items = (list || []).map(a => {
+  const all = list || [];
+  const open = all.filter(a => a.status !== "done").length;
+  const sorted = [...all.filter(a => a.status !== "done"), ...all.filter(a => a.status === "done")];  // open first
+  const items = sorted.map(a => {
     const done = a.status === "done";
     const from = a.findingId ? "dal controllo " + a.findingId : "inviato dal processo SOC";
     return `<div class="finding ${esc(a.severity)}"${done ? ' style="opacity:.55"' : ""}>
@@ -543,6 +547,7 @@ function drawAdvice(list) {
     </div>`;
   });
   $("advice-box").hidden = !items.length;
+  $("advice-count").textContent = `· approvati dall'analista · ${open} ${open === 1 ? "aperto" : "aperti"}`;
   $("advice").innerHTML = items.join("");
 }
 
