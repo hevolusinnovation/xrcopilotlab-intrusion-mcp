@@ -8,6 +8,7 @@ import http.client
 import http.server
 import json
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -192,9 +193,17 @@ def metasploit_available():
         return False
 
 
-def _emit(data, log):
+# dir_scanner calls "found" every path that does not answer 404: lab-01's rate limit answers 429 to the rest of the
+# scan, and those lines would read as hundreds of discoveries. They are counted instead, and reported once.
+_RATE_LIMITED = re.compile(r"^\[\+\] Found \S+ 429\b")
+
+
+def _emit(data, log, limited=None):
     for raw in (data or "").splitlines():
         line = raw.strip()
+        if limited is not None and _RATE_LIMITED.match(line):
+            limited[0] += 1
+            continue
         if line.startswith(("[+]", "[*]", "[-]", "[!]")):
             log(f"    {line}")
 
@@ -219,11 +228,15 @@ def _msf(source, modules, log, timeout=420):
             log(f"    [{module}]")
             console.write("run\n")
             deadline = time.time() + timeout
+            limited = [0]
             time.sleep(2)  # let the module start before we test is_busy
             while console.is_busy() and time.time() < deadline:
-                _emit(console.read().get("data", ""), log)
+                _emit(console.read().get("data", ""), log, limited)
                 time.sleep(1)
-            _emit(console.read().get("data", ""), log)
+            _emit(console.read().get("data", ""), log, limited)
+            if limited[0]:
+                log(f"    {limited[0]} risposte 429: lab-01 ha limitato la scansione (nginx, 10 richieste al secondo), "
+                    "non sono directory trovate")
     finally:
         try:
             console.destroy()

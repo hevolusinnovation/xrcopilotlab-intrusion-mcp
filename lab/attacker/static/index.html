@@ -145,7 +145,12 @@ async function setTarget() {
     const r = await fetch("/api/target", { method: "POST", body: JSON.stringify({ url, key }) });
     const d = await r.json();
     if (!r.ok) { $("target-msg").innerHTML = `<span class="error">${esc(d.error || "non verificato")}</span>`; }
-    else { $("target-msg").innerHTML = `<span style="color:var(--ok)">verificato: ${esc(d.host)} (${esc((d.detectors || []).join(", "))})</span>`; $("target-key").value = ""; }
+    else {
+      const note = d.note || d.warning;
+      $("target-msg").innerHTML = `<span style="color:var(--ok)">verificato: ${esc(d.host)} (${esc((d.detectors || []).join(", "))})</span>`
+        + (note ? `<br><span class="${d.warning ? "error" : ""}">${esc(note)}</span>` : "");
+      $("target-key").value = "";
+    }
   } catch { $("target-msg").innerHTML = `<span class="error">nessuna risposta</span>`; }
   $("target-set").disabled = false;
   refreshTarget();

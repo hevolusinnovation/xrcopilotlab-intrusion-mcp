@@ -119,10 +119,23 @@ class Handler(BaseHTTPRequestHandler):
                                              "(nel Dev Tunnel quello con -8091, non la pagina di monitoraggio -8093)"})
         except OSError as ex:
             return self._send(400, {"error": f"il server non risponde: {ex}"})
+        detectors = [d["detector"] for d in status.get("detectors", [])]
+        # lab-01's own public address (the Dev Tunnel) reaches only its API, not its website: the attacks would get 404
+        # there and no guardian would see them. It is the lab: attack it the lab's way, with every scenario.
+        if status.get("host") and status.get("host") == lab_host():
+            with _target_lock:
+                external = None
+            return self._send(200, {"mode": "lab", "host": status["host"], "detectors": detectors,
+                                    "note": "è l'indirizzo pubblico di lab-01, che porta solo all'API: gli attacchi "
+                                            "vanno al sito del laboratorio, con tutti gli scenari"})
+        warning = None
+        if parsed.hostname.endswith(".devtunnels.ms"):
+            warning = ("un Dev Tunnel porta solo all'API del toolkit, non al sito: gli attacchi web avranno 404 e il "
+                       "toolkit non li vedrà. Per attaccare il sito usa il suo indirizzo (https://sito/intrusion-mcp/)")
         with _target_lock:
             external = {"api": base + "/", "key": key, "host": status.get("host", parsed.hostname), "web": parsed.hostname}
-        return self._send(200, {"mode": "external", "host": status.get("host"),
-                                "detectors": [d["detector"] for d in status.get("detectors", [])]})
+        return self._send(200, {"mode": "external", "host": status.get("host"), "detectors": detectors,
+                                "warning": warning})
 
     def _forward(self, target, method):
         request = urllib.request.Request(target, method=method, data=b"" if method == "POST" else None)
@@ -149,6 +162,16 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, {"ok": False, "error": f"risposta {ex.code} dall'indirizzo pubblico"})
         except OSError as ex:
             return self._send(200, {"ok": False, "error": f"indirizzo pubblico non raggiungibile: {ex}"})
+
+
+def lab_host():
+    """lab-01's host name, from its own API; None if it does not answer."""
+    try:
+        request = urllib.request.Request(LAB_API + "status", headers={"X-API-Key": KEY})
+        with urllib.request.urlopen(request, timeout=10) as response:
+            return json.loads(response.read()).get("host")
+    except (OSError, json.JSONDecodeError):
+        return None
 
 
 def url_path(path):
