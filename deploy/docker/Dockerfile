@@ -88,6 +88,12 @@ RUN useradd -m -s /bin/bash -G sudo operatore && echo 'operatore:Alveo2026!' | c
  && suricata-update -q --no-test --local /etc/suricata/rules/lab.rules
 # The lab's sites, after the package: they turn ModSecurity off for the API ("modsecurity off;"), a directive nginx only
 # knows once --with modsecurity has loaded the module.
+# The page's key and certificate are made at the first start, not here: nginx -t runs with throwaway ones.
 COPY lab/server/nginx-sites/ /etc/nginx/sites-enabled/
-RUN nginx -t
+RUN d=/etc/nginx/xrcopilotlab-dashboard \
+ && printf 'proxy_set_header X-API-Key "check";\n' > $d/key.conf && : > $d/htpasswd \
+ && openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -days 1 -subj /CN=check \
+      -keyout $d/tls.key -out $d/tls.crt >/dev/null 2>&1 \
+ && nginx -t \
+ && rm -f $d/key.conf $d/htpasswd $d/tls.key $d/tls.crt
 ENTRYPOINT ["/usr/local/sbin/lab-entrypoint"]

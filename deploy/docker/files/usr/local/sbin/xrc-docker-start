@@ -31,10 +31,18 @@ fi
 
 # CrowdSec's credentials are not in the image: each container registers itself once (and with the central API when
 # online_client is in its configuration, to receive the community blocklist).
-if [[ -f /etc/crowdsec/config.yaml && ! -s /etc/crowdsec/local_api_credentials.yaml ]]; then
-  cscli machines add --auto --force >/dev/null 2>&1 && echo "crowdsec: registered this container (first start)"
+# The central API first: cscli refuses to load the local one while online_client names a credentials file that is not
+# there. Without internet, online_client is dropped and CrowdSec runs with its local API only.
+if [[ -f /etc/crowdsec/config.yaml ]]; then
   if grep -q '^    online_client:' /etc/crowdsec/config.yaml && [[ ! -s /etc/crowdsec/online_api_credentials.yaml ]]; then
-    cscli capi register >/dev/null 2>&1 || echo "crowdsec: no central API (no internet?): it runs with its local API only" >&2
+    if ! cscli capi register >/dev/null 2>&1; then
+      sed -i '/^    online_client:/,+1d' /etc/crowdsec/config.yaml
+      echo "crowdsec: no central API (no internet?): it runs with its local API only" >&2
+    fi
+  fi
+  if [[ ! -s /etc/crowdsec/local_api_credentials.yaml ]]; then
+    if cscli machines add --auto --force >/dev/null 2>&1; then echo "crowdsec: registered this container (first start)"
+    else echo "crowdsec: could not register with its local API: cscli machines add --auto --force" >&2; fi
   fi
 fi
 
