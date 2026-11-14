@@ -37,6 +37,7 @@ flowchart LR
 | Know how it protects the AI (the agent that reads the logs, and the customer's own chatbot) | [Protecting the AI agent](#protecting-the-ai-agent-prompt-injection-through-the-logs) and [guarding the customer's own AI](#guarding-the-customers-own-ai) |
 | Install it on a customer's server | [Quick start: a customer's server](#quick-start-a-customers-server), then [the details](#install-the-toolkit-on-a-customers-server) |
 | Give the customer's people a VPN | [The VPN](#the-vpn-step-by-step-the-customers-administrator); for the customer, in Italian: [docs/guida-vpn.md](docs/guida-vpn.md) |
+| Connect home and office (two FRITZ!Boxes) through a rented server | In Italian, step by step with costs: [docs/vps-aruba.md](docs/vps-aruba.md) (an Aruba Cloud VPS, from about €6.70 a month incl. VAT) |
 | Connect it to XRCopilotLab | [Register it in XRCopilotLab](#register-it-in-xrcopilotlab) |
 | Know what a setting or a variable does | [Every setting explained](#every-setting-explained) |
 | Know what a program or a tool is for | [Every tool explained](#every-tool-explained) |
@@ -773,7 +774,8 @@ for the other sites goes through the VPS. Every site needs its own network (two 
 change one). A FRITZ!Box imports a file: `xrc-vpn add casa-fritz --lan 192.168.178.0/24 > casa-fritz.conf`, then
 *Internet > Permit Access > VPN (WireGuard) > Add connection*. When a site is added, the users added before it are
 listed: `xrc-vpn reissue` gives them the new site's network. Step by step, in Italian:
-[docs/guida-vpn.md](docs/guida-vpn.md#un-server-centrale-vps-per-casa-e-ufficio).
+[docs/guida-vpn.md](docs/guida-vpn.md#un-server-centrale-vps-per-casa-e-ufficio); from buying the VPS to two connected
+FRITZ!Boxes, with the plans and their costs: [docs/vps-aruba.md](docs/vps-aruba.md).
 
 ```mermaid
 flowchart LR

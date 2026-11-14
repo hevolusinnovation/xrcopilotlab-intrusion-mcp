@@ -236,6 +236,9 @@ Cosa cambia rispetto a un server in ufficio:
 
 ### Quale VPS
 
+Tutti i passi su un VPS Aruba Cloud, dall'acquisto ai FRITZ!Box collegati, con i piani e i costi:
+[Un VPS Aruba come server centrale](vps-aruba.md).
+
 | | Minimo | Consigliato |
 |---|---|---|
 | Con solo VPN e monitoraggio | 2 vCPU, 2 GB RAM, 40 GB disco | |
