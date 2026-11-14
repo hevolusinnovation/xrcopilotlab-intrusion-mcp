@@ -1,4 +1,4 @@
-# Alveo Energia's public site (static, with a contact form), a reserved area with a password, and the intrusion package published as
+# lab-01's test site (static, with a contact form), a reserved area with a password, and the intrusion package published as
 # install.sh suggests: only the console's addresses may read it.
 server {
     listen 80 default_server;

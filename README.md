@@ -539,7 +539,7 @@ mistake can lock everyone out of SSH.
 
 To see the toolkit at work without a customer's server, `make up` starts a small lab on your computer, all in Docker:
 
-- **`server`** (container `intrusion-lab-server`, host `lab-01`), a fake company server (Ubuntu, "Alveo Energia" in Turin) with SSH, a website, fail2ban, a firewall, Suricata, Falco and ModSecurity,
+- **`server`** (container `intrusion-lab-server`, host `lab-01`), a test server (Ubuntu) with SSH, a website, fail2ban, a firewall, Suricata, Falco and ModSecurity,
   built from **the same Docker image a real host runs** ([`deploy/docker/Dockerfile`](deploy/docker/Dockerfile): target
   `lab` = target `server` + the lab's files), so the package, the guardians and the VPN are exactly the customer's. It is reached only through
   the `tunnel` container (the Dev Tunnel, or the customer's domain): its own networks never leave the lab;
