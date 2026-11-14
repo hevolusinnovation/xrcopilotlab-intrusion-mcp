@@ -12,7 +12,8 @@ gestisce la configurazione del vostro server: chi entra nella vostra rete lo dec
 La VPN è un **ingresso riservato** alla rete dell'azienda. Un dipendente in trasferta, da casa o dal cliente, accende
 la VPN sul telefono o sul portatile e lavora come se fosse in ufficio: raggiunge il gestionale, le cartelle condivise,
 il desktop remoto, le macchine dell'impianto. Lo stesso vale per una **seconda sede**: il suo router si collega alla
-VPN e le due reti si vedono.
+VPN e le due reti si vedono. E se l'azienda non ha un server in ufficio, la VPN può stare su un **server in affitto
+(VPS)** che fa da punto d'incontro per tutte le sedi: vedi [Un server centrale](#un-server-centrale-vps-per-casa-e-ufficio).
 
 Così i servizi delicati (desktop remoto, cartelle condivise, Modbus e gli altri protocolli industriali) non devono più
 essere aperti su internet, dove chiunque li può attaccare. La pagina di monitoraggio, alla voce *Cosa migliorare*, vi
@@ -88,7 +89,19 @@ sapete subito a chi chiedere. Il nome può contenere solo lettere minuscole, num
 
 ## Aggiungere il router di un'altra sede (o un PC gestito dall'IT)
 
-Un router crea **da solo** la sua chiave e vi fornisce solo la **chiave pubblica**, che non è segreta. La chiave
+Ci sono due modi, a seconda di cosa sa fare il router.
+
+**Il router importa un file** (il FRITZ!Box, per esempio). La chiave la crea il server e la mette nel file, come per un
+portatile:
+
+```bash
+xrc-vpn add sede-milano --lan 192.168.20.0/24 > sede-milano.conf
+```
+
+Importate il file nel router (FRITZ!Box: vedi [più avanti](#configurare-i-fritzbox)) e poi **cancellatelo**: contiene
+la chiave del router, che il server non conserva. Se si perde, `xrc-vpn reissue sede-milano` ne crea uno nuovo.
+
+**Il router crea la sua chiave** (MikroTik, pfSense/OPNsense, Draytek…). Un router così crea **da solo** la sua chiave e vi fornisce solo la **chiave pubblica**, che non è segreta. La chiave
 privata non lascia mai il router. Nel menu WireGuard del router (FRITZ!Box, MikroTik, pfSense/OPNsense, Draytek…)
 create una nuova connessione, copiate la chiave pubblica che vi mostra e date:
 
@@ -103,8 +116,12 @@ key* e *keepalive*. La *preshared key* è segreta: copiatela nel router e non co
 Allo stesso modo un PC gestito dal vostro reparto IT può creare la chiave nell'app (*Aggiungi tunnel vuoto*) e dare
 solo la chiave pubblica con `--pubkey`, senza `--lan`.
 
-Perché i computer dell'ufficio principale raggiungano quelli di Milano, il router dell'ufficio deve sapere che la rete
-`192.168.20.0/24` passa dal server della VPN (una *rotta statica*). Da Milano verso l'ufficio invece funziona subito.
+Da Milano verso l'ufficio funziona subito, e anche i telefoni e i portatili in VPN raggiungono Milano. Perché siano i
+computer dell'ufficio principale a raggiungere quelli di Milano, il router dell'ufficio deve sapere che la rete
+`192.168.20.0/24` passa dal server della VPN (una *rotta statica*).
+
+Gli utenti creati **prima** della nuova sede non conoscono ancora la sua rete: il comando li elenca, e
+`xrc-vpn reissue <nome>` dà a ciascuno la configurazione aggiornata.
 
 ## Togliere un utente
 
@@ -169,8 +186,8 @@ Per ciascuno:
 xrc-vpn reissue mario-telefono
 ```
 
-Un telefono o un portatile riceve un nuovo QR (o file, con `--conf`), con una chiave nuova. Un router tiene la sua
-chiave: `reissue` ristampa i campi da ricopiare nel router.
+Un telefono o un portatile riceve un nuovo QR (o file, con `--conf`), con una chiave nuova; un router che importa un
+file riceve un file nuovo. Un router con la sua chiave la tiene: `reissue` ristampa i campi da ricopiare nel router.
 
 ## IPv6
 
@@ -185,10 +202,112 @@ La VPN funziona anche in IPv6:
 - **verso la rete interna**: se l'ufficio usa IPv6, `xrc-vpn lan` accetta anche reti IPv6
   (`xrc-vpn lan 192.168.1.0/24,2001:db8:1::/64`).
 
+## Un server centrale (VPS) per casa e ufficio
+
+Quando le sedi sono due o più (casa e ufficio, due uffici) e nessuna ha un server sempre acceso, la VPN può stare su un
+**server in affitto su internet** (un VPS, per esempio Aruba Cloud). Il VPS non ha una rete interna sua: è solo il
+**punto d'incontro**. Il router di ogni sede si collega al VPS e da lì le sedi si vedono tra loro.
+
+```mermaid
+flowchart LR
+  subgraph CASA["Casa (192.168.178.0/24)"]
+    PC1[PC, TV, NAS] --- F1[FRITZ!Box]
+  end
+  subgraph UFFICIO["Ufficio (192.168.10.0/24)"]
+    PC2[PC, stampante] --- F2[FRITZ!Box]
+  end
+  F1 -->|"VPN, in uscita"| VPS["VPS<br/>xrc-vpn lan none"]
+  F2 -->|"VPN, in uscita"| VPS
+  TEL[Telefono fuori sede] -->|VPN| VPS
+  F1 -.->|"internet, linea propria"| NET((Internet))
+  F2 -.->|"internet, linea propria"| NET
+```
+
+Cosa cambia rispetto a un server in ufficio:
+
+- **Nessuna porta da aprire nelle sedi.** Sono i router a chiamare il VPS, che ha un IP pubblico fisso. Funziona anche
+  se la linea di casa o dell'ufficio è in CGNAT (senza IP pubblico).
+- **I computer delle sedi non installano niente.** Un portatile collegato al Wi-Fi di casa raggiunge la stampante
+  dell'ufficio passando dai due FRITZ!Box. Serve un utente VPN solo per un dispositivo **fuori** da entrambe le sedi
+  (il telefono in viaggio).
+- **Internet resta quello di ogni sede.** Passa dal VPS solo il traffico verso l'altra sede; la navigazione, lo
+  streaming e le videochiamate escono dalla linea di casa o dell'ufficio come prima. Se il VPS si ferma, si perde solo
+  il collegamento tra le sedi, non internet.
+
+### Quale VPS
+
+| | Minimo | Consigliato |
+|---|---|---|
+| Con solo VPN e monitoraggio | 2 vCPU, 2 GB RAM, 40 GB disco | |
+| Con Suricata (analisi del traffico) | | 2 vCPU, **4 GB RAM**, 80 GB disco |
+
+- Sistema **Ubuntu 24.04**, IPv4 pubblico (incluso nei VPS).
+- Deve essere una **macchina virtuale completa** (KVM/OpenStack, come i VPS e i Cloud Server di Aruba), non un
+  container: Falco lo verifica con `ls /sys/kernel/btf/vmlinux`.
+- Il traffico tra le sedi conta nel traffico del VPS: per file grandi e copie notturne scegliete un piano con traffico
+  abbondante o illimitato.
+
+### Installazione sul VPS
+
+```bash
+sudo VPN_LAN=none VPN_ENDPOINT=<IP pubblico del VPS> \
+     DASHBOARD_ALLOW="10.88.0.0/24 192.168.178.0/24 192.168.10.0/24" \
+     ./install.sh --with fail2ban,crowdsec,wireguard
+```
+
+`VPN_LAN=none` dice che il VPS non apre una rete sua. `DASHBOARD_ALLOW` fa aprire la pagina di monitoraggio solo dalle
+due sedi e dalla VPN. Nel pannello del provider (firewall del VPS) lasciate aperte solo **SSH** (meglio se solo dagli
+IP delle sedi) e **UDP 51820**. Se usate UFW sul VPS: `sudo ufw allow 51820/udp`.
+
+### Preparare le reti delle sedi
+
+Ogni sede deve avere una **rete diversa**. I FRITZ!Box nascono tutti con `192.168.178.0/24`: lasciate quella di casa e
+cambiate quella dell'ufficio (FRITZ!Box: *Rete domestica › Rete › Impostazioni di rete › Indirizzi IPv4*), per esempio
+in `192.168.10.1` con maschera `255.255.255.0`. I dispositivi dell'ufficio prendono il nuovo indirizzo da soli; quelli
+con un IP fisso (stampanti, NAS) vanno aggiornati a mano.
+
+Poi, sul VPS:
+
+```bash
+xrc-vpn add casa-fritz    --lan 192.168.178.0/24 > casa-fritz.conf
+xrc-vpn add ufficio-fritz --lan 192.168.10.0/24  > ufficio-fritz.conf
+xrc-vpn reissue casa-fritz > casa-fritz.conf      # casa è stata creata prima dell'ufficio: ora conosce anche lui
+```
+
+Se provate a dare a due sedi la stessa rete, `xrc-vpn` si ferma e lo dice.
+
+### Configurare i FRITZ!Box
+
+Serve FRITZ!OS **7.50 o successivo** (*Sistema › Aggiornamento*). Su ciascun FRITZ!Box:
+
+1. se ci sono già connessioni WireGuard di prova, **cancellatele**;
+2. *Internet › Abilitazioni › VPN (WireGuard)* › **Aggiungi connessione**;
+3. scegliete **Collegare reti** (*LAN-LAN*), poi **"La connessione è già configurata, importa le impostazioni"** (o
+   simile, secondo la versione);
+4. caricate il file `.conf` di quella sede (`casa-fritz.conf` a casa, `ufficio-fritz.conf` in ufficio) e confermate;
+5. **cancellate il file** dal computer.
+
+> **Da verificare sul vostro FRITZ!Box.** Il file ha come indirizzo del tunnel quello della VPN (`10.88.0.2/32`).
+> Alcune versioni di FRITZ!OS, per un collegamento tra reti, vogliono invece l'indirizzo del FRITZ!Box nella sua rete
+> (`192.168.178.1/24`). Se l'importazione lo rifiuta, correggete la riga `Address` nel file con l'indirizzo del FRITZ!Box
+> e riprovate: il VPS accetta entrambi.
+
+Il collegamento resta acceso da solo (*keepalive* di 25 secondi). Sul VPS, `xrc-vpn list` mostra le due sedi con
+l'ultimo collegamento di pochi minuti fa. Dal PC di casa provate `ping 192.168.10.1`: risponde il FRITZ!Box
+dell'ufficio.
+
+### Il telefono fuori sede
+
+```bash
+xrc-vpn add mario-telefono
+```
+
+Il telefono raggiunge entrambe le sedi. Quando è a casa o in ufficio, sul Wi-Fi, la VPN si può tenere spenta.
+
 ## Cosa fa e cosa non fa
 
-- Apre **solo** le reti interne indicate. Non fa uscire su internet attraverso l'ufficio: ognuno naviga con la propria
-  connessione.
+- Apre **solo** le reti interne indicate e quelle delle sedi collegate. Non fa uscire su internet attraverso l'ufficio
+  o il VPS: ognuno naviga con la propria connessione.
 - Non tocca il firewall UFW del server. Se è acceso, l'installazione vi dice la regola da aggiungere
   (`sudo ufw allow 51820/udp`).
 - Non registra tentativi falliti: chi non ha la chiave giusta non riceve risposta, e non c'è niente da registrare.
@@ -200,6 +319,7 @@ La VPN funziona anche in IPv6:
 | Problema | Cosa controllare |
 |---|---|
 | L'app non si collega mai (nessun "handshake") | La regola di port forwarding UDP 51820 sul router; l'indirizzo pubblico (`xrc-vpn show`); se la linea è in CGNAT (vedi sopra); che il telefono non sia su una rete Wi-Fi che blocca le VPN |
+| Le due sedi sono collegate (`xrc-vpn list`) ma non si vedono | Che le reti delle sedi siano diverse; che la sede creata per prima abbia avuto `reissue` dopo l'aggiunta dell'altra; il firewall dei PC (Windows blocca il ping da altre reti finché non lo si permette) |
 | Si collega ma non raggiunge i computer dell'ufficio | La rete interna aperta (`xrc-vpn show`, riga *Internal network*); se è sbagliata, `xrc-vpn lan` e poi `reissue` per gli utenti |
 | Funzionava e ora no | L'IP pubblico dell'ufficio è cambiato: `xrc-vpn endpoint`, poi `reissue`; oppure l'utente è stato revocato |
 | Un utente compare da una città strana | Chiedete alla persona; se non è lei, `xrc-vpn revoke <nome>` subito |
@@ -210,10 +330,11 @@ La VPN funziona anche in IPv6:
 |---|---|
 | `xrc-vpn add <nome>` | Nuovo telefono o portatile: QR code |
 | `xrc-vpn add <nome> --conf > file.conf` | Lo stesso, come file da importare |
+| `xrc-vpn add <nome> --lan <rete> > file.conf` | Router di un'altra sede che importa un file (FRITZ!Box) |
 | `xrc-vpn add <nome> --pubkey <chiave> [--lan <rete>]` | Router di un'altra sede o PC con chiave propria |
 | `xrc-vpn revoke <nome>` | Toglie subito l'accesso |
 | `xrc-vpn reissue <nome> [--conf]` | Nuova configurazione dopo un cambio di indirizzo o di rete, o per un dispositivo perso |
 | `xrc-vpn list` | Utenti e ultimo collegamento |
 | `xrc-vpn show [<nome>]` | Impostazioni del server, o i campi di un router |
 | `xrc-vpn endpoint <IP o nome>` | Indirizzo pubblico a cui si collegano gli utenti |
-| `xrc-vpn lan <reti> \| auto` | Reti interne che la VPN apre |
+| `xrc-vpn lan <reti> \| auto \| none` | Reti interne che la VPN apre; `none` su un server centrale (VPS) |

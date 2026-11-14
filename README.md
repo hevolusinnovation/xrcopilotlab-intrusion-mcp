@@ -726,7 +726,7 @@ sudo ./install.sh --with fail2ban,crowdsec,suricata,falco,modsecurity,wireguard 
 | `falco` | Installs Falco from its own repository with the **modern eBPF probe** (no kernel module, no compiler, nothing to rebuild at a kernel upgrade). Writes alerts as JSON to `/var/log/falco/events.json` (readable by the group `adm`, rotated daily for a week), adds to each alert the SSH client address, the `sudo` user and the process tree (so the toolkit can tie it to the attacker), and adds three rules Falco has not got for a plain server: **SSH key added**, **account created or changed**, **crypto miner started**. It watches; it never kills a process |
 | `modsecurity` | Needs nginx. Installs the ModSecurity v3 nginx module and the OWASP Core Rule Set, in **detection only** (`SecRuleEngine DetectionOnly`): it reads every request, bodies included, and writes the ones the CRS would block to `/var/log/modsecurity/audit.json` (JSON, readable by `adm`, rotated with `copytruncate`), but blocks nothing. Switched on for every site with one file in `conf.d` (a site with `modsecurity off;` stays off); the toolkit's own API and the monitoring page are excluded. `nginx -t` is run before and after: if it fails, the file is removed and nginx is left untouched. The package's own rule loader uses a directive ModSecurity v3 rejects, so the CRS files are included one by one. It also adds `/etc/modsecurity/xrcopilotlab/ai.conf`: three rules (ids 200101-200103) for text written to take over an AI in a request body or query string, see [Guarding the customer's own AI](#guarding-the-customers-own-ai) |
 
-| `wireguard` | Installs WireGuard, `qrencode` (QR codes for the phone app) and the command **`xrc-vpn`**, with which **the customer** manages the users: no user is created by the script, nor ever by Hevolus. The server's key is made at the **first start** (`xrcopilotlab-vpn-init`), never during the install, so an image built with `--no-start` does not give every customer the same key. The VPN (interface `wgxrc`, UDP 51820, networks `10.88.0.0/24` and an IPv6 ULA /64) reaches **only the internal network** (the one of the default route, printed at the end of the install, or `VPN_LAN`; IPv4 and IPv6), never the internet through this server. Creates the group `vpn-admin`, whose members may run `xrc-vpn` (and nothing else) through `sudo` with their own password. Every minute it writes who is connected for the toolkit, without any key. UFW is not touched: if it is on, the script prints the rule to add |
+| `wireguard` | Installs WireGuard, `qrencode` (QR codes for the phone app) and the command **`xrc-vpn`**, with which **the customer** manages the users: no user is created by the script, nor ever by Hevolus. The server's key is made at the **first start** (`xrcopilotlab-vpn-init`), never during the install, so an image built with `--no-start` does not give every customer the same key. The VPN (interface `wgxrc`, UDP 51820, networks `10.88.0.0/24` and an IPv6 ULA /64) reaches **only the internal network** (the one of the default route, printed at the end of the install, or `VPN_LAN`; IPv4 and IPv6) and the sites behind routers, never the internet through this server. With `VPN_LAN=none` it is a central server (a VPS) that connects the sites. Creates the group `vpn-admin`, whose members may run `xrc-vpn` (and nothing else) through `sudo` with their own password. Every minute it writes who is connected for the toolkit, without any key. UFW is not touched: if it is on, the script prints the rule to add |
 
 **Suricata needs memory:** about 1.5 GB with all the ET Open rules (measured in the lab). Install it on servers with
 4 GB or more, or trim the rules first (`/etc/suricata/disable.conf`, then `suricata-update`).
@@ -752,6 +752,7 @@ sudo usermod -aG vpn-admin anna                                     # who may ma
 xrc-vpn add mario-telefono            # a phone: prints a QR code for the WireGuard app, shown only now
 xrc-vpn add mario-pc --conf > mario-pc.conf    # a laptop: a file to import, then delete (it holds the key)
 xrc-vpn add sede-milano --pubkey <the router's public key> --lan 192.168.20.0/24   # another site's router
+xrc-vpn add casa-fritz --lan 192.168.178.0/24 > casa-fritz.conf   # a router that imports a file (FRITZ!Box)
 xrc-vpn list                          # who exists, last connection
 xrc-vpn revoke mario-telefono         # out at once
 xrc-vpn endpoint 93.41.10.7           # change the public address users connect to (IPv4, IPv6 or a name)
@@ -764,10 +765,35 @@ xrc-vpn show                          # the server's settings, and the networks 
 route. At the end of the install `install.sh` prints them, with the networks on the server's other interfaces that it
 does **not** open: on a server with more than one network card, check them, and change them with `xrc-vpn lan`.
 
+**A central server (a VPS) for several sites.** With `VPN_LAN=none` (or `xrc-vpn lan none`) the server opens no
+network of its own: it is the meeting point. Each site's router connects to it (no port to open at the sites, the
+keepalive keeps the tunnel up even behind a carrier-grade NAT) and every site reaches the others, with the VPN users;
+the PCs behind a router need nothing installed. Each site keeps browsing the internet on its own line: only the traffic
+for the other sites goes through the VPS. Every site needs its own network (two FRITZ!Boxes both on `192.168.178.0/24`:
+change one). A FRITZ!Box imports a file: `xrc-vpn add casa-fritz --lan 192.168.178.0/24 > casa-fritz.conf`, then
+*Internet > Permit Access > VPN (WireGuard) > Add connection*. When a site is added, the users added before it are
+listed: `xrc-vpn reissue` gives them the new site's network. Step by step, in Italian:
+[docs/guida-vpn.md](docs/guida-vpn.md#un-server-centrale-vps-per-casa-e-ufficio).
+
+```mermaid
+flowchart LR
+  subgraph HOME["Home (192.168.178.0/24)"]
+    PC1[PC, TV, NAS] --- F1[FRITZ!Box]
+  end
+  subgraph OFFICE["Office (192.168.10.0/24)"]
+    PC2[PCs, printer] --- F2[FRITZ!Box]
+  end
+  F1 -->|"WireGuard, outgoing"| VPS["VPS: xrc-vpn lan none<br/>+ the toolkit"]
+  F2 -->|"WireGuard, outgoing"| VPS
+  PHONE[Phone away from both] -->|WireGuard| VPS
+  F1 -.->|"internet, own line"| NET((Internet))
+  F2 -.->|"internet, own line"| NET
+```
+
 **After a change** of the public address (`endpoint`) or of the networks (`lan`), the users added before still have
 the old values in their configuration: the command lists them, and `xrc-vpn reissue <name>` gives each a new one. A
-phone or laptop gets a new key and QR (the old configuration stops working at once); a router keeps its own key and
-gets its fields again, preshared key included.
+phone or laptop, or a router that imported a file, gets a new key (the old configuration stops working at once); a
+router with its own key keeps it and gets its fields again, preshared key included.
 
 **IPv6.** The public address may be IPv6 (`xrc-vpn endpoint 2001:db8::7`, written as `[2001:db8::7]:51820` in the
 users' configuration): the usual way out when the office line has no public IPv4 of its own (carrier-grade NAT).
@@ -787,12 +813,13 @@ switches on IPv6 forwarding, after telling the server's interfaces to keep accep
 | `VPN_PORT` | `51820` | UDP port |
 | `VPN_SUBNET` | `10.88.0.0/24` | The VPN's own network: a /24 no site uses (checked against the internal network) |
 | `VPN_SUBNET6` | a ULA /64 made at the first start | The VPN's own IPv6 network, or `off` |
-| `VPN_LAN` | the default route's networks | The internal network(s) the VPN opens, IPv4 and IPv6, comma separated |
+| `VPN_LAN` | the default route's networks | The internal network(s) the VPN opens, IPv4 and IPv6, comma separated; `none` for a central server (VPS) |
 | `VPN_DNS` | — | A DNS server the users get (the office's) |
 
 **The keys.** A phone or laptop gets a key made on the server, shown once (QR or file) and **not kept**: the server
 keeps public keys only. A router, or a PC managed by the customer's IT, makes its own key and gives only its public key
-(`--pubkey`): the private key never leaves the device, and `xrc-vpn` prints the fields to type into the router. Every
+(`--pubkey`): the private key never leaves the device, and `xrc-vpn` prints the fields to type into the router. A
+router that can only import a file (a FRITZ!Box) gets its key made on the server, in the file, like a laptop. Every
 user also gets a preshared key. A lost device: `xrc-vpn reissue <name>` (a new key, the old one stops working), or
 `xrc-vpn revoke <name>` to take it out.
 
@@ -1230,7 +1257,7 @@ Variables, given before the command (`sudo VAR=value ./install.sh …`). All opt
 | `VPN_PORT` | `51820` | The VPN's UDP port; the office router forwards it to this server |
 | `VPN_SUBNET` | `10.88.0.0/24` | The VPN's own IPv4 network: a /24 no site uses |
 | `VPN_SUBNET6` | made at the first start | The VPN's own IPv6 network (a ULA /64), or `off` |
-| `VPN_LAN` | the default route's networks | The internal networks the VPN opens, IPv4 and IPv6, comma separated |
+| `VPN_LAN` | the default route's networks | The internal networks the VPN opens, IPv4 and IPv6, comma separated; `none` on a central server (a VPS) that only connects the sites |
 | `VPN_DNS` | — | A DNS server for the VPN users (the office's) |
 
 ### What `install.sh` writes on the server
