@@ -13,11 +13,14 @@ services:
   # The customer's server: service and container "server" (Docker Desktop shows it so), host lab-01.
   server:
     container_name: intrusion-lab-server
+    # The toolkit's server image (deploy/docker/Dockerfile, target server, the one for a real host) plus the lab's files:
+    # what runs here is what runs on a customer's VPS, with what the attacks need to find on top (target lab).
     build:
       context: ..
-      dockerfile: lab/server/Dockerfile
+      dockerfile: deploy/docker/Dockerfile
+      target: lab
     hostname: lab-01
-    # systemd as PID 1, iptables for the firewall and fail2ban: a lab container, never a pattern for production.
+    # systemd as PID 1, iptables for the firewall and fail2ban (as deploy/docker/compose.yml on a real host).
     privileged: true
     cgroup: host
     tmpfs: [/run, /run/lock]
@@ -37,6 +40,8 @@ services:
       PROD_API_KEY: ${PROD_API_KEY:-}
       # Set: the package says https://<domain> is XRCopilotLab's address (Connection:PublicUrl).
       PUBLIC_DOMAIN: ${PUBLIC_DOMAIN:-}
+      # The VPN's public address in the lab (the attacker's "internet" side).
+      VPN_ENDPOINT: 203.0.113.250
     networks:
       it:       { ipv4_address: 198.51.100.20 }
       internet: { ipv4_address: 203.0.113.250 }

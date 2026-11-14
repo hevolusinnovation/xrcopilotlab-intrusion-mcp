@@ -1,6 +1,6 @@
 {
   "name": "lab-01",
-  "note": "The Docker lab's test server (lab/server/Dockerfile): the toolkit's package with its guardians, plus what the attack console needs to find",
+  "note": "The Docker lab's test server (deploy/docker/Dockerfile, target lab): the server image a real host runs, plus what the attack console needs to find",
   "demoVpnUsers": ["anna-portatile"],
   "demo": [
     "The account operatore (sudo) logs in over SSH with a password the lab's scenarios guess",

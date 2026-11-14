@@ -35,7 +35,7 @@ flowchart LR
 | Understand how it works | [The big picture](#the-big-picture) and [How it works](#how-it-works-architecture) |
 | Try it on your laptop, with real attacks | [Quick start: the lab](#quick-start-the-lab-on-your-laptop) |
 | Know how it protects the AI (the agent that reads the logs, and the customer's own chatbot) | [Protecting the AI agent](#protecting-the-ai-agent-prompt-injection-through-the-logs) and [guarding the customer's own AI](#guarding-the-customers-own-ai) |
-| Install it on a customer's server | [Quick start: a customer's server](#quick-start-a-customers-server), then [the details](#install-the-toolkit-on-a-customers-server) |
+| Install it on a customer's server, **directly** or **in Docker** (a VPS, a mini PC) | [Two ways to install](#two-ways-to-install-directly-or-in-docker), then [directly](#install-the-toolkit-on-a-customers-server) or [in Docker](#install-in-docker-a-vps-a-mini-pc) |
 | Give the customer's people a VPN | [The VPN](#the-vpn-step-by-step-the-customers-administrator); for the customer, in Italian: [docs/guida-vpn.md](docs/guida-vpn.md) |
 | Connect home and office (two FRITZ!Boxes) through a rented server | In Italian, step by step with costs: [docs/vps-aruba.md](docs/vps-aruba.md) (an Aruba Cloud VPS, from about €6.70 a month incl. VAT) |
 | Connect it to XRCopilotLab | [Register it in XRCopilotLab](#register-it-in-xrcopilotlab) |
@@ -53,8 +53,10 @@ flowchart LR
 - [What it reads: the security packages](#what-it-reads-the-security-packages)
   ([what could come next](#more-guardians-what-could-come-next), [full analysis](docs/security-tools.md))
 - [The test console (Docker lab)](#the-test-console-docker-lab)
+- [Two ways to install: directly or in Docker](#two-ways-to-install-directly-or-in-docker)
 - [Install the toolkit on a customer's server](#install-the-toolkit-on-a-customers-server)
-  (incl. [the VPN](#the-vpn-step-by-step-the-customers-administrator) and [the monitoring page](#5-the-monitoring-page))
+  (incl. [the VPN](#the-vpn-step-by-step-the-customers-administrator) and [the monitoring page](#5-the-monitoring-page)),
+  or [in Docker (a VPS, a mini PC)](#install-in-docker-a-vps-a-mini-pc)
 - [The lab on a domain (stable address)](#the-lab-on-a-domain-stable-address), or else
   [a public test address for XRCopilotLab (dynamic URL)](#a-public-test-address-for-xrcopilotlab-dynamic-url)
 - [Commands (make)](#commands-make)
@@ -227,6 +229,9 @@ Start with **La notte completa** (about four minutes) and watch the page. `make 
 deletes everything. All the commands: [Commands (make)](#commands-make). What runs inside: [The test console](#the-test-console-docker-lab).
 
 ## Quick start: a customer's server
+
+Two ways, same toolkit, same guardians, same VPN: **directly** on the server (below), or **in Docker** on it
+([Install in Docker](#install-in-docker-a-vps-a-mini-pc)). Which one: [Two ways to install](#two-ways-to-install-directly-or-in-docker).
 
 **What you need:** a Debian or Ubuntu server (the lab runs Ubuntu 24.04; Falco needs a kernel with BTF, as on Ubuntu
 22.04 and later), `sudo`, and a key of at least
@@ -535,7 +540,8 @@ mistake can lock everyone out of SSH.
 To see the toolkit at work without a customer's server, `make up` starts a small lab on your computer, all in Docker:
 
 - **`server`** (container `intrusion-lab-server`, host `lab-01`), a fake company server (Ubuntu, "Alveo Energia" in Turin) with SSH, a website, fail2ban, a firewall, Suricata, Falco and ModSecurity,
-  and **the same toolkit package a customer installs**, installed by the same `install.sh`. It is reached only through
+  built from **the same Docker image a real host runs** ([`deploy/docker/Dockerfile`](deploy/docker/Dockerfile): target
+  `lab` = target `server` + the lab's files), so the package, the guardians and the VPN are exactly the customer's. It is reached only through
   the `tunnel` container (the Dev Tunnel, or the customer's domain): its own networks never leave the lab;
 - **`metasploit`** (container `intrusion-lab-metasploit`), a real attack engine the console drives for three of the attacks;
 - **`attacker`** (container `intrusion-lab-attacker`), which attacks `lab-01` when you press a button, and serves the console on
@@ -644,6 +650,40 @@ One row per attacking address, most serious first:
 | **Ultimo evento** | When it last did something |
 
 **Periodo** changes the window: last hour, last 24 hours, last week. The page refreshes by itself.
+
+---
+
+## Two ways to install: directly or in Docker
+
+The toolkit protects **one server**: the one whose logs it reads, whose firewall bans, whose VPN lets people in. It
+can sit on that server in two ways. Both use the same package and the same `install.sh`: what runs is the same.
+
+| | **Directly on the server** | **In Docker on the server** |
+|---|---|---|
+| How | `sudo ./install.sh --with …` ([details](#install-the-toolkit-on-a-customers-server)) | `docker compose -f deploy/docker/compose.yml up -d` ([details](#install-in-docker-a-vps-a-mini-pc)) |
+| What it watches | Everything on the server: SSH, nginx, the firewall, what runs inside (Falco) | The same, on the host's network (`network_mode: host`). SSH and the firewall are the **host's**: their logs are read from the host. Falco sees what runs **inside the container**, not the host's processes |
+| The web server | The server's nginx, with the customer's sites | The container's nginx takes ports 80/443: the customer's sites go in its `sites` volume (or the host keeps no nginx of its own) |
+| Updates | `install.sh` of the new version | `docker compose … up -d --build` with the new version: the volumes keep the key, the VPN, the bans, the history |
+| Best for | A server the customer already has, a VM with its own sites | A new VPS or mini PC that does only this: guardian, VPN hub, monitoring page |
+| Recommended when | You can install packages on the host | You want the whole thing in one container you can rebuild or move |
+
+**What is not an installation:**
+
+- **The lab's `lab-01`** (`make up`): it is the Docker image above **plus** what the attacks need to find (an account
+  with a known password, a sample site, a VPN user whose key the attacker has). Built to be attacked: never connect a
+  real network to it. It says so itself: a red **LABORATORIO** banner on its page and the finding `lab-image` (see
+  [the test console](#the-test-console-docker-lab)).
+- **The `Dockerfile` at the repository's root**: the toolkit alone, in simulated mode, for the online demo
+  ([Deploy the demo](#deploy-the-demo-simulated-mode)). No guardians, no VPN.
+
+```mermaid
+flowchart LR
+  P[The package<br/>install.sh] --> D[Directly<br/>on the server]
+  P --> S[Docker image<br/>target server]
+  S --> V[A VPS, a mini PC<br/>compose.yml]
+  S --> L[Docker image<br/>target lab = server<br/>+ the lab's files]
+  L --> T[lab-01: test only]
+```
 
 ---
 
@@ -894,6 +934,81 @@ save it as `/opt/xrcopilotlab-intrusion-mcp/geo/dbip-city-lite.csv.gz` and run
 
 Tried in the Docker lab (first install and repeated runs), not yet on a customer's server. Two things to check there: that `/var/log/crowdsec.log` is
 readable by the group `adm`, and the exact line format of the server's CrowdSec version.
+
+---
+
+## Install in Docker (a VPS, a mini PC)
+
+The same package, guardians and VPN as a direct install, in one container that runs systemd, like a small server
+inside the server. The image is [`deploy/docker/Dockerfile`](deploy/docker/Dockerfile), target `server`; the way to run
+it is [`deploy/docker/compose.yml`](deploy/docker/compose.yml). It holds **no user, no password and no key**: each
+container makes its own secrets at its first start and keeps them in its volumes.
+
+**What you need:** a Linux host (Ubuntu 22.04 or later; Falco needs a kernel with BTF) with Docker and the compose
+plugin, the repository (or just `deploy/` and `src/`) on it, and a key of at least 24 characters for XRCopilotLab.
+Nothing else on the host may use ports 80, 443, 8470, 8471 or the VPN's UDP port: the container works on the host's
+own network.
+
+```bash
+# 1. on the host: the settings (the key, the VPN's public address)
+cp deploy/docker/server.env.example deploy/docker/server.env
+nano deploy/docker/server.env        # INTRUSION_MCP_API_KEY=…, VPN_ENDPOINT=<this VPS's IP or name>, VPN_LAN=none on a VPS
+
+# 2. build and start (the first build takes a few minutes: Suricata's rules, Falco, CrowdSec)
+docker compose -f deploy/docker/compose.yml up -d --build
+
+# 3. the monitoring page's password, printed once at the first start
+docker compose -f deploy/docker/compose.yml logs server | grep -A1 "Monitoring page"
+
+# 4. check it answers
+curl -s http://127.0.0.1:8470/healthz
+
+# 5. the VPN's users, added by the customer, as on any server
+docker exec -it xrc-server xrc-vpn add mario-telefono
+```
+
+**At every start** the container runs `install.sh --no-start` again, before systemd. It makes what is missing and
+keeps the rest:
+
+- **API key:** its SHA-256 from `INTRUSION_MCP_API_KEY` (or `INTRUSION_MCP_API_KEY_HASH`). Give it once, then remove
+  it from `server.env`.
+- **Monitoring page:** password (`DASHBOARD_PASSWORD`, or generated and printed once), certificate and its own key.
+- **CrowdSec:** registered with its local API, and with the central API when online.
+- **Suricata:** listens on the host's interface with the default route (`SURICATA_INTERFACE` to choose), with the
+  host's addresses as `HOME_NET`.
+- **VPN:** the settings from `VPN_*`. Its key is made by `xrc-vpn init` at the first start, never in the image.
+- **The host's SSH and firewall:** compose mounts the host's `/var/log` read-only on `/var/log/host`. The toolkit reads
+  `auth.log` and `ufw.log` there, and fail2ban watches the host's `auth.log` and bans on the host's network. The host's
+  `/etc/ssh` is mounted read-only too, so the posture checks the sshd people really log in to.
+
+**What it keeps** (named volumes, kept across `down`, updates and rebuilds):
+
+| Volume | What is in it |
+|---|---|
+| `etc` | The key's SHA-256, the page's key hash, the public address |
+| `dashboard` | The page's password (hash), certificate, key |
+| `sites` | nginx's sites: put the customer's sites here, ModSecurity watches them |
+| `vpn`, `wireguard` | The VPN: its key, its settings, its users (public keys only) |
+| `crowdsec-etc`, `crowdsec-data` | CrowdSec's configuration, credentials and decisions |
+| `fail2ban` | fail2ban's bans and history |
+| `state` | The toolkit's state (the advice approved in the SOC process) |
+| `logs` | The guardians' logs: the attacks' history the toolkit reads |
+
+**Update:** with the new version of the repository, `docker compose -f deploy/docker/compose.yml up -d --build`. The
+volumes stay, so the key, the users and the history are the same.
+
+**Remove:** `docker compose -f deploy/docker/compose.yml down` stops it and keeps the volumes. Add `-v` to delete them
+too, keys and VPN users included: this cannot be undone.
+
+**Limits, honestly:**
+
+- **Falco** watches the container's processes, not the host's. A container whose PID 1 is systemd cannot also see the
+  host's processes. For Falco on the host, install directly.
+- **SSH and the firewall are the host's.** The container reads their logs and bans on the host's network, but it does
+  not configure the host's sshd or UFW: the posture says what to change, you change it on the host.
+- **The guardians' versions** on the page are the container's (Ubuntu 24.04's packages), whatever the host runs.
+- **`privileged: true`** is needed by systemd, iptables (bans, VPN routing) and Falco's probe. The container is the
+  host's guardian: treat it as part of the host.
 
 ---
 
@@ -1243,6 +1358,24 @@ targets (`TARGET_IT` 198.51.100.20, `TARGET_INTERNET` 203.0.113.250, `TARGET_HOM
 addresses), where Metasploit answers (`MSF_RPC_HOST`, `MSF_RPC_PORT`), and where the tunnel finds the server's API and
 page (`LAB_API` 10.77.0.20:8091, `LAB_PAGE` 10.77.0.20:8093).
 
+### `deploy/docker/server.env`: the server in Docker
+
+Read by [`deploy/docker/compose.yml`](deploy/docker/compose.yml); copy it from
+[`server.env.example`](deploy/docker/server.env.example). Never committed. Change it, then
+`docker compose -f deploy/docker/compose.yml up -d`.
+
+| Variable | Example | What it is | When |
+|---|---|---|---|
+| `INTRUSION_MCP_API_KEY` | 24+ characters | The key XRCopilotLab sends; only its SHA-256 is stored (volume `etc`) | Once, then remove it from the file |
+| `INTRUSION_MCP_API_KEY_HASH` | 64 hex characters | The key's SHA-256 instead of the key: written at every start | To change the key without writing it on the host |
+| `PUBLIC_URL` | `https://guardiano.example.com/intrusion-mcp` | The address XRCopilotLab uses, on the customer's domain | When the domain is ready |
+| `DASHBOARD_PASSWORD` | | The monitoring page's password at the first start; otherwise generated and printed once in `docker logs` | First start only |
+| `DASHBOARD_ALLOW` | `127.0.0.1 ::1 10.88.0.0/24` | Who may open the page (addresses or networks) | To open it to the VPN's users |
+| `VPN_ENDPOINT` | `vps.example.com` | The public address the VPN's users connect to | Always, for the VPN |
+| `VPN_LAN` | `none` | The networks the VPN opens; `none` on a VPS with no network behind it (a central server) | See [The VPN](#the-vpn-step-by-step-the-customers-administrator) |
+| `VPN_PORT`, `VPN_SUBNET`, `VPN_SUBNET6`, `VPN_DNS` | `51820` | The VPN's other settings, as for `install.sh` | Rarely |
+| `SURICATA_INTERFACE` | `eth0` | Where Suricata listens, if not the interface with the default route | Hosts with several interfaces |
+
 ### `install.sh`: options and variables on a customer's server
 
 Options, after `sudo ./install.sh`:
@@ -1447,6 +1580,9 @@ src/XrCopilotLab.Intrusion.Mcp.Server/   ASP.NET host: MCP tools, REST face, API
 tests/                                   parsers, analyzer, geo, the simulated story
 deploy/linux/                            systemd unit, install script, guardians (--with), the monitoring page (dashboard.sh), production settings,
                                          xrc-vpn (the customer's VPN users: add, revoke, reissue, lan, endpoint; state for the toolkit)
+deploy/docker/                           the server in Docker: Dockerfile (targets server and lab), compose.yml for a real host,
+                                         server.env.example, xrc-docker-start (the container's start: install.sh again, then systemd)
+lab/                                     the Docker lab: lab-01's files on top of the server image, the attacker, the tunnel
 infra/                                   Container App of the demo
 ```
 
