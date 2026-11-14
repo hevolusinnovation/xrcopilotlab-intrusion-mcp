@@ -549,6 +549,16 @@ To see the toolkit at work without a customer's server, `make up` starts a small
 The attacks never leave the lab: all addresses are "documentation" addresses (RFC 5737) that no real computer uses,
 and each one gets an invented city so that the map has something to show.
 
+**`lab-01` is built to be attacked: never use it for a real network.** On top of the real package it has what the
+attacks need to find: the account `operatore` with a password the scenarios guess, the sample site with `/admin/`
+behind a known password, fail2ban and rate limits shortened, and the VPN user `anna-portatile`, whose key is left
+where the attacker reads it (the "lost laptop"). Its image writes a marker, `/etc/xrcopilotlab-intrusion-mcp/lab.json`
+(`lab/server/files/`), and only the marker makes the toolkit say so: the page shows a red **LABORATORIO** banner and
+marks `anna-portatile` as a lab test user, and `intrusion_posture` puts the critical finding `lab-image` first.
+Running in Docker is not the sign: the toolkit in a container on a VPS, or on a Docker network on your laptop, is a
+real server and answers as one, with no banner and no demo users. For a real server use the package
+([Install the toolkit on a customer's server](#install-the-toolkit-on-a-customers-server)).
+
 What the toolkit sees (the numbers, the red box, the map and the table below) is on `lab-01`'s own **monitoring page**,
 the same a customer gets (see [The monitoring page](#5-the-monitoring-page)), with the Hevolus logo at the top. On your
 laptop it opens on **http://localhost:8089** (the `tunnel` container forwards it: `lab-01` itself publishes no port);
@@ -1039,7 +1049,7 @@ The period is the last 24 hours by default (`hours`, max 720), or `since`/`until
 | `intrusion_host_activity` | What happened **inside** the server (Falco): each alert with its rule, attack type, severity, account, command, file, and the address it was tied to (`ssh-session` or `web-exploit`) or none. Filters: `attackType`, `unlinkedOnly`. |
 | `intrusion_guardians` | The server's protection as configured now: each guardian with its role, status (ok / stopped / log-unreadable / missing), version, mode (detection or blocking); the TCP ports open to the network; sshd's settings; and how XRCopilotLab reaches the server (the customer's domain, or a temporary test tunnel). |
 | `intrusion_vpn` | The customer's VPN, if there is one: up or down, the public address users connect to, the internal network it opens, and each user (a device, or a branch router with its networks), connected now or when last, from which address and city, and whether that country is expected. No key is ever returned. The agent can propose a revocation; the customer does it with `xrc-vpn`. |
-| `intrusion_posture` | Checks of the configuration against the attacks of the period: incidents first (someone got in), then SSH with passwords, services, industrial ports and AI services (Ollama, vector databases) open to the network, someone looking for AI services or writing instructions for an AI, a slow brute force nobody banned, no web firewall, guardians stopped, old rules, VPN users connected from an unexpected country or silent for 60 days, a VPN with no public address. Each finding has a severity, the evidence, a recommendation and — when this package can do it — the command that fixes it. Nothing is applied: it is the material for a security plan. |
+| `intrusion_posture` | Checks of the configuration against the attacks of the period: `lab-image` first on the Docker lab's test server (see [the test console](#the-test-console-docker-lab)), then incidents (someone got in), then SSH with passwords, services, industrial ports and AI services (Ollama, vector databases) open to the network, someone looking for AI services or writing instructions for an AI, a slow brute force nobody banned, no web firewall, guardians stopped, old rules, VPN users connected from an unexpected country or silent for 60 days, a VPN with no public address. Each finding has a severity, the evidence, a recommendation and — when this package can do it — the command that fixes it. Nothing is applied: it is the material for a security plan. |
 
 REST, same parameters as query strings: `GET /api/status`, `/api/banned?jail=`, `/api/attempts?hours=&jail=&attackType=&country=&top=`,
 `/api/ips/{ip}?hours=`, `/api/suspicious-logins?hours=`, `/api/summary?hours=&top=`, `/api/host-activity?hours=&attackType=&unlinkedOnly=`,

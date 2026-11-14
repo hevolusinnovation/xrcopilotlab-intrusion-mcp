@@ -42,6 +42,22 @@ public static class PostureChecks
         var hours = (int)Math.Round((attacks.Period.To - attacks.Period.From).TotalHours);
         var period = hours % 24 == 0 ? $"{hours / 24} day(s)" : $"{hours} hour(s)";
 
+        // ---- The lab's test server first: built to be attacked, it must never carry a real network. Only its marker says so. ----
+        if (facts.Lab is { } lab)
+        {
+            var demoUsers = lab.DemoVpnUsers.Where(u => facts.Vpn?.Peers.Any(p => p.Name == u) == true).ToList();
+            var evidence = new List<string> { $"Lab marker present ({lab.Name})." };
+            if (lab.Note.Length > 0) evidence.Add(lab.Note.TrimEnd('.') + ".");
+            if (demoUsers.Count > 0) evidence.Add($"VPN users added by the lab, whose keys the attacker has on purpose: {string.Join(", ", demoUsers)}.");
+            evidence.AddRange(lab.Demo.Select(d => d.TrimEnd('.') + "."));
+            findings.Add(new("lab-image", nameof(Severity.Critical), "lab", "This is the Docker lab's test server, built to be attacked",
+                string.Join(" ", evidence),
+                "Do not connect a real network, real users or a real site to it. For a real server (a VPS, a mini PC, a container) "
+                + "install the package with install.sh, or build a container without the lab's files: same toolkit, same guardians, "
+                + "no demo users and no keys given away.",
+                demoUsers.Count > 0 ? string.Join(" && ", demoUsers.Select(u => $"sudo xrc-vpn revoke {u}")) : null));
+        }
+
         // ---- Incidents first: someone is or was inside. One finding per way in, with the addresses. ----
         void Incident(string id, string title, IReadOnlyList<IpReport> who, string recommendation)
         {
@@ -240,8 +256,10 @@ public static class PostureChecks
                 $"Domain {connection.Url}; tunnel {connection.TunnelUrl}: a second way in to the API that nobody needs any more.",
                 "Close the test tunnel: XRCopilotLab must use the domain only.", null));
 
+        // The lab's own finding leads: whatever else is wrong, this host must not carry a real network.
         return findings
-            .OrderByDescending(f => Enum.Parse<Severity>(f.Severity))
+            .OrderByDescending(f => f.Area == "lab")
+            .ThenByDescending(f => Enum.Parse<Severity>(f.Severity))
             .ThenBy(f => f.Area, StringComparer.Ordinal)
             .ThenBy(f => f.Id, StringComparer.Ordinal)
             .ToList();

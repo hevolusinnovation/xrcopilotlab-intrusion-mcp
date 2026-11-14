@@ -58,15 +58,18 @@ public sealed record ConnectionInfo(string Mode, string? Url, string? Api, strin
 public sealed record GuardianStatus(string Name, string Role, string Status, bool Installed, string? Version, bool? Running, string? Mode,
     bool Managed, string? Log, DateTimeOffset? LogUpdated, DateTimeOffset? RulesUpdated, string? Note);
 
+/// <summary><c>Lab</c>: set only on the Docker lab's test server (see <see cref="LabFacts"/>); null on every real host.</summary>
 public sealed record GuardiansResult(string Host, bool Simulated, DateTimeOffset Now, SiteLocation Site, ConnectionInfo Connection, IReadOnlyList<GuardianStatus> Guardians,
-    IReadOnlyList<ListeningPort> Listening, SshFacts? Ssh);
+    IReadOnlyList<ListeningPort> Listening, SshFacts? Ssh, LabFacts? Lab = null);
 
 /// <summary>
 /// One VPN user as the page and the agents see it: where it last connected from (<c>Location</c>, geolocated) and
-/// whether that country is one the customer's people are expected in (<c>Policy:AllowedCountries</c>).
+/// whether that country is one the customer's people are expected in (<c>Policy:AllowedCountries</c>). <c>LabDemo</c>: a
+/// user the Docker lab added for its scenarios, whose key the attacker has on purpose.
 /// </summary>
 public sealed record VpnPeerStatus(string Name, string Kind, string Address, IReadOnlyList<string> Lan, DateTimeOffset Created, bool Connected,
-    DateTimeOffset? LastHandshake, string? RemoteIp, GeoLocation? Location, bool ExpectedCountry, long Received, long Sent, string? Address6 = null);
+    DateTimeOffset? LastHandshake, string? RemoteIp, GeoLocation? Location, bool ExpectedCountry, long Received, long Sent, string? Address6 = null,
+    bool LabDemo = false);
 
 /// <summary>
 /// The customer's VPN: <c>Installed</c> once <c>install.sh --with wireguard</c> set it up, <c>Up</c> while it listens on
@@ -106,7 +109,7 @@ public sealed class GuardQueries(IHostInspector inspector, IntrusionQueries intr
         return new GuardiansResult(intrusions.Host, intrusions.Simulated, now, site.Current, Connection(connection, facts.TunnelUrl),
             facts.Guardians.Select(g => new GuardianStatus(g.Name, Roles.GetValueOrDefault(g.Name, ""), StatusOf(g), g.Installed, g.Version, g.Running,
                 g.Mode, g.Managed, g.Log, g.LogUpdated, g.RulesUpdated, g.Note)).ToList(),
-            facts.Listening, facts.Ssh);
+            facts.Listening, facts.Ssh, facts.Lab);
     }
 
     public PostureResult Posture(DateTimeOffset now, Period period)
@@ -133,7 +136,8 @@ public sealed class GuardQueries(IHostInspector inspector, IntrusionQueries intr
         {
             var location = p.RemoteIp is null ? null : geo.Locate(p.RemoteIp);
             return new VpnPeerStatus(p.Name, p.Kind, p.Address, p.Lan, p.Created, VpnState.Connected(p, now), p.LastHandshake, p.RemoteIp, location,
-                policy.IsAllowedCountry(location?.CountryCode), p.Received, p.Sent, p.Address6);
+                policy.IsAllowedCountry(location?.CountryCode), p.Received, p.Sent, p.Address6,
+                facts.Lab?.DemoVpnUsers.Contains(p.Name, StringComparer.Ordinal) == true);
         }).OrderByDescending(p => p.Connected).ThenByDescending(p => p.LastHandshake).ThenBy(p => p.Name, StringComparer.Ordinal).ToList();
         var connected = peers.Count(p => p.Connected);
         var note = !vpn.Up ? "The VPN is installed but its interface is down: nobody can connect."

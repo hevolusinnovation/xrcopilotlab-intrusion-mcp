@@ -13,7 +13,8 @@ public sealed record HostFacts(
     IReadOnlyList<ListeningPort> Listening,
     SshFacts? Ssh,
     string? TunnelUrl = null,
-    VpnFacts? Vpn = null);
+    VpnFacts? Vpn = null,
+    LabFacts? Lab = null);
 
 /// <summary>
 /// One guardian: <c>fail2ban</c>, <c>crowdsec</c>, <c>suricata</c>, <c>falco</c>, <c>modsecurity</c>, <c>ufw</c>, the

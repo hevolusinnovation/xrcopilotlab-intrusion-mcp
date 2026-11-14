@@ -43,6 +43,9 @@ public sealed class LogFileOptions
     /// <summary>Who is connected to the customer's VPN, written every minute by <c>xrc-vpn state</c> (no key in it). <c>install.sh --with wireguard</c>.</summary>
     public string VpnStateFile { get; set; } = "/run/xrcopilotlab-vpn/state.json";
 
+    /// <summary>Written only by the Docker lab's image: this host is the lab's test server, with demo users and keys given to the attacker.</summary>
+    public string LabMarkerFile { get; set; } = "/etc/xrcopilotlab-intrusion-mcp/lab.json";
+
     /// <summary>
     /// The host's own addresses, to tell an attack coming in from a connection the host opened (a Suricata alert on
     /// malware calling home). Empty = the addresses of the host's network interfaces.

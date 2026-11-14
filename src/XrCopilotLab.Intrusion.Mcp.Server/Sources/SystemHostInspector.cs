@@ -64,7 +64,7 @@ public sealed class SystemHostInspector(LogFileOptions logs, ConnectionOptions c
         var wireguard = Guardian("wireguard", managed ? V("wireguard-tools") : null, Running(managed && V("wireguard-tools") is not null, VpnUnit), null, managed,
             [logs.VpnStateFile], note: vpn is null ? null : VpnNote(vpn, now));
         guardians.Add(wireguard);
-        return new HostFacts(now, guardians, Listening(), Ssh(), TunnelUrl(), vpn);
+        return new HostFacts(now, guardians, Listening(), Ssh(), TunnelUrl(), vpn, Lab());
     }
 
     private GuardianFacts Guardian(string name, string? version, bool? running, string? mode, bool managed, List<string> patterns,
@@ -108,6 +108,12 @@ public sealed class SystemHostInspector(LogFileOptions logs, ConnectionOptions c
                 .Any(f => Lines(f).Any(l => !l.TrimStart().StartsWith('#') && l.Contains(text, StringComparison.Ordinal)));
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return false; }
+    }
+
+    private LabFacts? Lab()
+    {
+        try { return File.Exists(logs.LabMarkerFile) ? LabMarker.Parse(File.ReadAllText(logs.LabMarkerFile)) : null; }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return null; }
     }
 
     private VpnFacts? Vpn()

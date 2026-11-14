@@ -131,7 +131,7 @@ public sealed class IntrusionTools(IntrusionQueries queries, GuardQueries guard,
         "The host's protection as it is configured now: each guardian (sshd, nginx, ufw, fail2ban, crowdsec, suricata, falco, modsecurity, wireguard = the VPN) " +
         "with its role, status (ok, stopped, log-unreadable, missing), version, mode (detection = reports only, blocking = stops traffic), " +
         "whether install.sh --with configured it, when its log and its rules were last updated; the TCP ports open to the network; " +
-        "and sshd's settings (password logins, root login). Read it before advising a change: it says what is there to build on.")]
+        "and sshd's settings (password logins, root login); lab is set only on the Docker lab's test server. Read it before advising a change: it says what is there to build on.")]
     public GuardiansResult Guardians() => guard.Guardians(clock.GetUtcNow());
 
     [McpServerTool(Name = "intrusion_vpn", ReadOnly = true),
@@ -139,12 +139,12 @@ public sealed class IntrusionTools(IntrusionQueries queries, GuardQueries guard,
         "The customer's WireGuard VPN, if install.sh --with wireguard set one up: whether it is up, the public address users connect to, " +
         "the internal network it opens, and each user (a person's device, or a router of another site with the networks behind it): " +
         "connected now or when last, from which address and city, and whether that country is expected (Policy:AllowedCountries). " +
-        "No key is ever shown. The customer adds and revokes users with xrc-vpn on the server: propose a revocation, never claim to do it.")]
+        "labDemo marks a user the Docker lab added for its scenarios, whose key the attacker has on purpose. No key is ever shown. The customer adds and revokes users with xrc-vpn on the server: propose a revocation, never claim to do it.")]
     public VpnResult Vpn() => guard.Vpn(clock.GetUtcNow());
 
     [McpServerTool(Name = "intrusion_posture", ReadOnly = true),
      Description(
-        "Checks of the host's configuration against what attacked it: incidents first (someone got in), then SSH with passwords, " +
+        "Checks of the host's configuration against what attacked it: lab-image first if this is the Docker lab's test server (built to be attacked: never for a real network), then incidents (someone got in), then SSH with passwords, " +
         "services and industrial ports open to the network, a slow brute force nobody banned, no web firewall, guardians stopped or " +
         "unreadable, old IDS rules, AI services (Ollama, vector databases) open to the network, someone looking for them or writing instructions for an AI, VPN users connected from an unexpected country or unused for months. Each finding has a stable id, a severity grown with the evidence of the period, the evidence, a " +
         "recommendation in plain words and, when this package can do it, the command that fixes it. Nothing is applied. " +
