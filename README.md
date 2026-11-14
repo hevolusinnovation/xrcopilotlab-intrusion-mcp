@@ -73,10 +73,12 @@ flowchart LR
 Everything below was recorded on the **Docker lab** that comes with this repository: a fake company server and an
 attacker, on your laptop, that cannot reach anything outside.
 
-**1. An attack, from the attacker's side.** You press a button in the attack console; the attacker scans the server,
-tries four passwords slowly (too slowly for fail2ban to notice), then logs in with the right one.
+**1. An attack, from the attacker's side.** You press a button in the attack console and watch the live feed: here a
+fast SSH brute force, which fail2ban bans after five tries — the lines turn from "password rejected" (the defence
+answering) to "no answer (blocked)". The console is bilingual (IT/EN, toggle top right) and lists the attacks in the
+order of a real intrusion, from reconnaissance to the break-in.
 
-![The attack console while an intrusion runs: scan, four wrong passwords, then the login](docs/images/attack-console.gif)
+![The attack console: a fast SSH brute force, blocked by fail2ban after five attempts](docs/images/attack-console.gif)
 
 **2. The same night, from the company's side.** While the attacks run, the monitoring page fills up: each attacker
 appears on the map at its city, with a line to the server, and in the table with what it did. The numbers at the top
@@ -551,6 +553,10 @@ To see the toolkit at work without a customer's server, `make up` starts a small
   **http://localhost:8089** on your laptop.
 
 ![The attack console: the server to test, and the attacks grouped by phase of an intrusion](docs/images/console.jpg)
+
+The console is bilingual: the **IT/EN** toggle at the top right switches the whole page — the briefing, the attack
+phases, every scenario and the live feed. A briefing at the top spells out, for non-experts, that these are real tools
+against a real target and why the map shows cities worldwide (the source addresses are faked, the attacks are not).
 
 The attacks never leave the lab: all addresses are "documentation" addresses (RFC 5737) that no real computer uses,
 and each one gets an invented city so that the map has something to show.
