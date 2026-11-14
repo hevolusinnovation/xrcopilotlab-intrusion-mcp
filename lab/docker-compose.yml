@@ -28,6 +28,9 @@ services:
       - tunnel-state:/var/lib/lab-tunnel:ro
       # The VPN configuration of an employee (lab-vpn-user), which the attacker "steals" in a VPN scenario.
       - lab-vpn:/var/lib/lab-vpn
+      # The package's own state (the advice approved in the SOC process, /api/advice): kept when lab-01 is rebuilt,
+      # as on a real server across updates. Writable and the StateDirectory itself, so systemd sets it up as usual.
+      - lab-state:/var/lib/xrcopilotlab-intrusion-mcp
     environment:
       LAB_API_KEY: ${LAB_API_KEY:?run make lab-up, which creates lab/.env}
       # The hidden production key, used (its hash) when a domain is set; never shown on the page.
@@ -129,6 +132,8 @@ volumes:
   tunnel-state: {}
   # lab-01 writes an employee's VPN configuration here; the attacker reads it (the "stolen laptop").
   lab-vpn: {}
+  # lab-01's package state (approved advice): kept by make lab-down and rebuilds, deleted by make lab-reset.
+  lab-state: {}
 
 networks:
   # Docker gives its own addresses from the /28 at the top; the attackers' addresses are added below it.

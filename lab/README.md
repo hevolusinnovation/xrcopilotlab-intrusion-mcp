@@ -15,8 +15,8 @@ What each part of the console shows, and how to give the lab a public address fo
 
 ```bash
 make lab-up      # builds and starts; creates lab/.env with the lab key on the first run
-make lab-down    # stops the lab (keeps the tunnel login: same public address)
-make lab-reset   # stops the lab and deletes all its state, tunnel login included
+make lab-down    # stops the lab (keeps the tunnel login and the advice received: same public address)
+make lab-reset   # stops the lab and deletes all its state, tunnel login and advice included
 ```
 
 ## What runs

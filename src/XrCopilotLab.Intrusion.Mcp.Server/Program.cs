@@ -94,7 +94,16 @@ var app = builder.Build();
 // The monitoring page: static files only, no data in them. Its data comes from /api, with a key (added by the
 // package's nginx, or typed by the person when the page is opened directly).
 app.UseDefaultFiles();
-app.UseStaticFiles();
+// The page itself is revalidated on every load (no-cache keeps the ETag, so an unchanged page is a 304): after an
+// update the browser shows the new page, not the copy it kept. Its libraries and logo may be cached as usual.
+app.UseStaticFiles(new StaticFileOptions
+{
+    OnPrepareResponse = ctx =>
+    {
+        if (ctx.File.Name.EndsWith(".html", StringComparison.OrdinalIgnoreCase))
+            ctx.Context.Response.Headers.CacheControl = "no-cache";
+    },
+});
 
 app.UseAuthentication();
 app.UseAuthorization();
