@@ -14,9 +14,13 @@ using XrCopilotLab.Intrusion.Mcp.Core.Simulation;
 using XrCopilotLab.Intrusion.Mcp.Core.Sources;
 using XrCopilotLab.Intrusion.Mcp.Server;
 using XrCopilotLab.Intrusion.Mcp.Server.Advice;
+using XrCopilotLab.Intrusion.Mcp.Server.Audit;
 using XrCopilotLab.Intrusion.Mcp.Server.Authentication;
 using XrCopilotLab.Intrusion.Mcp.Server.Sources;
 using XrCopilotLab.Intrusion.Mcp.Server.Tools;
+
+// The audit is this same binary, started by root on a timer (… audit): it takes its picture of the host and exits.
+if (args is ["audit", ..]) return AuditCollector.Run(args[1..], Console.Out);
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -133,5 +137,6 @@ app.Logger.LogInformation("Intrusion MCP server: mode {Mode}, host {Host}, {Keys
     app.Services.GetRequiredService<IOptionsMonitor<ApiKeyOptions>>().CurrentValue.ActiveKeys().Count());
 
 app.Run();
+return 0;
 
 public partial class Program;

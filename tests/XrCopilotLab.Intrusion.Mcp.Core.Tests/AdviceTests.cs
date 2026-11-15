@@ -1,4 +1,5 @@
 using XrCopilotLab.Intrusion.Mcp.Core.Advice;
+using XrCopilotLab.Intrusion.Mcp.Core.Guard;
 using Xunit;
 
 namespace XrCopilotLab.Intrusion.Mcp.Core.Tests;
@@ -103,4 +104,39 @@ public class AdviceTests
         var ids = ledger.List(Now.AddHours(1), null).Select(a => a.Id).ToArray();
         Assert.Equal(["inst-4", "inst-3", "inst-2"], ids);
     }
+
+    private static PostureFinding Finding(string id) => new(id, "High", "network", "t", $"evidence of {id}", "r", null);
+
+    [Fact]
+    public void Advice_is_read_against_the_findings_of_now()
+    {
+        var ledger = new AdviceLedger();
+        ledger.Upsert(Valid(id: "still") with { FindingId = "exposed-service-3389" }, Now);
+        ledger.Upsert(Valid(id: "gone") with { FindingId = "ssh-password-auth" }, Now);
+        ledger.Upsert(Valid(id: "attack") with { FindingId = "incident-ssh-login" }, Now);   // fires on attacks, not on configuration
+        ledger.Upsert(Valid(id: "free") with { FindingId = null }, Now);
+        ledger.MarkDone("still", Now.AddMinutes(5));
+
+        var views = AdviceVerifier.Verify(ledger.List(Now, null), [Finding("exposed-service-3389")]).ToDictionary(v => v.Id);
+
+        // Marked done, and the port is still open: the page and the agent can say it did not take effect.
+        Assert.Equal((AdviceLimits.StatusDone, AdviceVerifier.Open), (views["still"].Status, views["still"].Verification));
+        Assert.Equal("evidence of exposed-service-3389", views["still"].Evidence);
+        // Never marked, yet fixed on the host.
+        Assert.Equal((AdviceLimits.StatusReceived, AdviceVerifier.Fixed), (views["gone"].Status, views["gone"].Verification));
+        // A silent incident proves nothing; advice with no finding has nothing to be read against.
+        Assert.Equal(AdviceVerifier.Unknown, views["attack"].Verification);
+        Assert.Equal(AdviceVerifier.Unknown, views["free"].Verification);
+    }
+
+    [Theory]
+    [InlineData("ssh-password-auth", true)]
+    [InlineData("exposed-ai-11434", true)]
+    [InlineData("guardian-stopped-falco", true)]
+    [InlineData("incident-c2", false)]
+    [InlineData("slow-brute-force-unbanned", false)]
+    [InlineData("waf-detection-only", false)]
+    [InlineData("made-up", false)]
+    public void Only_configuration_findings_can_be_verified(string id, bool expected) =>
+        Assert.Equal(expected, PostureChecks.ReadsConfiguration(id));
 }

@@ -135,7 +135,8 @@ public class VpnTests
             G("suricata", mode: "detection", rules: Now.AddHours(-8)), G("falco", mode: "detection"), G("modsecurity", mode: "detection"),
         ];
         if (withVpn) guardians.Add(G("wireguard"));
-        return new HostFacts(Now, guardians, [new(22, "0.0.0.0", true), .. extra], new SshFacts(false, "prohibit-password", 22));
+        return new HostFacts(Now, guardians, [new(22, "0.0.0.0", true), .. extra], new SshFacts(false, "prohibit-password", 22),
+            Audit: AuditTests.Unchanged(Now));
     }
 
     private static VpnPeerStatus Peer(string name, string country, DateTimeOffset? last) =>

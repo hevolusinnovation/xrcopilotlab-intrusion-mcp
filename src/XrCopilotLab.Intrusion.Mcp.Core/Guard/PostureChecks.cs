@@ -1,4 +1,5 @@
 using XrCopilotLab.Intrusion.Mcp.Core.Analysis;
+using XrCopilotLab.Intrusion.Mcp.Core.Audit;
 using XrCopilotLab.Intrusion.Mcp.Core.Models;
 using XrCopilotLab.Intrusion.Mcp.Core.Queries;
 
@@ -31,6 +32,22 @@ public static class PostureChecks
 
     /// <summary>A VPN user silent this long is probably a device nobody uses any more, and its key still opens the network.</summary>
     public const int UnusedVpnDays = 60;
+
+    // The findings that fire on the host's configuration alone. The others (incidents, probes, a slow brute force, what
+    // the web firewall would have blocked, a VPN user abroad) need the attacks of the period: when they stop firing, the
+    // attacks ended, nobody fixed anything.
+    private static readonly HashSet<string> ConfigurationIds = new(StringComparer.Ordinal)
+    {
+        "lab-image", "ssh-password-auth", "ssh-root-login", "fail2ban-missing", "waf-missing", "ids-rules-stale", "ids-missing",
+        "host-monitor-missing", "firewall-off", "vpn-unused-users", "vpn-endpoint-missing", "connection-temporary", "connection-tunnel-open",
+    };
+    private static readonly string[] ConfigurationPrefixes =
+        ["exposed-industrial-", "exposed-service-", "exposed-ai-", "guardian-stopped-", "log-unreadable-"];
+
+    /// <summary>True when the finding with this id fires on the configuration alone: once it is fixed it stops firing,
+    /// so advice that came from it can be verified (<see cref="Advice.AdviceVerifier"/>).</summary>
+    public static bool ReadsConfiguration(string id) =>
+        ConfigurationIds.Contains(id) || AuditChecks.VerifiableIds.Contains(id) || ConfigurationPrefixes.Any(p => id.StartsWith(p, StringComparison.Ordinal));
 
     public static IReadOnlyList<PostureFinding> Evaluate(HostFacts facts, SummaryResult attacks, ConnectionInfo? connection = null, VpnResult? vpn = null)
     {
@@ -221,6 +238,18 @@ public static class PostureChecks
             findings.Add(new("host-alerts-unlinked", nameof(Severity.High), "host", "Critical activity on the host with no known origin",
                 $"{unlinked} critical Falco alert(s) could not be tied to a login or a web attack.",
                 "Look at them (intrusion_host_activity unlinkedOnly=true): a cron job you know, or an intruder who came in a way the logs do not show.", null));
+
+        // ---- The host itself: what changed on it since the customer last said "this is how it should be" ----
+        if (facts.Audit is { } audit)
+            findings.AddRange(AuditChecks.Evaluate(audit, facts.Time,
+                findings.Any(f => f.Id is "incident-ssh-login" or "incident-web-exploit") ? attacks.Period.From : null));
+        else
+            findings.Add(new("audit-missing", nameof(Severity.Low), AuditChecks.Area, "Nothing checks the host itself for signs of a break-in",
+                "The logs show who knocked and who was let in. They do not show an SSH key added, a new account, a job that starts by itself "
+                + "or a program running from /tmp: what an intruder leaves to come back, also after cleaning the logs.",
+                "Install the audit: every 15 minutes it reads accounts, SSH keys, scheduled jobs, services and running programs, as root and "
+                + "without changing anything, and says what is different from the day you accepted the host as it was.",
+                "sudo ./install.sh --with audit"));
 
         // ---- The VPN: who holds a key is the customer's decision; these say when a key looks out of place ----
         if (vpn is { Installed: true })

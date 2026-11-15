@@ -43,6 +43,10 @@ public sealed class LogFileOptions
     /// <summary>Who is connected to the customer's VPN, written every minute by <c>xrc-vpn state</c> (no key in it). <c>install.sh --with wireguard</c>.</summary>
     public string VpnStateFile { get; set; } = "/run/xrcopilotlab-vpn/state.json";
 
+    /// <summary>The host's accounts, SSH keys, scheduled jobs and odd processes, with their baseline, written every 15 minutes
+    /// by the audit (root, read-only; no secret in it). <c>install.sh --with audit</c>.</summary>
+    public string AuditStateFile { get; set; } = "/var/lib/xrcopilotlab-audit/state.json";
+
     /// <summary>Written only by the Docker lab's image: this host is the lab's test server, with demo users and keys given to the attacker.</summary>
     public string LabMarkerFile { get; set; } = "/etc/xrcopilotlab-intrusion-mcp/lab.json";
 

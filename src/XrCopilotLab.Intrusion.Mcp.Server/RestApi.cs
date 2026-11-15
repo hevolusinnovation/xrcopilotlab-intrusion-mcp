@@ -58,6 +58,8 @@ public static class RestApi
 
         api.MapGet("/vpn", (GuardQueries g, TimeProvider clock) => g.Vpn(clock.GetUtcNow()));
 
+        api.MapGet("/audit", (GuardQueries g, TimeProvider clock) => g.Audit(clock.GetUtcNow()));
+
         api.MapGet("/posture", (GuardQueries g, IntrusionQueries q, TimeProvider clock, int? hours, DateTimeOffset? since, DateTimeOffset? until) =>
         {
             var now = clock.GetUtcNow();
@@ -83,7 +85,11 @@ public static class RestApi
             }
         }).AddEndpointFilter(RejectOversized);
 
-        advice.MapGet("", (AdviceStore store, TimeProvider clock, int? hours) => store.List(clock.GetUtcNow(), hours));
+        advice.MapGet("", (AdviceStore store, GuardQueries g, TimeProvider clock, int? hours) =>
+        {
+            var now = clock.GetUtcNow();
+            return g.Advice(now, store.List(now, hours));
+        });
 
         advice.MapPost("/{id}/done", (string id, AdviceStore store, TimeProvider clock) =>
             store.MarkDone(id, clock.GetUtcNow())
