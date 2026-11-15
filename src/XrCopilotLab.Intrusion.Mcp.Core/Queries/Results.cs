@@ -1,4 +1,5 @@
 using XrCopilotLab.Intrusion.Mcp.Core.Geo;
+using XrCopilotLab.Intrusion.Mcp.Core.Sources;
 
 namespace XrCopilotLab.Intrusion.Mcp.Core.Queries;
 
@@ -125,7 +126,8 @@ public sealed record StatusResult(
     int CurrentlyBanned,
     IReadOnlyList<DetectorStatus> Detectors,
     IReadOnlyList<JailStatus> Jails,
-    string? GeoAttribution);
+    string? GeoAttribution,
+    IReadOnlyList<HostInfo>? Hosts = null);
 
 public sealed record BannedIp(string Ip, string Jail, string AttackType, DateTimeOffset Since, GeoLocation Location);
 
@@ -142,7 +144,7 @@ public sealed record AttemptsResult(string Host, bool Simulated, Period Period, 
 /// <c>Injection</c> the prompt-injection rule the attacker's text matched.</summary>
 public sealed record TimelineEntry(DateTimeOffset Time, string Kind, string Origin, string? Jail, string? User, int? Port, string? Method,
     int? TargetPort, string? Path, int? Status, string? Rule, string? Detail, bool Outbound = false, string? Command = null, string? LinkedBy = null, int? Score = null,
-    string? Injection = null);
+    string? Injection = null, string? Host = null);
 
 public sealed record IpDetailResult(string Host, bool Simulated, Period Period, IpReport? Report, IReadOnlyList<SuspiciousLogin> SuspiciousLogins,
     int TimelineCount, IReadOnlyList<TimelineEntry> Timeline, string? GeoAttribution)

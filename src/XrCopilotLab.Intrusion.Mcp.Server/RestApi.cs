@@ -2,6 +2,8 @@ using XrCopilotLab.Intrusion.Mcp.Core.Advice;
 using XrCopilotLab.Intrusion.Mcp.Core.Guard;
 using XrCopilotLab.Intrusion.Mcp.Core.Queries;
 using XrCopilotLab.Intrusion.Mcp.Server.Advice;
+using XrCopilotLab.Intrusion.Mcp.Server.Authentication;
+using XrCopilotLab.Intrusion.Mcp.Server.Sources;
 
 namespace XrCopilotLab.Intrusion.Mcp.Server;
 
@@ -9,50 +11,46 @@ namespace XrCopilotLab.Intrusion.Mcp.Server;
 /// The same answers as the MCP tools, as plain HTTP GETs under <c>/api</c>, with the same key. A blueprint can only
 /// provision an MCP server it builds itself (<c>kind: builder</c>, HTTP calls on a connection): with this face the
 /// whole sentinel module installs from the manifest, with no step in the UI. The MCP face stays for whoever
-/// registers the server by hand.
+/// registers the server by hand. Every route takes <c>host</c>: without it, all the hosts of the key's tenant.
 /// </summary>
 public static class RestApi
 {
-    public static void MapRestApi(this WebApplication app)
+    public static void MapRestApi(this WebApplication app, bool collector = false)
     {
-        var api = app.MapGroup("/api").RequireAuthorization();
+        var api = app.MapGroup("/api").RequireAuthorization(KeyPolicies.Query);
 
-        api.MapGet("/status", (IntrusionQueries q, TimeProvider clock) => q.Status(clock.GetUtcNow()));
+        api.MapGet("/hosts", (HttpContext http, QueryScope scope) => Results.Ok(new { hosts = scope.HostNames(http.User) }));
 
-        api.MapGet("/banned", (IntrusionQueries q, TimeProvider clock, string? jail) =>
-            q.Banned(clock.GetUtcNow(), Blank(jail)));
+        api.MapGet("/status", (HttpContext http, QueryScope scope, TimeProvider clock, string? host, CancellationToken ct) =>
+            Answer(http, scope, clock, host, ct, (q, now) => q.Status(now)));
 
-        api.MapGet("/attempts", (IntrusionQueries q, TimeProvider clock, int? hours, DateTimeOffset? since, DateTimeOffset? until, int? slotMinutes,
-                string? jail, string? attackType, string? country, int? top) =>
-        {
-            var now = clock.GetUtcNow();
-            return q.Attempts(now, q.Resolve(now, hours, since, until, slotMinutes), Blank(jail), Blank(attackType), Blank(country), top ?? 20);
-        });
+        api.MapGet("/banned", (HttpContext http, QueryScope scope, TimeProvider clock, string? host, string? jail, CancellationToken ct) =>
+            Answer(http, scope, clock, host, ct, (q, now) => q.Banned(now, Blank(jail))));
 
-        api.MapGet("/ips/{ip}", (IntrusionQueries q, TimeProvider clock, string ip, int? hours, DateTimeOffset? since, DateTimeOffset? until) =>
-        {
-            var now = clock.GetUtcNow();
-            return q.IpDetail(now, q.Resolve(now, hours, since, until), ip.Trim());
-        });
+        api.MapGet("/attempts", (HttpContext http, QueryScope scope, TimeProvider clock, string? host, int? hours, DateTimeOffset? since, DateTimeOffset? until,
+                int? slotMinutes, string? jail, string? attackType, string? country, int? top, CancellationToken ct) =>
+            Answer(http, scope, clock, host, ct, (q, now) =>
+                q.Attempts(now, q.Resolve(now, hours, since, until, slotMinutes), Blank(jail), Blank(attackType), Blank(country), top ?? 20)));
 
-        api.MapGet("/suspicious-logins", (IntrusionQueries q, TimeProvider clock, int? hours, DateTimeOffset? since, DateTimeOffset? until, int? slotMinutes) =>
-        {
-            var now = clock.GetUtcNow();
-            return q.SuspiciousLogins(now, q.Resolve(now, hours, since, until, slotMinutes));
-        });
+        api.MapGet("/ips/{ip}", (HttpContext http, QueryScope scope, TimeProvider clock, string ip, string? host, int? hours, DateTimeOffset? since,
+                DateTimeOffset? until, CancellationToken ct) =>
+            Answer(http, scope, clock, host, ct, (q, now) => q.IpDetail(now, q.Resolve(now, hours, since, until), ip.Trim())));
 
-        api.MapGet("/summary", (IntrusionQueries q, TimeProvider clock, int? hours, DateTimeOffset? since, DateTimeOffset? until, int? slotMinutes, int? top) =>
-        {
-            var now = clock.GetUtcNow();
-            return q.Summary(now, q.Resolve(now, hours, since, until, slotMinutes), top ?? 10);
-        });
+        api.MapGet("/suspicious-logins", (HttpContext http, QueryScope scope, TimeProvider clock, string? host, int? hours, DateTimeOffset? since,
+                DateTimeOffset? until, int? slotMinutes, CancellationToken ct) =>
+            Answer(http, scope, clock, host, ct, (q, now) => q.SuspiciousLogins(now, q.Resolve(now, hours, since, until, slotMinutes))));
 
-        api.MapGet("/host-activity", (IntrusionQueries q, TimeProvider clock, int? hours, DateTimeOffset? since, DateTimeOffset? until, int? slotMinutes,
-            string? attackType, bool? unlinkedOnly) =>
-        {
-            var now = clock.GetUtcNow();
-            return q.HostActivity(now, q.Resolve(now, hours, since, until, slotMinutes), Blank(attackType), unlinkedOnly ?? false);
-        });
+        api.MapGet("/summary", (HttpContext http, QueryScope scope, TimeProvider clock, string? host, int? hours, DateTimeOffset? since,
+                DateTimeOffset? until, int? slotMinutes, int? top, CancellationToken ct) =>
+            Answer(http, scope, clock, host, ct, (q, now) => q.Summary(now, q.Resolve(now, hours, since, until, slotMinutes), top ?? 10)));
+
+        api.MapGet("/host-activity", (HttpContext http, QueryScope scope, TimeProvider clock, string? host, int? hours, DateTimeOffset? since,
+                DateTimeOffset? until, int? slotMinutes, string? attackType, bool? unlinkedOnly, CancellationToken ct) =>
+            Answer(http, scope, clock, host, ct, (q, now) =>
+                q.HostActivity(now, q.Resolve(now, hours, since, until, slotMinutes), Blank(attackType), unlinkedOnly ?? false)));
+
+        // What follows is about the host this server runs on: a collector runs elsewhere and has none of it.
+        if (collector) return;
 
         api.MapGet("/guardians", (GuardQueries g, TimeProvider clock) => g.Guardians(clock.GetUtcNow()));
 
@@ -89,6 +87,16 @@ public static class RestApi
             store.MarkDone(id, clock.GetUtcNow())
                 ? Results.Ok(new { id = id.Trim(), status = AdviceLimits.StatusDone })
                 : Results.NotFound());
+    }
+
+    private static async Task<IResult> Answer<T>(HttpContext http, QueryScope scope, TimeProvider clock, string? host, CancellationToken ct,
+        Func<IntrusionQueries, DateTimeOffset, T> answer)
+    {
+        var now = clock.GetUtcNow();
+        var queries = await scope.OpenAsync(http.User, Blank(host), now, ct);
+        return queries is null
+            ? Results.NotFound(new { error = $"host '{host}' is not one of this key's hosts", hosts = scope.HostNames(http.User) })
+            : Results.Ok(answer(queries, now));
     }
 
     // 413 for a body over the cap, before the handler runs. The caller is trusted (it has the key); this guards a mistake.

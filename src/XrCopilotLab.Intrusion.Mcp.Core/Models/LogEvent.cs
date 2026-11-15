@@ -109,4 +109,7 @@ public sealed record LogEvent(
 
     /// <summary>A host event not tied to any address yet.</summary>
     public bool HasAddress => SourceIp.Length > 0;
+
+    /// <summary>The host whose log the line comes from: a collector holds the events of several hosts.</summary>
+    public string? Host { get; init; }
 }

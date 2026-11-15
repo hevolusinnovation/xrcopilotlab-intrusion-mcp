@@ -17,13 +17,15 @@ public sealed class ThreatAnalyzer(IntrusionPolicy policy, IGeoLocator geo)
     /// </summary>
     public static IReadOnlyList<(string Ip, string Jail, DateTimeOffset Since)> CurrentBans(IEnumerable<LogEvent> history)
     {
-        var state = new Dictionary<(string, string), DateTimeOffset?>();
+        // Per host too: with several hosts, an unban on one does not lift the ban on another.
+        var state = new Dictionary<(string?, string, string), DateTimeOffset?>();
         foreach (var e in history.Where(e => e.Origin == LogOrigin.Fail2ban && e.Jail is not null).OrderBy(e => e.Time))
         {
-            if (e.IsBanStart) state[(e.SourceIp, e.Jail!)] = state.TryGetValue((e.SourceIp, e.Jail!), out var since) && since is not null ? since : e.Time;
-            else if (e.Kind == LogEventKind.Unban) state[(e.SourceIp, e.Jail!)] = null;
+            var key = (e.Host, e.SourceIp, e.Jail!);
+            if (e.IsBanStart) state[key] = state.TryGetValue(key, out var since) && since is not null ? since : e.Time;
+            else if (e.Kind == LogEventKind.Unban) state[key] = null;
         }
-        return state.Where(kv => kv.Value is not null).Select(kv => (kv.Key.Item1, kv.Key.Item2, kv.Value!.Value)).OrderByDescending(b => b.Item3).ToList();
+        return state.Where(kv => kv.Value is not null).Select(kv => (kv.Key.Item2, kv.Key.Item3, kv.Value!.Value)).OrderByDescending(b => b.Item3).ToList();
     }
 
     /// <summary>Successful logins that a person should look at: after repeated failures, or from an unexpected country.</summary>

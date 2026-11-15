@@ -46,6 +46,6 @@ public sealed class SimulatedLogSource(SimulationOptions options) : ILogSource
     private IReadOnlyList<LogEvent> Day(DateOnly day)
     {
         var lines = _host.Generate(day);
-        return LogLines.Parse(lines.ToLogSet(), _zone, DateTimeOffset.MaxValue).ToList();
+        return LogLines.Parse(lines.ToLogSet(), _zone, DateTimeOffset.MaxValue).Select(e => e with { Host = options.Hostname }).ToList();
     }
 }
