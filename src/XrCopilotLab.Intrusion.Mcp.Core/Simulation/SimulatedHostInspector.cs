@@ -9,7 +9,8 @@ namespace XrCopilotLab.Intrusion.Mcp.Core.Simulation;
 /// passwords from the internet, which is how the night's intruder got in. The customer's VPN is up with four users: two
 /// connected from Italy (a phone and the Milan site's router), a laptop that connected from Saint Petersburg, and an old
 /// PC silent for three months. The audit shows what the night's intruder left behind: an SSH key added to the account
-/// it entered with, and its miner still running from /dev/shm.
+/// it entered with, and its miner still running from /dev/shm; and a host kept as many are: security updates that wait,
+/// a certificate whose renewal stopped, a container Docker publishes past the firewall.
 /// </summary>
 public sealed class SimulatedHostInspector : IHostInspector
 {
@@ -30,7 +31,7 @@ public sealed class SimulatedHostInspector : IHostInspector
             G("modsecurity", "3.0.12-1.1build2", "detection", true, "/var/log/modsecurity/audit.json", note: "OWASP CRS 3.3.5"),
             G("wireguard", "1.0.20210914-1ubuntu4", null, true, "/run/xrcopilotlab-vpn/state.json", note: "4 user(s), 2 connected now; users connect to vpn.example.com"),
         ],
-        [new(22, "0.0.0.0", true), new(80, "0.0.0.0", true), new(443, "0.0.0.0", true), new(8470, "127.0.0.1", false)],
+        [new(22, "0.0.0.0", true), new(80, "0.0.0.0", true), new(443, "0.0.0.0", true), new(3000, "0.0.0.0", true), new(8470, "127.0.0.1", false)],
         new SshFacts(PasswordAuthentication: true, PermitRootLogin: "prohibit-password", Port: 22),
         Vpn: Vpn(now),
         Audit: Audit(now));
@@ -68,7 +69,17 @@ public sealed class SimulatedHostInspector : IHostInspector
             new("cron", "/etc/cron.d/backup-notturno", "5d41402abc4b2a76b9719d911017c592a3f5c1e0b7d2e8f94c6a1b3d5e7f9a0b", now.AddDays(-180), false, false),
             new("systemd", "/etc/systemd/system/xrcopilotlab-intrusion-mcp.service", "9b74c9897bac770ffc029102a200c5de1f3a5b7c9d0e2f4a6b8c0d2e4f6a8b0c", now.AddDays(-60), false, false),
         ];
-        var baseline = new AuditSnapshot(AuditState.Version, then, accounts, keys, jobs, [], []);
+        var hardening = new HardeningFacts(
+            new UpdateFacts(7, ["openssh-server", "libssl3t64", "nginx-common", "curl", "libxml2", "python3.12", "vim-common"], now.AddHours(-6), true, true),
+            new FirewallFacts(true, "deny", true,
+            [
+                new("limit", "tcp", "22", "0.0.0.0/0"), new("allow", "tcp", "80,443", "0.0.0.0/0"), new("allow", "udp", "51820", "0.0.0.0/0"),
+            ]),
+            [new("/etc/letsencrypt/live/www.example.com/fullchain.pem", "www.example.com", now.AddDays(9))],
+            [],
+            [new("grafana", "grafana/grafana:11.2.0", false, false, false, false, false, [3000])],
+            []);
+        var baseline = new AuditSnapshot(AuditState.Version, then, accounts, keys, jobs, [], [], hardening);
         return new AuditState(baseline with
         {
             Time = now.AddMinutes(-4),

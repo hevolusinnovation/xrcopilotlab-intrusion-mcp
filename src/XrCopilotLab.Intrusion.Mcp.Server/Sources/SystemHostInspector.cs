@@ -66,7 +66,7 @@ public sealed class SystemHostInspector(LogFileOptions logs, ConnectionOptions c
         var wireguard = Guardian("wireguard", managed ? V("wireguard-tools") : null, Running(managed && V("wireguard-tools") is not null, VpnUnit), null, managed,
             [logs.VpnStateFile], note: vpn is null ? null : VpnNote(vpn, now));
         guardians.Add(wireguard);
-        return new HostFacts(now, guardians, Listening(), Ssh(), TunnelUrl(), vpn, Lab(), Audit());
+        return new HostFacts(now, guardians, Listening(), Ssh(), TunnelUrl(), vpn, Lab(), Audit(), File.Exists("/.dockerenv") || File.Exists("/run/.containerenv"));
     }
 
     private GuardianFacts Guardian(string name, string? version, bool? running, string? mode, bool managed, List<string> patterns,

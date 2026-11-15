@@ -297,7 +297,7 @@ flowchart TB
       FAL[Falco<br/>what processes do inside]
       MOD[ModSecurity + OWASP CRS<br/>web firewall in nginx, reads bodies<br/>+ rules for text written for an AI]
     end
-    AUD[Host audit, opt-in: xrc-audit<br/>root, read-only, no network, every 15 min<br/>accounts · SSH keys · cron and services<br/>programs in /tmp or in memory<br/>vs. the baseline the customer accepted]
+    AUD[Host audit, opt-in: xrc-audit<br/>root, read-only, no network, every 15 min<br/>accounts · SSH keys · cron and services<br/>programs in /tmp or in memory<br/>vs. the baseline the customer accepted<br/>+ how the host is kept: security updates · UFW rules<br/>certificates · containers]
     LOGS[(Logs<br/>auth.log · fail2ban.log · ufw.log · access.log<br/>crowdsec.log · suricata/eve.json<br/>falco/events.json · modsecurity/audit.json<br/>VPN state: who is connected, no key)]
     subgraph TK[Intrusion toolkit, read-only, 127.0.0.1:8470]
       P[Parsers<br/>one per log]
@@ -305,7 +305,7 @@ flowchart TB
       L[Linker<br/>Falco alert → the SSH session<br/>or web exploit it came from]
       AN[Analyzer<br/>attack type · severity · campaigns]
       GEO[Geolocation<br/>DB-IP Lite, offline]
-      PST[Posture checks<br/>configuration and host audit vs. attacks<br/>what to fix]
+      PST[Posture checks<br/>configuration, host audit and hardening<br/>vs. attacks: what to fix]
       ADV[Advice inbox<br/>approved in the SOC, shown never applied<br/>checked against the host: still open or fixed]
       API[REST /api · MCP /mcp · monitoring page<br/>X-API-Key]
     end
@@ -354,7 +354,9 @@ In order:
    that can only read (`xrc-audit`) notes who can log in, which SSH keys open the host, what starts by itself (cron,
    systemd, `rc.local`, `ld.so.preload`) and which programs run from `/tmp` or from memory, and the checks report what
    **changed since the baseline** the customer accepted: a quiet intruder, or one who cleaned the logs, still has to
-   leave one of these to come back (see [the host audit](#the-host-audit-what-the-logs-do-not-show)).
+   leave one of these to come back. The same run says **how the host is kept**: security updates that wait, what the
+   firewall really lets in, a port Docker opens behind it, a certificate about to expire
+   (see [the host audit](#the-host-audit-what-the-logs-do-not-show)).
 5. **XRCopilotLab** asks over HTTPS, with a key, on the customer's own domain when one is set (a temporary test tunnel
    otherwise), and the agent answers the person in plain words. Every answer says which of its fields are the
    attackers' text (`untrusted`), to be quoted as evidence and never followed. The customer sees the same data on a read-only
@@ -508,7 +510,7 @@ write. Each one guards a different door; together they tell the whole story.
 | **Falco** | A CCTV camera **inside** the server: watches what programs do, through the kernel (eBPF) | `/var/log/falco/events.json` | What an intruder did **after** getting in: read `/etc/shadow` or private keys, added an SSH key or an account, started a crypto miner, cleared the logs, a shell started by the web server. Tied to the address that got in |
 | **ModSecurity + OWASP CRS** | A web application firewall **inside** nginx: reads the **whole** request, POST bodies included, against the OWASP Core Rule Set | `/var/log/modsecurity/audit.json` | Web attacks the access log cannot show, because they hide in the request body: SQL injection, XSS, command injection, path traversal, with the CRS rule and an anomaly score; and, with the toolkit's own rules, text written to take over an AI (a chatbot's message, a form a model will summarise). In detection only: it never blocks |
 | **WireGuard** (the VPN) | The staff entrance: the customer's people and branch routers reach the internal network, each with its own key; to anyone else it does not even answer | `/run/xrcopilotlab-vpn/state.json` (written every minute by `xrc-vpn state`, no key in it) | Which users exist, who is connected now, from which address and city, when each one last connected. A VPN logs no failed attempts (a packet without a known key is dropped in silence), so it adds no attacks to the map |
-| **The host audit** (`xrc-audit`, the toolkit's own) | A roll call of the server itself: who can log in, which SSH keys open it, what starts by itself, what runs from where no program belongs, compared with the day the customer said "this is how it should be" | `/var/lib/xrcopilotlab-audit/state.json` (written every 15 minutes by a root, read-only program; no password hash and no key in it, only fingerprints of public keys) | What an intrusion **leaves behind**, even one no log shows: a new account or one that can now become root, a second root, an account with no password, a new SSH key, a new or changed scheduled job or service, a library loaded into every program, a program running from `/tmp` or only in memory |
+| **The host audit** (`xrc-audit`, the toolkit's own) | A roll call of the server itself: who can log in, which SSH keys open it, what starts by itself, what runs from where no program belongs, compared with the day the customer said "this is how it should be" | `/var/lib/xrcopilotlab-audit/state.json` (written every 15 minutes by a root, read-only program; no password hash and no key in it, only fingerprints of public keys) | What an intrusion **leaves behind**, even one no log shows: a new account or one that can now become root, a second root, an account with no password, a new SSH key, a new or changed scheduled job or service, a library loaded into every program, a program running from `/tmp` or only in memory. And **how the server is kept**, which no log says either: security updates that wait, what the firewall really lets in, a port Docker opens behind it, a container that can take over the host, a certificate about to expire |
 
 A detector the host does not have is simply absent from the answers.
 
@@ -547,13 +549,41 @@ What changed stays in the findings until someone accepts it or undoes it: the to
 neither can the agent. The names and paths in the evidence are the host's, so on a compromised host the intruder's:
 they are cut to the characters a name or a path is made of, and the answer lists them as `untrusted`.
 
+**How the host is kept.** The same run reads a second thing, which needs no intruder to be wrong: files only root may
+open that say whether the server is looked after. These findings have the area `hardening` and **no baseline**:
+`xrc-audit accept` does not silence them, they end when the host is fixed (and advice that came from one is then
+shown as fixed).
+
+| Finding | What it means | Severity |
+|---|---|---|
+| `updates-security-pending` | Installed packages for which the distribution's **security** archive has a newer version (dpkg's status against the lists apt downloaded) | Medium; High when one answers the network or gives root (OpenSSH, nginx, OpenSSL, sudo, the kernel, libc, Docker…) |
+| `updates-not-checked` | apt has not downloaded its lists for 14 days, or never: the count above says little | Medium |
+| `updates-auto-off` | `unattended-upgrades` is missing or switched off: every fix waits for a person | Low |
+| `reboot-required` | `/run/reboot-required`: a kernel or library was updated, the old one still runs | Medium |
+| `firewall-default-allow` | UFW is on, and accepts whatever no rule names | High |
+| `firewall-unused-rules` | UFW lets anyone in on a TCP port nothing listens on: a rule left from a service that is gone | Low |
+| `docker-bypasses-firewall` | A container publishes a port UFW has no rule for. Docker writes its own rules before UFW's, so the port is open all the same: the most common surprise on a Docker host | High |
+| `docker-host-access` | A running container is privileged, holds Docker's socket or the host's whole disk, or sees the host's processes: who breaks into it is root on the host | Medium; High when it answers the network |
+| `docker-group-root` | An account in the group `docker` without sudo rights: it is root through Docker, with no password asked | Low |
+| `tls-cert-expiring` | A certificate nginx shows expires within 21 days (Let's Encrypt renews at 30: the renewal is failing), or has expired | Medium; High within 7 days |
+| `tls-old-protocols` | nginx still accepts SSLv3, TLS 1.0 or 1.1 | Medium |
+
+The audit has no network and starts no program, so all of this is read from files: it never runs `apt`, `ufw`,
+`docker` or `openssl`, and never contacts an archive. That sets its limits. The updates are those of the lists apt
+last downloaded (hence `updates-not-checked`), on Debian and Ubuntu only, and without Ubuntu Pro's (ESM), which a host
+with no subscription cannot install; a list apt keeps compressed is named among what was not read. The firewall is
+UFW as its files say: rules written by hand with `iptables` or `nft` are not seen, and with UFW off nothing is said
+about Docker's ports (the posture already says the firewall is off). Certificates and protocols are those in nginx's
+configuration, not what another web server or a load balancer in front shows.
+
 **What it is not.** The baseline lives on the same server: an intruder who became root can rewrite it, or hide from
 `/proc` with a kernel rootkit, so a silent audit is **not** proof of a clean host, while a finding always deserves an
 answer. A baseline taken on a host that was already compromised calls the intruder's key normal: so look once at
 `intrusion_audit`, which lists every key and every account that can log in, accepted or not.
 It follows `~/.ssh/authorized_keys` (not an `AuthorizedKeysFile` moved elsewhere in `sshd_config`) and the users and
 groups named in sudoers (not its aliases); "owned by a package" is read from dpkg (Debian, Ubuntu). It is not a file
-integrity monitor for the whole disk (AIDE, Wazuh) nor an antivirus.
+integrity monitor for the whole disk (AIDE, Wazuh), nor an antivirus, nor a vulnerability scanner: it knows that a
+security update waits, not which CVE it closes, and nothing about software installed outside the distribution's packages.
 
 | Mode | Where it runs | What it reads | Use |
 |---|---|---|---|
@@ -840,7 +870,7 @@ sudo ./install.sh --with fail2ban,crowdsec,suricata,falco,modsecurity,wireguard,
 | `modsecurity` | Needs nginx. Installs the ModSecurity v3 nginx module and the OWASP Core Rule Set, in **detection only** (`SecRuleEngine DetectionOnly`): it reads every request, bodies included, and writes the ones the CRS would block to `/var/log/modsecurity/audit.json` (JSON, readable by `adm`, rotated with `copytruncate`), but blocks nothing. Switched on for every site with one file in `conf.d` (a site with `modsecurity off;` stays off); the toolkit's own API and the monitoring page are excluded. `nginx -t` is run before and after: if it fails, the file is removed and nginx is left untouched. The package's own rule loader uses a directive ModSecurity v3 rejects, so the CRS files are included one by one. It also adds `/etc/modsecurity/xrcopilotlab/ai.conf`: three rules (ids 200101-200103) for text written to take over an AI in a request body or query string, see [Guarding the customer's own AI](#guarding-the-customers-own-ai) |
 
 | `wireguard` | Installs WireGuard, `qrencode` (QR codes for the phone app) and the command **`xrc-vpn`**, with which **the customer** manages the users: no user is created by the script, nor ever by Hevolus. The server's key is made at the **first start** (`xrcopilotlab-vpn-init`), never during the install, so an image built with `--no-start` does not give every customer the same key. The VPN (interface `wgxrc`, UDP 51820, networks `10.88.0.0/24` and an IPv6 ULA /64) reaches **only the internal network** (the one of the default route, printed at the end of the install, or `VPN_LAN`; IPv4 and IPv6) and the sites behind routers, never the internet through this server. With `VPN_LAN=none` it is a central server (a VPS) that connects the sites. Creates the group `vpn-admin`, whose members may run `xrc-vpn` (and nothing else) through `sudo` with their own password. Every minute it writes who is connected for the toolkit, without any key. UFW is not touched: if it is on, the script prints the rule to add |
-| `audit` | Installs nothing from outside: the command **`xrc-audit`** and a timer that starts the toolkit's own program as root every 15 minutes, read-only and with no network ([the host audit](#the-host-audit-what-the-logs-do-not-show)). The first run takes the baseline; what changes later is shown in "what to fix" until the customer accepts it (`xrc-audit accept`). Not for the Docker install: in a container it would audit the container, not the host |
+| `audit` | Installs nothing from outside: the command **`xrc-audit`** and a timer that starts the toolkit's own program as root every 15 minutes, read-only and with no network ([the host audit](#the-host-audit-what-the-logs-do-not-show)). The first run takes the baseline; what changes later is shown in "what to fix" until the customer accepts it (`xrc-audit accept`). Every run also reads how the host is kept (security updates, UFW's rules, nginx's certificates, Docker's containers), from files only. Not for the Docker install: in a container it would audit the container, not the host |
 
 **Suricata needs memory:** about 1.5 GB with all the ET Open rules (measured in the lab). Install it on servers with
 4 GB or more, or trim the rules first (`/etc/suricata/disable.conf`, then `suricata-update`).
@@ -1227,7 +1257,7 @@ The period is the last 24 hours by default (`hours`, max 720), or `since`/`until
 | `intrusion_host_activity` | What happened **inside** the server (Falco): each alert with its rule, attack type, severity, account, command, file, and the address it was tied to (`ssh-session` or `web-exploit`) or none. Filters: `attackType`, `unlinkedOnly`. |
 | `intrusion_guardians` | The server's protection as configured now: each guardian with its role, status (ok / stopped / log-unreadable / missing), version, mode (detection or blocking); the TCP ports open to the network; sshd's settings; and how XRCopilotLab reaches the server (the customer's domain, or a temporary test tunnel). |
 | `intrusion_vpn` | The customer's VPN, if there is one: up or down, the public address users connect to, the internal network it opens, and each user (a device, or a branch router with its networks), connected now or when last, from which address and city, and whether that country is expected. No key is ever returned. The agent can propose a revocation; the customer does it with `xrc-vpn`. |
-| `intrusion_audit` | The host itself, from the audit (`--with audit`): the accounts that can log in or become root, every SSH key that opens the host (fingerprint, file, date), what starts by itself that no package owns, the programs running from where none belongs, each marked `new` or `changed` since the baseline the customer accepted; what the audit could not read (`notRead`); and the findings of the area `integrity`. No password hash and no key is ever returned. |
+| `intrusion_audit` | The host itself, from the audit (`--with audit`): the accounts that can log in or become root, every SSH key that opens the host (fingerprint, file, date), what starts by itself that no package owns, the programs running from where none belongs, each marked `new` or `changed` since the baseline the customer accepted; what the audit could not read (`notRead`); how the host is kept (`hardening`: the security updates that wait, UFW's default and rules, the certificates nginx shows, the running containers and what they may do to the host); and the findings of the areas `integrity` and `hardening`. No password hash and no key is ever returned. |
 | `intrusion_posture` | Checks of the configuration against the attacks of the period: `lab-image` first on the Docker lab's test server (see [the test console](#the-test-console-docker-lab)), then incidents (someone got in), then SSH with passwords, services, industrial ports and AI services (Ollama, vector databases) open to the network, someone looking for AI services or writing instructions for an AI, a slow brute force nobody banned, no web firewall, guardians stopped, old rules, VPN users connected from an unexpected country or silent for 60 days, a VPN with no public address. Each finding has a severity, the evidence, a recommendation and — when this package can do it — the command that fixes it. Nothing is applied: it is the material for a security plan. |
 | `intrusion_advice` | The advice a person approved in the SOC process and sent back to this server (`POST /api/advice`), newest first, each **checked against the host as it is now**: `verification` is `open` (the finding is still there: not applied yet), `fixed` (the finding is gone) or `unknown` (an attack or an incident, which no configuration check can close), with the evidence. The toolkit shows the advice and never applies it. |
 
@@ -1489,7 +1519,7 @@ is where.
 | `/etc/wireguard/wgxrc.key`, `wgxrc.conf` | The VPN server's private key (made at the first start) and its configuration, rebuilt by `xrc-vpn` | root only |
 | `/run/xrcopilotlab-vpn/state.json` | Who is connected to the VPN, every minute, **without any key** | root, group `adm` (the toolkit) |
 | `/etc/systemd/system/xrcopilotlab-audit.service`, `.timer` | With `--with audit`: the audit, every 15 minutes, as root with read-only capabilities, no network, nothing writable but its state | everyone |
-| `/var/lib/xrcopilotlab-audit/state.json` | The host as the audit saw it, and the baseline: accounts, fingerprints of the SSH **public** keys, hashes of what starts by itself. **No password hash, no key** | root, group `xrcopilot-intrusion` (the toolkit) |
+| `/var/lib/xrcopilotlab-audit/state.json` | The host as the audit saw it, and the baseline: accounts, fingerprints of the SSH **public** keys, hashes of what starts by itself; the names of the packages with a security update waiting, UFW's rules, the certificates' names and expiry, the containers' names and images. **No password hash, no key** | root, group `xrcopilot-intrusion` (the toolkit) |
 | `/etc/sudoers.d/xrcopilotlab-vpn` | The group `vpn-admin` may run `xrc-vpn` (and nothing else) with its own password | root |
 
 The toolkit's own settings are in `/opt/xrcopilotlab-intrusion-mcp/appsettings.Production.json`, kept across updates;
@@ -1526,7 +1556,7 @@ answers. In one line each:
 | `intrusion_host_activity` | What happened *inside* the server after a login? |
 | `intrusion_guardians` | Which guardians are there, are they running, how is SSH set? |
 | `intrusion_vpn` | Who is on the VPN, and from where? |
-| `intrusion_audit` | Did the server itself change: a new account, SSH key, scheduled job, an odd program? |
+| `intrusion_audit` | Did the server itself change: a new account, SSH key, scheduled job, an odd program? And is it kept: updates, firewall rules, certificates, containers? |
 | `intrusion_posture` | What should we fix, most urgent first, with the command? |
 | `intrusion_advice` | Which approved advice has been applied, and which is still open? |
 
@@ -1544,7 +1574,7 @@ answers. In one line each:
 | **ModSecurity** + **OWASP CRS** | Web firewall inside nginx: reads whole requests, bodies included; detection only | `--with modsecurity` | Apache-2.0 |
 | **WireGuard** + `qrencode` | The VPN for the customer's people and branches; QR codes for the phone app | `--with wireguard` | GPL-2 / LGPL-2.1 |
 | **xrc-vpn** | The command the customer uses to add, revoke and reissue VPN users | `--with wireguard` | Hevolus |
-| **xrc-audit** | The host audit (the toolkit's own program, as root, read-only) and the command the customer uses to see what changed and accept it | `--with audit` | Hevolus |
+| **xrc-audit** | The host audit (the toolkit's own program, as root, read-only) and the command the customer uses to see what changed and accept it; it also reads how the host is kept (updates, firewall rules, certificates, containers) | `--with audit` | Hevolus |
 | **DB-IP Lite** (optional) | Puts each address on a city, offline | downloaded by the customer | CC BY 4.0 |
 | **systemd**, **iptables/ip6tables** | Run the services; route the VPN to the internal network | the distribution | — |
 
@@ -1642,7 +1672,7 @@ Everything that *acts* is a person's decision, taken through XRCopilotLab and Cl
 1. **Read the alerts.** The agent calls the [twelve read-only tools](#the-agents-tools) over `/mcp` or `/api` — above all
    `intrusion_summary` (the whole period at a glance: numbers, map, top attackers), `intrusion_suspicious_logins` and
    `intrusion_host_activity` (did anyone get in, and what did they do inside), `intrusion_vpn` (who is on the VPN, and
-   from where), `intrusion_audit` (did the server itself change: accounts, SSH keys, what starts by itself) and `intrusion_posture` (what to fix, most urgent first, each with the exact command). The same alerts
+   from where), `intrusion_audit` (did the server itself change: accounts, SSH keys, what starts by itself; and is it kept: updates, firewall rules, certificates, containers) and `intrusion_posture` (what to fix, most urgent first, each with the exact command). The same alerts
    are on the [monitoring page](#5-the-monitoring-page) for a person to watch.
 2. **Explain.** It turns the raw alerts into plain language for the operator — what happened, from where, how serious —
    and, thanks to the [prompt-injection guard](#protecting-the-ai-agent-prompt-injection-through-the-logs), without
@@ -1671,7 +1701,8 @@ src/XrCopilotLab.Intrusion.Mcp.Core/     pure logic, no I/O
   Parsing/      fail2ban, auth.log, ufw.log, nginx access.log, crowdsec.log, Suricata eve.json, Falco, ModSecurity parsers; web attack patterns
   Analysis/     attack catalogue, threat analyzer, Falco alert linker, policy
   Guard/        host facts, posture checks, guardians + connection + VPN state for the agent and the page
-  Audit/        the host audit: snapshot and baseline, parsers (passwd, shadow, sudoers, authorized_keys, dpkg), checks
+  Audit/        the host audit: snapshot and baseline, parsers (passwd, shadow, sudoers, authorized_keys, dpkg), checks;
+                hardening: dpkg versions and apt lists, UFW rules, nginx TLS, Docker containers, and their checks
   Advice/       the advice inbox's rules, and its verification against the current posture
   Geo/          reserved ranges, range table (DB-IP), locator interface
   Simulation/   synthetic host, its invented geography, the simulated host inspector

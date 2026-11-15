@@ -9,7 +9,9 @@ namespace XrCopilotLab.Intrusion.Mcp.Core.Guard;
 /// address of a test tunnel (Dev Tunnels), when one is open (<see cref="ConnectionOptions.TunnelUrlFile"/>). <c>Vpn</c>:
 /// the customer's WireGuard VPN and its users, when <c>install.sh --with wireguard</c> set it up. <c>Audit</c>: the one
 /// part read with privileges, by another program: accounts, SSH keys, what starts by itself and what runs from odd
-/// places, with the baseline to compare them to, when <c>install.sh --with audit</c> set it up.
+/// places, with the baseline to compare them to, and how the host is kept (updates, firewall rules, certificates,
+/// containers), when <c>install.sh --with audit</c> set it up. <c>Container</c>: the toolkit runs in a container (the
+/// Docker install), where an audit would read the container, not the host.
 /// </summary>
 public sealed record HostFacts(
     DateTimeOffset Time,
@@ -19,7 +21,8 @@ public sealed record HostFacts(
     string? TunnelUrl = null,
     VpnFacts? Vpn = null,
     LabFacts? Lab = null,
-    AuditState? Audit = null);
+    AuditState? Audit = null,
+    bool Container = false);
 
 /// <summary>
 /// One guardian: <c>fail2ban</c>, <c>crowdsec</c>, <c>suricata</c>, <c>falco</c>, <c>modsecurity</c>, <c>ufw</c>, the

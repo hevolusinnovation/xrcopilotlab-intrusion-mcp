@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using XrCopilotLab.Intrusion.Mcp.Core.Audit;
 
@@ -10,6 +11,8 @@ namespace XrCopilotLab.Intrusion.Mcp.Server.Audit;
 /// no network, nothing writable but its own state directory). It reads what the server's own account may not —
 /// <c>/etc/shadow</c> for the state of the passwords, the users' <c>authorized_keys</c>, the scheduled jobs and the
 /// services, the executable of every process — and writes one file the server reads: the host now, and the baseline.
+/// It also reads how the host is kept: dpkg's and apt's files for the security updates that wait, UFW's rules, the
+/// certificates nginx shows, Docker's description of its containers. Files only: it starts no program and has no network.
 /// It changes nothing on the host and keeps no secret: no hash, no key, only fingerprints.
 /// <list type="bullet">
 /// <item><c>audit</c>: take the picture; the first run also takes the baseline.</item>
@@ -22,6 +25,7 @@ public static class AuditCollector
     public const string DefaultStateFile = "/var/lib/xrcopilotlab-audit/state.json";
 
     private const int MaxFileBytes = 1024 * 1024;
+    private const int MaxPackagesNamed = 40;
     private static readonly string[] CronDirs = ["/etc/cron.d", "/etc/cron.hourly", "/etc/cron.daily", "/etc/cron.weekly", "/etc/cron.monthly",
         "/var/spool/cron/crontabs", "/var/spool/cron"];
     private static readonly string[] PackagedRoots = ["/etc/cron", "/etc/systemd/", "/etc/rc.local", "/lib/systemd/", "/usr/lib/systemd/"];
@@ -62,6 +66,10 @@ public static class AuditCollector
         }
         output.WriteLine($"Audit of {state.Current.Time:u}, baseline of {state.Baseline.Time:u}.");
         Print(state, output, "Different from the baseline:");
+        // No ports here: the firewall's unused rules are judged by the service, which knows what listens.
+        var kept = state.Current.Hardening is { } hardening ? HardeningChecks.Evaluate(hardening, state.Current.Time) : [];
+        if (kept.Count > 0) output.WriteLine("How the host is kept (it ends when fixed, not with accept):");
+        foreach (var f in kept) output.WriteLine($"  [{f.Severity}] {f.Title}: {f.Evidence}");
         return 0;
     }
 
@@ -111,8 +119,84 @@ public static class AuditCollector
         if (host.Text("/etc/ld.so.preload") is { } preload && preload.Split('\n').Any(l => l.Trim() is { Length: > 0 } t && t[0] != '#'))
             Add("preload", "/etc/ld.so.preload");
 
+        var processes = Processes(host, accounts);
+        var hardening = Hardening(host, passwd, accounts);
         return new AuditSnapshot(AuditState.Version, now, accounts, keys.Take(AuditState.MaxEntries).ToList(),
-            persistence.OrderBy(p => p.Path, StringComparer.Ordinal).Take(AuditState.MaxEntries).ToList(), Processes(host, accounts), host.Skipped);
+            persistence.OrderBy(p => p.Path, StringComparer.Ordinal).Take(AuditState.MaxEntries).ToList(), processes, host.Skipped, hardening);
+    }
+
+    private static HardeningFacts Hardening(HostFiles host, string passwd, IReadOnlyList<AuditAccount> accounts)
+    {
+        // ---- Updates: what dpkg has against what apt's security lists offer ----
+        UpdateFacts? updates = null;
+        if (host.Text("/var/lib/dpkg/status", limit: false) is { } status)
+        {
+            const string lists = "/var/lib/apt/lists";
+            var security = new List<string>();
+            foreach (var list in host.Files(lists))
+            {
+                var name = list[(lists.Length + 1)..];
+                if (HardeningParsers.IsSecurityList(name)) { if (host.Text(list, limit: false) is { } text) security.Add(text); }
+                else if (name.Contains("security", StringComparison.OrdinalIgnoreCase) && name.Contains("_Packages.", StringComparison.Ordinal))
+                    host.Note($"{list} (compressed: the security updates in it are not counted)");
+            }
+            var pending = HardeningParsers.PendingSecurity(status, security);
+            var stamps = new[] { "/var/lib/apt/periodic/update-success-stamp", "/var/lib/apt/periodic/update-stamp", "/var/cache/apt/pkgcache.bin", lists }
+                .Select(host.ModifiedIfThere).OfType<DateTimeOffset>().ToList();
+            updates = new UpdateFacts(pending.Count,
+                pending.OrderByDescending(HardeningParsers.FacesNetwork).ThenBy(p => p, StringComparer.Ordinal).Take(MaxPackagesNamed).ToList(),
+                stamps.Count > 0 ? stamps.Max() : null,
+                host.Exists("/usr/bin/unattended-upgrade")
+                && HardeningParsers.AutomaticUpdates(host.Files("/etc/apt/apt.conf.d").Select(f => host.Text(f)).OfType<string>()),
+                host.Exists("/run/reboot-required"));
+        }
+
+        // ---- UFW, as its own files say (the kernel's rules need the network this audit does not have) ----
+        FirewallFacts? firewall = null;
+        if (host.Text("/etc/ufw/ufw.conf") is { } ufw)
+        {
+            var rules = new[] { "/etc/ufw/user.rules", "/etc/ufw/user6.rules" }.Select(f => host.Text(f)).OfType<string>().ToList();
+            firewall = new FirewallFacts(HardeningParsers.UfwEnabled(ufw), HardeningParsers.UfwIncoming(host.Text("/etc/default/ufw") ?? ""), rules.Count > 0,
+                rules.SelectMany(HardeningParsers.UfwRules).Distinct().Take(AuditState.MaxEntries).ToList());
+        }
+
+        // ---- TLS: the certificates nginx shows and the protocols it accepts ----
+        var certificates = new List<TlsCertificate>();
+        var old = new List<string>();
+        var nginx = new[] { "/etc/nginx/nginx.conf", "/etc/letsencrypt/options-ssl-nginx.conf" }
+            .Concat(host.Files("/etc/nginx/conf.d")).Concat(host.Files("/etc/nginx/sites-enabled")).Concat(host.Files("/etc/nginx/snippets"));
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var conf in nginx)
+        {
+            if (host.Text(conf) is not { } text) continue;
+            var (files, protocols) = HardeningParsers.NginxTls(text);
+            if (protocols.Count > 0) old.Add($"{string.Join(' ', protocols)} in {conf}");
+            foreach (var file in files.Where(seen.Add))
+            {
+                if (host.Text(file) is not { } pem) continue;
+                try
+                {
+                    // A chain file starts with the site's own certificate; the ones after it are the authority's.
+                    using var certificate = X509Certificate2.CreateFromPem(pem);
+                    var names = certificate.Extensions.OfType<X509SubjectAlternativeNameExtension>().SelectMany(e => e.EnumerateDnsNames()).ToList();
+                    certificates.Add(new TlsCertificate(file, names.Count > 0 ? string.Join(", ", names) : certificate.GetNameInfo(X509NameType.SimpleName, false),
+                        new DateTimeOffset(certificate.NotAfter.ToUniversalTime(), TimeSpan.Zero)));
+                }
+                catch (CryptographicException) { host.Note($"{file} (not a certificate this audit can read)"); }
+            }
+        }
+
+        // ---- Docker: what each running container may do to the host ----
+        var containers = new List<AuditContainer>();
+        foreach (var dir in host.Directories("/var/lib/docker/containers").Order(StringComparer.Ordinal))
+            if (host.Text($"{dir}/config.v2.json") is { } config && host.Text($"{dir}/hostconfig.json") is { } hostConfig
+                && HardeningParsers.Container(config, hostConfig) is { } container)
+                containers.Add(container);
+        var trusted = accounts.Where(a => a.Uid == 0 || a.Sudo || !a.Login).Select(a => a.Name).ToHashSet(StringComparer.Ordinal);
+        var docker = AuditParsers.GroupMembers(passwd, host.Text("/etc/group") ?? "", "docker").Where(m => !trusted.Contains(m)).ToList();
+
+        return new HardeningFacts(updates, firewall, certificates.Take(AuditState.MaxEntries).ToList(), old,
+            containers.OrderBy(c => c.Name, StringComparer.Ordinal).Take(AuditState.MaxEntries).ToList(), docker);
     }
 
     private static List<AuditProcess> Processes(HostFiles host, IReadOnlyList<AuditAccount> accounts)
@@ -175,6 +259,20 @@ public static class AuditCollector
         private string Off(string path) => _root.Length > 0 && path.StartsWith(_root, StringComparison.Ordinal) ? path[_root.Length..] : path;
 
         public bool Exists(string path) => File.Exists(On(path));
+
+        /// <summary>Something the audit did not read for a reason of its own, said with the others.</summary>
+        public void Note(string what) => _skipped.Add(what);
+
+        /// <summary>When a file or a directory last changed, or null when it is not there.</summary>
+        public DateTimeOffset? ModifiedIfThere(string path)
+        {
+            try
+            {
+                FileSystemInfo entry = Directory.Exists(On(path)) ? new DirectoryInfo(On(path)) : new FileInfo(On(path));
+                return entry.Exists ? new DateTimeOffset(entry.LastWriteTimeUtc, TimeSpan.Zero) : null;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return null; }
+        }
 
         public byte[]? Bytes(string path, bool limit = true)
         {

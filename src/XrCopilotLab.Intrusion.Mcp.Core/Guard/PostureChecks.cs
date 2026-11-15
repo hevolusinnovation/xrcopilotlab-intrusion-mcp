@@ -47,7 +47,8 @@ public static class PostureChecks
     /// <summary>True when the finding with this id fires on the configuration alone: once it is fixed it stops firing,
     /// so advice that came from it can be verified (<see cref="Advice.AdviceVerifier"/>).</summary>
     public static bool ReadsConfiguration(string id) =>
-        ConfigurationIds.Contains(id) || AuditChecks.VerifiableIds.Contains(id) || ConfigurationPrefixes.Any(p => id.StartsWith(p, StringComparison.Ordinal));
+        ConfigurationIds.Contains(id) || AuditChecks.VerifiableIds.Contains(id) || HardeningChecks.VerifiableIds.Contains(id)
+        || ConfigurationPrefixes.Any(p => id.StartsWith(p, StringComparison.Ordinal));
 
     public static IReadOnlyList<PostureFinding> Evaluate(HostFacts facts, SummaryResult attacks, ConnectionInfo? connection = null, VpnResult? vpn = null)
     {
@@ -241,9 +242,15 @@ public static class PostureChecks
 
         // ---- The host itself: what changed on it since the customer last said "this is how it should be" ----
         if (facts.Audit is { } audit)
+        {
             findings.AddRange(AuditChecks.Evaluate(audit, facts.Time,
                 findings.Any(f => f.Id is "incident-ssh-login" or "incident-web-exploit") ? attacks.Period.From : null));
-        else
+            // How the host is kept, from the same picture. No ports read: nothing is said about the firewall's unused rules.
+            if (audit.Current.Hardening is { } hardening)
+                findings.AddRange(HardeningChecks.Evaluate(hardening, facts.Time, facts.Listening.Count > 0 ? facts.Listening : null));
+        }
+        // In the Docker install an audit would read the container, not the host: nothing to propose.
+        else if (!facts.Container || facts.Lab is not null)
             findings.Add(new("audit-missing", nameof(Severity.Low), AuditChecks.Area, "Nothing checks the host itself for signs of a break-in",
                 "The logs show who knocked and who was let in. They do not show an SSH key added, a new account, a job that starts by itself "
                 + "or a program running from /tmp: what an intruder leaves to come back, also after cleaning the logs.",

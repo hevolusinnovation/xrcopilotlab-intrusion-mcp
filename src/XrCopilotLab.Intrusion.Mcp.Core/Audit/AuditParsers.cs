@@ -56,6 +56,18 @@ public static partial class AuditParsers
         return accounts;
     }
 
+    /// <summary>The accounts in a group: those <c>/etc/group</c> lists and those that have it as their own group in <c>/etc/passwd</c>.</summary>
+    public static IReadOnlyList<string> GroupMembers(string passwd, string group, string name)
+    {
+        var members = new SortedSet<string>(StringComparer.Ordinal);
+        foreach (var g in Fields(group, 3).Where(f => f[0] == name))
+        {
+            if (g.Length > 3) members.UnionWith(g[3].Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+            members.UnionWith(Fields(passwd, 7).Where(f => f[3] == g[2]).Select(f => f[0]));
+        }
+        return members.ToList();
+    }
+
     /// <summary>The home of each account, to look for its <c>authorized_keys</c>.</summary>
     public static IReadOnlyList<(string User, string Home)> Homes(string passwd) =>
         Fields(passwd, 7).Where(f => f[5].StartsWith('/') && f[5].Length > 1).Select(f => (f[0], f[5])).ToList();

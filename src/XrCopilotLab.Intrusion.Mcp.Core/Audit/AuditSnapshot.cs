@@ -8,7 +8,8 @@ namespace XrCopilotLab.Intrusion.Mcp.Core.Audit;
 /// running from a place no program belongs. Taken by the audit (<c>xrc-audit</c>, root, read-only, every 15 minutes),
 /// which the toolkit's own service could not take: it has no right to read <c>/etc/shadow</c>, the users' homes or
 /// other users' processes. It carries no secret: no password hash, no key, only fingerprints of public keys.
-/// <c>Skipped</c>: what the audit could not read, so its silence there is not a clean bill.
+/// <c>Skipped</c>: what the audit could not read, so its silence there is not a clean bill. <c>Hardening</c>: how the
+/// host is kept (updates, firewall rules, certificates, containers); null in a picture taken before the audit read it.
 /// </summary>
 public sealed record AuditSnapshot(
     int Version,
@@ -17,7 +18,8 @@ public sealed record AuditSnapshot(
     IReadOnlyList<AuditKey> Keys,
     IReadOnlyList<AuditPersistence> Persistence,
     IReadOnlyList<AuditProcess> Processes,
-    IReadOnlyList<string> Skipped);
+    IReadOnlyList<string> Skipped,
+    HardeningFacts? Hardening = null);
 
 /// <summary>
 /// One account of <c>/etc/passwd</c>. <c>Login</c>: its shell is a real one. <c>Password</c>: <c>set</c>,
@@ -84,7 +86,23 @@ public sealed record AuditState(AuditSnapshot Current, AuditSnapshot Baseline)
             .Select(p => new AuditPersistence(Word(p.Kind), Path(p.Path), Word(p.Hash), p.Modified, p.Packaged, p.Altered)).ToList(),
         (s.Processes ?? []).Where(p => p?.Exe is not null).Take(MaxEntries)
             .Select(p => new AuditProcess(p.Pid, User(p.User), Path(p.Exe), Word(p.Reason), UntrustedText.Clean(p.Command, UntrustedText.MaxCommand), p.Started)).ToList(),
-        (s.Skipped ?? []).Where(x => x is not null).Take(MaxEntries).Select(Path).ToList());
+        (s.Skipped ?? []).Where(x => x is not null).Take(MaxEntries).Select(Path).ToList(),
+        s.Hardening is null ? null : Clean(s.Hardening));
+
+    private static HardeningFacts Clean(HardeningFacts h) => new(
+        h.Updates is { } u ? new UpdateFacts(Math.Max(0, u.Security), Words(u.Packages), u.Checked, u.Automatic, u.RebootRequired) : null,
+        h.Firewall is { } f
+            ? new FirewallFacts(f.Enabled, Word(f.Incoming), f.RulesRead, (f.Rules ?? []).Where(r => r is not null).Take(MaxEntries)
+                .Select(r => new FirewallRule(Word(r.Action), Word(r.Protocol), Word(r.Ports), Word(r.From))).ToList())
+            : null,
+        (h.Certificates ?? []).Where(c => c?.File is not null).Take(MaxEntries).Select(c => new TlsCertificate(Path(c.File), Path(c.Names), c.Expires)).ToList(),
+        (h.OldTlsProtocols ?? []).Where(x => x is not null).Take(MaxEntries).Select(Path).ToList(),
+        (h.Containers ?? []).Where(c => c?.Name is not null).Take(MaxEntries)
+            .Select(c => new AuditContainer(Word(c.Name), Path(c.Image), c.Privileged, c.HostNetwork, c.HostPid, c.DockerSocket, c.HostDisk,
+                (c.Ports ?? []).Where(p => p is > 0 and < 65536).Take(100).ToList())).ToList(),
+        (h.DockerGroup ?? []).Where(x => x is not null).Take(MaxEntries).Select(User).ToList());
+
+    private static List<string> Words(IReadOnlyList<string>? raw) => (raw ?? []).Where(x => x is not null).Take(MaxEntries).Select(Word).ToList();
 
     private static string User(string? raw) => UntrustedText.Clean(raw, UntrustedText.MaxUser) ?? "";
     private static string Path(string? raw) => UntrustedText.Clean(raw, UntrustedText.MaxPath) ?? "";
