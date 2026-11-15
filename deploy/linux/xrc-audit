@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# xrc-audit: the host's audit, installed by install.sh --with audit. It reads what the logs do not show — who can log
+# in, which SSH keys open the host, what starts by itself, what runs from /tmp or from memory — and compares it with
+# the baseline: the host as it was when the customer last said "this is how it should be". It changes nothing on the
+# host. The toolkit shows what differs (posture, area "integrity"); only the customer can accept a change.
+#
+#   xrc-audit status    what differs from the baseline, from the last audit
+#   xrc-audit run       take the audit now (systemd does it every 15 minutes)
+#   xrc-audit accept    take the audit and make it the baseline: every change shown by "status" becomes normal.
+#                       Read "status" first: accepting an intruder's key makes it invisible.
+#
+# Run as root. The baseline lives on this host: an intruder who became root can rewrite it, so a silent audit is not
+# proof of a clean host, while a finding is always worth an answer.
+set -euo pipefail
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+umask 027
+
+if [[ $EUID -ne 0 ]]; then exec sudo -- "$0" "$@"; fi
+
+BIN=/opt/xrcopilotlab-intrusion-mcp/XrCopilotLab.Intrusion.Mcp.Server
+STATE_DIR=/var/lib/xrcopilotlab-audit
+
+case "${1:-status}" in
+  status) exec "$BIN" audit --status ;;
+  run|accept)
+    [[ "$1" == accept ]] && flag=(--accept) || flag=()
+    "$BIN" audit "${flag[@]}"
+    # The toolkit's service reads the file by its group, the directory's.
+    chgrp --reference="$STATE_DIR" "$STATE_DIR/state.json" ;;
+  *) sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+esac

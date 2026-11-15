@@ -19,7 +19,8 @@ public class PostureTests
             Now, rules);
 
     private static HostFacts Facts(IEnumerable<GuardianFacts> guardians, IEnumerable<ListeningPort>? listening = null, SshFacts? ssh = null) =>
-        new(Now, guardians.ToList(), (listening ?? [new(22, "0.0.0.0", true)]).ToList(), ssh ?? new SshFacts(false, "prohibit-password", 22));
+        new(Now, guardians.ToList(), (listening ?? [new(22, "0.0.0.0", true)]).ToList(), ssh ?? new SshFacts(false, "prohibit-password", 22),
+            Audit: AuditTests.Unchanged(Now));
 
     private static readonly GuardianFacts[] AllGood =
     [

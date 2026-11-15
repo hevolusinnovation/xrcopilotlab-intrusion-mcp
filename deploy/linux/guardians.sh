@@ -1,10 +1,10 @@
-# The security packages ("guardians") the toolkit reads, installed on request: install.sh --with fail2ban,crowdsec,suricata,falco,modsecurity,wireguard
+# The security packages ("guardians") the toolkit reads, installed on request: install.sh --with fail2ban,crowdsec,suricata,falco,modsecurity,wireguard,audit
 # Sourced by install.sh, as root. Every function is idempotent: a package already there is configured, not reinstalled,
 # and a configuration this script did not write is left alone. Everything runs in detection mode: nothing here blocks
 # traffic that fail2ban would not already block. UFW is never switched on: a firewall turned on by a script can lock
 # everyone out of SSH.
 
-GUARDIANS_SUPPORTED="fail2ban crowdsec suricata falco modsecurity wireguard"
+GUARDIANS_SUPPORTED="fail2ban crowdsec suricata falco modsecurity wireguard audit"
 SERVICE_DROPIN_DIR=/etc/systemd/system/xrcopilotlab-intrusion-mcp.service.d
 
 installed() { dpkg-query -W -f='${Status}' "$1" 2>/dev/null | grep -q "install ok installed"; }
@@ -514,6 +514,55 @@ UNIT
   echo "wireguard: installed. The users are added by the customer: sudo usermod -aG vpn-admin <their account>, then xrc-vpn add <name>"
 }
 
+# The host's audit: the toolkit's own program, started as root every 15 minutes with nothing writable but its state
+# directory and no network. It reads accounts, SSH keys, scheduled jobs, services and running programs, and writes
+# what the toolkit's service (which cannot read them) shows as posture findings. Nothing is installed from outside.
+guardian_audit() {
+  local user=xrcopilot-intrusion
+  id -u "$user" >/dev/null 2>&1 || useradd --system --no-create-home --shell /usr/sbin/nologin "$user"
+  install -m 0755 "$HERE/xrc-audit" /usr/local/sbin/xrc-audit
+  # Setgid: the state file takes the directory's group, the one the toolkit's service reads it with.
+  install -d -m 2750 -o root -g "$user" /var/lib/xrcopilotlab-audit
+  cat > /etc/systemd/system/xrcopilotlab-audit.service <<'UNIT'
+[Unit]
+Description=XRCopilotLab host audit: accounts, SSH keys, what starts by itself, odd processes (read-only)
+[Service]
+Type=oneshot
+ExecStart=/opt/xrcopilotlab-intrusion-mcp/XrCopilotLab.Intrusion.Mcp.Server audit
+Group=xrcopilot-intrusion
+UMask=0027
+Environment=DOTNET_gcServer=0
+Nice=10
+# Root, to read /etc/shadow, the users' homes and every process; and nothing else of root: it can read, not write.
+CapabilityBoundingSet=CAP_DAC_READ_SEARCH CAP_SYS_PTRACE
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/var/lib/xrcopilotlab-audit
+PrivateTmp=true
+PrivateDevices=true
+PrivateNetwork=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_UNIX
+RestrictSUIDSGID=true
+LockPersonality=true
+UNIT
+  cat > /etc/systemd/system/xrcopilotlab-audit.timer <<'UNIT'
+[Unit]
+Description=Every 15 minutes: the host's audit
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=15min
+AccuracySec=30s
+[Install]
+WantedBy=timers.target
+UNIT
+  systemctl enable xrcopilotlab-audit.timer >/dev/null 2>&1 || true
+  echo "audit: installed. The first run takes the baseline (the host as it is now); later changes are shown until you accept them: xrc-audit status, xrc-audit accept"
+}
+
 # The start of whatever was configured; called by install.sh once systemd is up (not with --no-start).
 guardians_start() {
   local g
@@ -539,6 +588,11 @@ guardians_start() {
         # What the VPN opens, found on its own: said now, so a server with more networks is checked at once.
         /usr/local/sbin/xrc-vpn show | sed 's/^/wireguard: /'
         [[ -n "${VPN_LAN:-}" ]] || echo "wireguard: the internal network above was found on its own (no VPN_LAN): check it; xrc-vpn lan <networks> changes it" ;;
+      audit)
+        systemctl daemon-reload
+        systemctl start xrcopilotlab-audit.timer
+        # Now, not in 15 minutes: the first run is the baseline, a later one shows at once what this install changed.
+        systemctl start xrcopilotlab-audit.service || echo "audit: the first run failed: journalctl -u xrcopilotlab-audit" >&2 ;;
       *) ;;
     esac
   done

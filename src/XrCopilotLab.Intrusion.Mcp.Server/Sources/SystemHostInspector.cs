@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Globalization;
 using System.Net;
+using XrCopilotLab.Intrusion.Mcp.Core.Audit;
 using XrCopilotLab.Intrusion.Mcp.Core.Guard;
 
 namespace XrCopilotLab.Intrusion.Mcp.Server.Sources;
@@ -8,7 +9,8 @@ namespace XrCopilotLab.Intrusion.Mcp.Server.Sources;
 /// <summary>
 /// Reads the host's protection without privileges and without changing anything: package versions from dpkg, service
 /// states from systemd (over D-Bus, as any user may), the configuration files that are world-readable, the listening
-/// sockets from <c>/proc/net</c>, and whether the toolkit can open each log. Kept for 30 seconds: the page asks often.
+/// sockets from <c>/proc/net</c>, and whether the toolkit can open each log. What needs root (accounts, SSH keys, jobs,
+/// processes) it does not read: it takes the file the audit wrote. Kept for 30 seconds: the page asks often.
 /// </summary>
 public sealed class SystemHostInspector(LogFileOptions logs, ConnectionOptions connection, ILogger<SystemHostInspector> logger) : IHostInspector
 {
@@ -64,7 +66,7 @@ public sealed class SystemHostInspector(LogFileOptions logs, ConnectionOptions c
         var wireguard = Guardian("wireguard", managed ? V("wireguard-tools") : null, Running(managed && V("wireguard-tools") is not null, VpnUnit), null, managed,
             [logs.VpnStateFile], note: vpn is null ? null : VpnNote(vpn, now));
         guardians.Add(wireguard);
-        return new HostFacts(now, guardians, Listening(), Ssh(), TunnelUrl(), vpn, Lab());
+        return new HostFacts(now, guardians, Listening(), Ssh(), TunnelUrl(), vpn, Lab(), Audit(), File.Exists("/.dockerenv") || File.Exists("/run/.containerenv"));
     }
 
     private GuardianFacts Guardian(string name, string? version, bool? running, string? mode, bool managed, List<string> patterns,
@@ -113,6 +115,12 @@ public sealed class SystemHostInspector(LogFileOptions logs, ConnectionOptions c
     private LabFacts? Lab()
     {
         try { return File.Exists(logs.LabMarkerFile) ? LabMarker.Parse(File.ReadAllText(logs.LabMarkerFile)) : null; }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return null; }
+    }
+
+    private AuditState? Audit()
+    {
+        try { return File.Exists(logs.AuditStateFile) ? AuditState.Parse(File.ReadAllText(logs.AuditStateFile)) : null; }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return null; }
     }
 

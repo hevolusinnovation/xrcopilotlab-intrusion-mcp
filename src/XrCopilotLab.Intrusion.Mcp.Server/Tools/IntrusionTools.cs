@@ -160,11 +160,28 @@ public sealed class IntrusionTools(QueryScope scope, IHttpContextAccessor http, 
         "labDemo marks a user the Docker lab added for its scenarios, whose key the attacker has on purpose. No key is ever shown. The customer adds and revokes users with xrc-vpn on the server: propose a revocation, never claim to do it.")]
     public VpnResult Vpn() => Guard.Vpn(clock.GetUtcNow());
 
+    [McpServerTool(Name = "intrusion_audit", ReadOnly = true),
+     Description(
+        "The host itself, not its logs: what an intruder leaves to come back, also after cleaning the logs. Taken every 15 minutes by the audit " +
+        "(install.sh --with audit: root, read-only, no network) and compared with the baseline, the host as the customer last accepted it: " +
+        "the accounts that can log in or become root and the state of their passwords, the SSH keys that open them (fingerprints only), " +
+        "the scheduled jobs and services no package owns or someone edited, the programs running from /tmp, /dev/shm or memory. " +
+        "change says what was not so at the baseline (new, changed); findings are the conclusions: a second root account, an empty password, " +
+        "an account, a key or a job added, a library loaded into every program, a suspicious process. installed false: no audit here, propose it. " +
+        "stale: the audit stopped. hardening is how the host is kept, read from the same files and with no baseline: the security updates that wait " +
+        "(apt's security lists against what is installed), whether they install by themselves, a restart that waits, UFW's default and rules, " +
+        "the certificates nginx shows and when they expire, the running containers that are privileged, hold Docker's socket or publish a port; " +
+        "its findings (area hardening: updates-*, reboot-required, firewall-*, docker-*, tls-*) end when the host is fixed, not with accept. " +
+        "hardening null: the audit on the server is an older version. No password hash and no key is ever shown. Nothing is changed: what the customer changed on purpose they " +
+        "confirm on the server with xrc-audit accept, so propose that or a clean-up, never claim to do it. The same findings are in " +
+        "intrusion_posture, weighed with the attacks of the period." + UntrustedHelp)]
+    public AuditResult Audit() => Guard.Audit(clock.GetUtcNow());
+
     [McpServerTool(Name = "intrusion_posture", ReadOnly = true),
      Description(
         "Checks of the host's configuration against what attacked it: lab-image first if this is the Docker lab's test server (built to be attacked: never for a real network), then incidents (someone got in), then SSH with passwords, " +
         "services and industrial ports open to the network, a slow brute force nobody banned, no web firewall, guardians stopped or " +
-        "unreadable, old IDS rules, AI services (Ollama, vector databases) open to the network, someone looking for them or writing instructions for an AI, VPN users connected from an unexpected country or unused for months. Each finding has a stable id, a severity grown with the evidence of the period, the evidence, a " +
+        "unreadable, old IDS rules, AI services (Ollama, vector databases) open to the network, someone looking for them or writing instructions for an AI, VPN users connected from an unexpected country or unused for months, and what the audit found on the host itself (area integrity: an account, an SSH key or a job added since the baseline, a second root, a program running from /tmp; area hardening: security updates that wait, a firewall that lets everything in, a port Docker publishes past the firewall, a container that can take over the host, a certificate about to expire; details in intrusion_audit). Each finding has a stable id, a severity grown with the evidence of the period, the evidence, a " +
         "recommendation in plain words and, when this package can do it, the command that fixes it. Nothing is applied. " +
         "Use it to propose a security plan for this customer. Default period: the last 7 days.")]
     public async Task<PostureResult> Posture(
@@ -180,13 +197,18 @@ public sealed class IntrusionTools(QueryScope scope, IHttpContextAccessor http, 
      Description(
         "The hardening advice a person approved in the SOC process and sent to this server, newest first: the finding it " +
         "came from, the address, the severity, the recommendation and its fix command, who approved it and when, and " +
-        "whether it is still to do or marked done. This server only shows it: it never applies a recommendation and never " +
-        "runs a command. Use it to tell the user what has already been decided (\"already sent on …\").")]
-    public IReadOnlyList<AdviceItem> Advice(
+        "whether it is still to do or marked done (status), and what the host says now (verification): open = the check it came from " +
+        "still fires, with the evidence; fixed = it no longer fires; unknown = no check to read it against. status done with " +
+        "verification open means it was marked done but did not take effect: say so. This server only shows it: it never applies a " +
+        "recommendation and never runs a command. Use it to tell the user what has already been decided (\"already sent on …\").")]
+    public IReadOnlyList<AdviceView> Advice(
         [Description("Only advice received in the last this many hours. Null = everything kept (up to 500).")] int? hours = null)
-        => Approved.List(clock.GetUtcNow(), hours);
+    {
+        var now = clock.GetUtcNow();
+        return Guard.Advice(now, Approved.List(now, hours));
+    }
 
-    // The guardians, the VPN, the posture and the advice are about the host this server runs on: a collector runs elsewhere.
+    // The guardians, the VPN, the audit, the posture and the advice are about the host this server runs on: a collector runs elsewhere.
     private GuardQueries Guard => guard ?? throw NotOnTheHost();
 
     private AdviceStore Approved => advice ?? throw NotOnTheHost();
