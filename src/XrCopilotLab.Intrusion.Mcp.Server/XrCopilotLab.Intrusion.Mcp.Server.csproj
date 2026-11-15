@@ -16,6 +16,10 @@
     <PackageReference Include="ModelContextProtocol.AspNetCore" />
   </ItemGroup>
 
+  <ItemGroup Label="Collector store">
+    <PackageReference Include="Azure.Storage.Blobs" />
+  </ItemGroup>
+
   <ItemGroup Label="Telemetry">
     <PackageReference Include="OpenTelemetry.Extensions.Hosting" />
     <PackageReference Include="OpenTelemetry.Instrumentation.AspNetCore" />

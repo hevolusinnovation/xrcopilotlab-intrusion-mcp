@@ -61,7 +61,8 @@ flowchart LR
   [a public test address for XRCopilotLab (dynamic URL)](#a-public-test-address-for-xrcopilotlab-dynamic-url)
 - [Commands (make)](#commands-make)
 - [The agent's tools](#tools), [Attack types](#attack-types), [The simulated host](#the-simulated-host),
-  [Authentication](#authentication), [Configuration](#configuration)
+  [Authentication](#authentication), [Configuration](#configuration),
+  [collector and agent (experimental)](#a-server-nobody-can-call-collector-and-agent-experimental)
 - [Every setting explained](#every-setting-explained) · [Every tool explained](#every-tool-explained) ·
   [When something does not work](#when-something-does-not-work)
 - [Register it in XRCopilotLab](#register-it-in-xrcopilotlab) ·
@@ -1390,7 +1391,7 @@ configured; `/livez` answers when the process is up. 120 calls per minute per ke
 
 | Key | Default | Meaning |
 |---|---|---|
-| `Server:Mode` | `logs` | `logs` or `simulated` |
+| `Server:Mode` | `logs` | `logs` or `simulated`; `collector` and `agent` are [experimental](#a-server-nobody-can-call-collector-and-agent-experimental) |
 | `ApiKeys:Hash` | — | SHA-256 of the key |
 | `Logs:Fail2banFiles` | `/var/log/fail2ban.log*` | fail2ban logs; `*` takes the rotated copies, `.gz` included |
 | `Logs:AuthFiles` | `/var/log/auth.log*` | sshd logs (`/var/log/secure*` on RHEL) |
@@ -1420,6 +1421,64 @@ column order (`ip_start,ip_end,continent,country,stateprov,city,latitude,longitu
 and has not yet been checked against a downloaded file.
 
 ---
+
+---
+
+## A server nobody can call: collector and agent (experimental)
+
+> **Parked, not used by the lab or by any customer.** The code is tested (store, keys, parsers, the two modes
+> talking to each other in a container) but it has no installer, no package and no deployment yet. Everything else
+> in this README describes the `logs` and `simulated` modes.
+
+The `logs` mode needs XRCopilotLab to reach the customer's server (a public address or a tunnel). Some customers
+allow no inbound connection at all. For them the same program has two more modes: the server only **sends**.
+
+```mermaid
+flowchart LR
+  subgraph host["Customer's host (no inbound port)"]
+    logs["fail2ban, sshd, UFW, nginx, CrowdSec logs"] --> agent["Server:Mode = agent<br/>tails the logs"]
+  end
+  agent -- "POST /ingest (HTTPS, outbound only)<br/>the host's own ingest key" --> collector
+  subgraph ours["Our side"]
+    collector["Server:Mode = collector<br/>keeps only the lines about an attack"] --> store[("file or Azure blob store<br/>tenant/host/day/log.jsonl")]
+  end
+  xr["XRCopilotLab"] -- "/mcp, /api (query key)" --> collector
+```
+
+| Mode | Where it runs | What it does |
+|---|---|---|
+| `agent` | The customer's host | Reads the current log files from where it stopped (state in `Agent:StateFile`), sends the new lines every `Agent:IntervalSeconds` to `Agent:CollectorUrl`. Opens no port, answers nothing |
+| `collector` | Our side | Receives the lines on `POST /ingest`, stores only those a parser recognises as an event, answers the same query tools and `/api` routes as a host, for one host (`host=`) or for all the hosts of the key's tenant seen as one |
+
+Two kinds of key, never interchangeable:
+
+- an **ingest key**, one per host (`Collector:Hosts:n:Name|Tenant|IngestKeyHash`): it only writes, and only in the
+  name of its host. Stolen from a compromised host, it reads nothing and cannot write as another host. `Active: false`
+  revokes it;
+- a **query key** (`ApiKeys:*`, each with its `Tenant`): it reads `/mcp` and `/api`, only its tenant's hosts.
+  `GET /api/hosts` lists them; a host of another tenant is a 404.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `Collector:Store` | `file` | `file` (a folder) or `blob` (Azure append blobs, `Collector:BlobConnectionString`, `Collector:BlobContainer`) |
+| `Collector:StorePath` | `/data/intrusion` | Folder of the file store |
+| `Collector:RetentionDays` | 30 | Days kept; older days are deleted every six hours |
+| `Collector:SimulatedTenants` | — | Tenants that also see the simulated host next to their real ones (a demo) |
+| `Agent:CollectorUrl` / `Agent:Key` | — | The collector's address and this host's ingest key |
+| `Agent:TimeZone` | system zone | The host's IANA zone, sent with the lines (fail2ban writes local time) |
+| `Agent:Files:<log>` | the five paths below | Current file of each log; an empty path turns it off |
+| `Agent:InitialBackfillBytes` | 8 MB | On the first run, how much of the end of each file is sent |
+
+What it does **not** do today:
+
+- The agent sends by default `fail2ban`, `auth`, `firewall`, `web`, `crowdsec`. The collector also knows `suricata`,
+  `falco` and `modsecurity` by name, but they are not sent unless `Agent:Files` names them, a ModSecurity line is
+  often longer than the 8,192 characters a line may have, and the collector does not know the host's own addresses,
+  so it cannot tell a Suricata alert on a connection the host opened from one coming in.
+- A collector answers only about events. The guardians, the VPN, the posture, the advice inbox and the host audit
+  read the host itself: on a collector their routes do not exist and their tools refuse, saying why.
+- A host name or a tenant that is not a plain name (lowercase letters, digits, `.`, `_`, `-`) stops the collector at
+  startup: the names are folders of the store.
 
 ---
 
@@ -1708,9 +1767,12 @@ src/XrCopilotLab.Intrusion.Mcp.Core/     pure logic, no I/O
   Simulation/   synthetic host, its invented geography, the simulated host inspector
   Sources/      log source interface, simulated source
   Queries/      the answers behind the tools
+  Collector/    (experimental) the ingest request and its rules, stored lines, store paths
 src/XrCopilotLab.Intrusion.Mcp.Server/   ASP.NET host: MCP tools, REST face, API key, file source, DB-IP loader,
   Sources/      file log source, host inspector (dpkg/systemd/proc, no privileges)
   Audit/        the audit collector: the same binary started as "… audit" by root
+  Collector/    (experimental) /ingest, the file and blob stores, a tenant's hosts as sources
+  Agent/        (experimental) tails the host's logs and sends the new lines out
   wwwroot/      the monitoring page (static), Leaflet vendored
 tests/                                   parsers, analyzer, geo, the simulated story
 deploy/linux/                            systemd unit, install script, guardians (--with), the monitoring page (dashboard.sh), production settings,

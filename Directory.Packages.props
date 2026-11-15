@@ -9,6 +9,10 @@
     <PackageVersion Include="ModelContextProtocol.AspNetCore" Version="2.2.0" />
   </ItemGroup>
 
+  <ItemGroup Label="Collector store">
+    <PackageVersion Include="Azure.Storage.Blobs" Version="12.25.0" />
+  </ItemGroup>
+
   <ItemGroup Label="Telemetry">
     <PackageVersion Include="OpenTelemetry.Extensions.Hosting" Version="1.19.1" />
     <PackageVersion Include="OpenTelemetry.Instrumentation.AspNetCore" Version="1.19.0" />
