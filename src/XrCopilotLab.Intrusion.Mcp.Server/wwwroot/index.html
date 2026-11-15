@@ -1,0 +1,749 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hevolus Intrusion MCP</title>
+<link rel="stylesheet" href="vendor/leaflet/leaflet.css">
+<style>
+:root {
+  --bg: #0f1419; --panel: #161d24; --line: #26313b; --text: #e6edf3; --muted: #8b98a5;
+  --accent: #4aa3ff; --low: #8b98a5; --medium: #e3b341; --high: #f0883e; --critical: #f85149; --ok: #3fb950;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; background: var(--bg); color: var(--text); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+.top { display: flex; align-items: center; gap: 16px; height: 56px; padding: 0 16px; background: var(--panel); border-bottom: 1px solid var(--line); }
+.top img { height: 40px; width: auto; display: block; }
+.top .sep { width: 1px; height: 28px; background: var(--line); }
+.top h1 small { display: inline; margin: 0 0 0 8px; }
+.langtog { margin-left: auto; display: inline-flex; border: 1px solid var(--line); border-radius: 999px; overflow: hidden; flex-shrink: 0; }
+.langtog button { background: transparent; color: var(--muted); border: 0; padding: 4px 11px; cursor: pointer; font: 600 12px system-ui, sans-serif; }
+.langtog button.on { background: var(--accent); color: #0b0f13; }
+.app { display: grid; grid-template-columns: 400px 1fr; height: calc(100vh - 56px); }
+aside { background: var(--panel); border-right: 1px solid var(--line); overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 18px; }
+main { display: grid; grid-template-rows: 1fr 280px; min-width: 0; }
+h1 { font-size: 17px; font-weight: 600; }
+h1 small { display: block; color: var(--muted); font-size: 12px; font-weight: 400; margin-top: 2px; }
+h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 600; margin-bottom: 8px; }
+.badge[hidden] { display: none; }
+.lab-banner[hidden] { display: none; }
+.lab-banner { background: var(--critical); color: #fff; font-size: 13px; padding: 6px 16px; text-align: center; }
+.lab-banner b { letter-spacing: .08em; }
+.badge { display: inline-block; font-size: 11px; padding: 1px 7px; border-radius: 10px; background: var(--medium); color: #0f1419; font-weight: 600; margin-left: 6px; vertical-align: middle; }
+.stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.stat { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 8px; }
+.stat b { display: block; font-size: 20px; font-variant-numeric: tabular-nums; }
+.stat span { color: var(--muted); font-size: 11px; }
+.alert { display: none; background: rgba(248,81,73,.12); border: 1px solid var(--critical); border-radius: 8px; padding: 10px 12px; }
+.alert.on { display: block; }
+.alert b { color: var(--critical); }
+.guardians { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.guardian { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 7px 9px; cursor: default; }
+.guardian b { font-weight: 600; }
+.guardian .light { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; vertical-align: 1px; }
+.guardian span { display: block; color: var(--muted); font-size: 11px; }
+.light.ok { background: var(--ok); } .light.stopped, .light.log-unreadable { background: var(--critical); } .light.missing { background: var(--line); border: 1px solid var(--muted); }
+.vpn-users { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; }
+.vpn-user { display: flex; justify-content: space-between; gap: 8px; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 5px 9px; font-size: 12px; }
+.vpn-user span { color: var(--muted); text-align: right; }
+.vpn-user.away { border-color: var(--high); } .vpn-user.away span { color: var(--high); }
+.vpn-user { flex-wrap: wrap; } .vpn-user b { white-space: nowrap; }
+.vpn-user span.demo { flex-basis: 100%; text-align: left; color: var(--critical); font-size: 11px; }
+.vpn-user.demo-user { border-color: var(--critical); }
+.findings { display: flex; flex-direction: column; gap: 8px; }
+.finding { background: var(--bg); border: 1px solid var(--line); border-left: 4px solid var(--low); border-radius: 8px; padding: 8px 10px; }
+.finding.Critical { border-left-color: var(--critical); } .finding.High { border-left-color: var(--high); } .finding.Medium { border-left-color: var(--medium); }
+.finding b { display: block; }
+.finding p { color: var(--muted); font-size: 12px; margin-top: 3px; }
+.finding code { display: block; margin-top: 5px; background: #0b0f13; border: 1px solid var(--line); border-radius: 6px; padding: 4px 6px; font-size: 11px; white-space: pre-wrap; word-break: break-all; }
+.finding details { margin-top: 4px; font-size: 11px; color: var(--muted); }
+.conn-row { margin-top: 8px; }
+.conn-row .lbl { color: var(--muted); font-size: 11px; display: block; margin-bottom: 2px; }
+.conn-row .val { display: flex; gap: 6px; align-items: stretch; }
+.conn-row .val code { flex: 1; min-width: 0; background: #0b0f13; border: 1px solid var(--accent); border-radius: 6px; padding: 5px 7px; font-size: 12px; color: var(--text); overflow-x: auto; white-space: nowrap; }
+.conn-row.key .val code { border-color: var(--line); color: var(--muted); }
+.conn-copy { background: var(--accent); color: #0b0f13; border: 0; border-radius: 6px; padding: 0 9px; font: 600 11px system-ui, sans-serif; cursor: pointer; white-space: nowrap; }
+.conn-row.key .val code { border-color: var(--medium); color: var(--text); }
+.c-state { font-size: 13px; margin-bottom: 2px; }
+.c-state b.on { color: var(--ok); } .c-state b.off { color: var(--muted); } .c-state b.err { color: var(--critical); }
+.btn.ghost { background: transparent; color: var(--text); border: 1px solid var(--line); }
+.btnrow { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+.code-big { font: 600 18px ui-monospace, Menlo, monospace; letter-spacing: .08em; background: #0b0f13; border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; display: inline-block; }
+#connection a { color: var(--accent); }
+.toolbar { display: flex; gap: 8px; align-items: center; color: var(--muted); font-size: 12px; flex-wrap: wrap; }
+select, input { background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 3px 6px; font: inherit; }
+#map { min-height: 0; background: #0a1017; }
+.city-bg { color: #5b6b7a; font: 10px/1 system-ui, sans-serif; white-space: nowrap; text-shadow: 0 1px 2px #0a1017, 0 0 2px #0a1017; pointer-events: none; }
+.city-atk { font: 600 11px/1 system-ui, sans-serif; white-space: nowrap; text-shadow: 0 1px 2px #000, 0 0 3px #000; pointer-events: none; }
+.table-wrap { overflow: auto; border-top: 1px solid var(--line); background: var(--panel); }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+th { position: sticky; top: 0; background: var(--panel); color: var(--muted); font-weight: 500; font-size: 12px; }
+td.num { font-variant-numeric: tabular-nums; text-align: right; }
+.sev { display: inline-block; padding: 1px 7px; border-radius: 10px; font-size: 11px; font-weight: 600; color: #0f1419; }
+.sev-Low { background: var(--low); } .sev-Medium { background: var(--medium); } .sev-High { background: var(--high); } .sev-Critical { background: var(--critical); color: #fff; }
+.dot { border-radius: 50%; border: 2px solid rgba(255,255,255,.85); box-shadow: 0 0 0 0 currentColor; }
+.dot.new { animation: pulse 1.4s ease-out 3; }
+@keyframes pulse { 0% { box-shadow: 0 0 0 0 currentColor; } 100% { box-shadow: 0 0 0 18px transparent; } }
+.target { background: var(--accent); border-radius: 4px; border: 2px solid #fff; }
+.leaflet-popup-content { font: 13px/1.45 system-ui, sans-serif; }
+.city-atk-tt { background: transparent; border: 0; box-shadow: none; padding: 0; }
+.city-atk-tt::before { display: none; }
+.muted { color: var(--muted); }
+.error { color: var(--critical); font-size: 12px; }
+.login { position: fixed; inset: 0; background: rgba(15,20,25,.92); display: none; align-items: center; justify-content: center; z-index: 2000; }
+.login.on { display: flex; }
+.login form { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 20px; width: min(420px, 92vw); display: flex; flex-direction: column; gap: 10px; }
+.btn { background: var(--accent); color: #0b0f13; border: 0; border-radius: 6px; padding: 6px 12px; font: 600 13px system-ui, sans-serif; cursor: pointer; }
+/* ?view=map: only the map and the attacks received, for a screen on the wall or the lab's server page. */
+body.map-only .app { grid-template-columns: 1fr; }
+body.map-only aside { display: none; }
+body.map-only main { grid-template-rows: 1fr 300px; }
+@media (max-width: 900px) {
+  .app { grid-template-columns: 1fr; height: auto; }
+  .top h1 small { display: block; margin: 2px 0 0; }
+  aside { border-right: 0; border-bottom: 1px solid var(--line); }
+  main { grid-template-rows: 60vh auto; }
+}
+</style>
+</head>
+<body>
+<header class="top">
+  <img src="hevolus-logo.svg" alt="Hevolus">
+  <span class="sep"></span>
+  <h1>Hevolus Intrusion MCP<span class="badge" id="simulated" hidden data-i18n="simulated">dati simulati</span><small id="host">…</small></h1>
+  <div class="langtog" id="langtog"><button data-lang="it">IT</button><button data-lang="en">EN</button></div>
+</header>
+<div class="lab-banner" id="lab-banner" hidden></div>
+<div class="app">
+  <aside>
+
+    <div class="stats">
+      <div class="stat"><b id="s-attempts">–</b><span data-i18n="sAttempts">tentativi</span></div>
+      <div class="stat"><b id="s-addresses">–</b><span data-i18n="sAddresses">indirizzi</span></div>
+      <div class="stat"><b id="s-banned">–</b><span data-i18n="sBanned">bannati ora</span></div>
+      <div class="stat"><b id="s-waf">–</b><span data-i18n="sWaf">attacchi web visti dal WAF</span></div>
+      <div class="stat"><b id="s-host">–</b><span data-i18n="sHost">azioni dentro il server</span></div>
+      <div class="stat"><b id="s-blocks">–</b><span data-i18n="sBlocks">blocchi firewall</span></div>
+    </div>
+
+    <div class="alert" id="alert"></div>
+
+    <!-- At the top: what the SOC analyst approved and sent here is what the person reading this page acts on. -->
+    <div id="advice-box" hidden>
+      <h2><span data-i18n="toFix">Da sistemare</span> <span class="muted" id="advice-count" style="text-transform:none;letter-spacing:0"></span></h2>
+      <div class="findings" id="advice"></div>
+    </div>
+
+    <div>
+      <h2 data-i18n="reach">Come ti raggiunge XRCopilotLab</h2>
+      <div class="finding" id="connection"><span class="muted">…</span></div>
+    </div>
+
+    <div>
+      <h2 data-i18n="guardians">Guardiani</h2>
+      <div class="guardians" id="guardians"><span class="muted">…</span></div>
+    </div>
+
+    <div id="vpn-box" hidden>
+      <h2 data-i18n="vpn">VPN · chi è collegato</h2>
+      <div class="muted" id="vpn-note" style="font-size:12px"></div>
+      <div class="vpn-users" id="vpn-users"></div>
+    </div>
+
+    <div>
+      <h2><span data-i18n="improve">Cosa migliorare</span> <span class="muted" style="text-transform:none;letter-spacing:0" data-i18n="last7">· ultimi 7 giorni</span></h2>
+      <div class="findings" id="findings"><span class="muted">…</span></div>
+    </div>
+
+    <div class="muted" style="font-size:12px" data-i18n="readOnly">
+      Questa pagina legge soltanto: non banna, non blocca e non cambia niente sul server. I comandi suggeriti vanno
+      eseguiti da chi amministra il server. I consigli in «Da sistemare» sono quelli che un analista ha approvato nel
+      processo SOC e inviati qui: il server li mostra soltanto, non li applica.
+    </div>
+  </aside>
+
+  <main>
+    <div id="map"></div>
+    <div class="table-wrap">
+      <div class="toolbar" style="padding:8px 10px">
+        <span data-i18n="period">Periodo</span>
+        <select id="hours">
+          <option value="1" data-i18n="h1">ultima ora</option>
+          <option value="24" selected data-i18n="h24">ultime 24 ore</option>
+          <option value="168" data-i18n="h168">ultima settimana</option>
+        </select>
+        <span id="updated"></span>
+        <span id="attribution" class="muted" style="margin-left:auto"></span>
+        <span class="error" id="error"></span>
+      </div>
+      <table>
+        <thead><tr><th data-i18n="thSeverity">Gravità</th><th data-i18n="thAddress">Indirizzo</th><th data-i18n="thCity">Città</th><th data-i18n="thType">Tipo di attacco</th><th class="num" data-i18n="thAttempts">Tentativi</th><th class="num" data-i18n="thBlocks">Blocchi</th><th data-i18n="thBanned">Bannato</th><th data-i18n="thLast">Ultimo evento</th></tr></thead>
+        <tbody id="rows"><tr><td colspan="8" class="muted" data-i18n="waiting">In attesa dei dati…</td></tr></tbody>
+      </table>
+    </div>
+  </main>
+</div>
+
+<div class="login" id="login">
+  <form id="login-form">
+    <b data-i18n="loginTitle">Chiave di accesso</b>
+    <span class="muted" style="font-size:12px" data-i18n="loginText">Questa pagina non è dietro il proxy del server: inserisci la chiave API (X-API-Key). Resta in questa scheda del browser e si cancella alla chiusura.</span>
+    <input type="password" id="key" autocomplete="off" placeholder="chiave API" data-i18n-placeholder="loginKey">
+    <button class="btn" type="submit" data-i18n="loginGo">Entra</button>
+  </form>
+</div>
+
+<script src="vendor/leaflet/leaflet.js"></script>
+<script>
+const COLORS = { Low: "#8b98a5", Medium: "#e3b341", High: "#f0883e", Critical: "#f85149" };
+// The page speaks Italian or English (IT|EN at the top, remembered in this browser). The API speaks English: in English
+// the findings show its own title and advice; in Italian, the texts below.
+let lang = "it";
+try { const saved = localStorage.getItem("lang"); lang = saved === "en" ? "en" : saved === "it" ? "it" : ((navigator.language || "").slice(0, 2) === "en" ? "en" : "it"); } catch { }
+const LOCALE = () => lang === "en" ? "en-GB" : "it-IT";
+const pick = (d) => d[lang] || d.it;
+const SEVERITY_ = { it: { Low: "bassa", Medium: "media", High: "alta", Critical: "critica" },
+  en: { Low: "low", Medium: "medium", High: "high", Critical: "critical" } };
+const TYPES_ = { it: {
+  SshBruteForce: "forza bruta SSH", DistributedSshBruteForce: "campagna distribuita", WebLoginBruteForce: "forza bruta web",
+  WebVulnerabilityScan: "scansione del sito", WebExploitAttempt: "exploit web", RequestFlood: "flood di richieste",
+  MailLoginBruteForce: "forza bruta posta", PortScan: "scansione porte", IndustrialProtocolProbe: "protocolli industriali",
+  RepeatOffender: "recidivo", LoginAfterFailures: "ACCESSO dopo tentativi",
+  NetworkExploitAttempt: "exploit di rete", KnownMaliciousSource: "indirizzo in blacklist",
+  IndustrialProtocolCommand: "comandi industriali", CommandAndControl: "SERVER COMPROMESSO (C2)",
+  SensitiveFileAccess: "file riservati letti", SuspiciousExecution: "programma sospetto", Persistence: "porta sul retro (chiave/account)",
+  PrivilegeEscalation: "scalata dei privilegi", LogTampering: "log cancellati", CryptoMining: "MINER di criptovalute",
+  AiServiceProbe: "cerca servizi AI", AiPromptInjection: "inganno dell'AI (prompt injection)", Other: "altro",
+}, en: {
+  SshBruteForce: "SSH brute force", DistributedSshBruteForce: "distributed campaign", WebLoginBruteForce: "web brute force",
+  WebVulnerabilityScan: "site scan", WebExploitAttempt: "web exploit", RequestFlood: "request flood",
+  MailLoginBruteForce: "mail brute force", PortScan: "port scan", IndustrialProtocolProbe: "industrial protocols",
+  RepeatOffender: "repeat offender", LoginAfterFailures: "LOGIN after failures",
+  NetworkExploitAttempt: "network exploit", KnownMaliciousSource: "blacklisted address",
+  IndustrialProtocolCommand: "industrial commands", CommandAndControl: "HOST COMPROMISED (C2)",
+  SensitiveFileAccess: "sensitive files read", SuspiciousExecution: "suspicious program", Persistence: "back door (key/account)",
+  PrivilegeEscalation: "privilege escalation", LogTampering: "logs wiped", CryptoMining: "crypto MINER",
+  AiServiceProbe: "looks for AI services", AiPromptInjection: "tricking the AI (prompt injection)", Other: "other",
+} };
+const GUARDIANS_ = { it: {
+  sshd: "Accesso remoto (SSH)", nginx: "Server web", ufw: "Firewall", fail2ban: "fail2ban · banna chi sbaglia password",
+  crowdsec: "CrowdSec · riconosce gli attacchi", suricata: "Suricata · controlla la rete", falco: "Falco · controlla dentro il server",
+  modsecurity: "ModSecurity · filtra il web", wireguard: "WireGuard · VPN di dipendenti e sedi",
+}, en: {
+  sshd: "Remote access (SSH)", nginx: "Web server", ufw: "Firewall", fail2ban: "fail2ban · bans wrong passwords",
+  crowdsec: "CrowdSec · recognises attacks", suricata: "Suricata · watches the network", falco: "Falco · watches inside the host",
+  modsecurity: "ModSecurity · filters the web", wireguard: "WireGuard · VPN for staff and sites",
+} };
+const STATUS_ = { it: { ok: "attivo", stopped: "FERMO", "log-unreadable": "log non leggibile", missing: "non installato" },
+  en: { ok: "running", stopped: "STOPPED", "log-unreadable": "log unreadable", missing: "not installed" } };
+const MODE_ = { it: { detection: "osserva", blocking: "blocca", off: "spento" }, en: { detection: "watches", blocking: "blocks", off: "off" } };
+// The findings in Italian: the API speaks English to the agents; the page to the customer.
+const FINDINGS = {
+  "incident-ssh-login": ["Qualcuno è entrato via SSH indovinando la password", "Considera il server compromesso: cambia la password dell'account usato, togli le chiavi SSH che non conosci, cerca programmi avviati da /tmp o /dev/shm e banna l'indirizzo."],
+  "incident-web-exploit": ["Un attacco web ha eseguito comandi sul server", "L'applicazione web ha una falla che esegue comandi: aggiornala o togli la pagina, e controlla cosa può raggiungere l'utente del server web (www-data)."],
+  "incident-c2": ["Il server chiama un controllore di malware", "Staccalo da internet, conserva il disco per l'analisi e ricostruiscilo da un backup pulito: un server che chiama un controllore obbedisce a qualcun altro."],
+  "ssh-password-auth": ["SSH accetta password da internet", "Entra con le chiavi SSH e disattiva le password, oppure fai rispondere SSH solo dall'ufficio o dalla VPN."],
+  "ssh-root-login": ["root può entrare via SSH", "Entra con un utente nominale e usa sudo; imposta PermitRootLogin no."],
+  "fail2ban-missing": ["Nessuno banna chi prova le password SSH", "Installa fail2ban: un indirizzo che sbaglia cinque volte resta fuori per un po'."],
+  "slow-brute-force-unbanned": ["Un attacco lento alle password non è mai stato bannato", "Un tentativo ogni pochi minuti passa sotto la soglia di fail2ban. Fai agire CrowdSec su quello che vede (bouncer) o allunga la finestra di fail2ban per SSH."],
+  "ai-probes": ["Qualcuno cerca servizi di intelligenza artificiale", "Verifica che nessun modello (Ollama, LM Studio), server MCP o database vettoriale sia raggiungibile senza password, qui o su altri server della rete."],
+  "lab-image": ["Questo è il server di prova del laboratorio", "È fatto per essere attaccato: utenti di prova, password note, chiavi VPN date apposta all'attaccante. Non collegarci una rete, utenti o un sito veri. Per un server vero (VPS, mini PC, container) installa il pacchetto con install.sh: stesso toolkit, stesse difese, senza niente di prova."],
+  "ai-prompt-injection": ["Qualcuno ha scritto istruzioni per un'AI", "L'assistente le riporta come prova e non le esegue. Se hai un chatbot o un agente che legge quello che scrivono i visitatori (moduli, email, ticket), non fargli mai avviare un'azione senza l'approvazione di una persona."],
+  "industrial-probes": ["Qualcuno cerca sistemi industriali", "Verifica che nessuna porta di PLC o SCADA sia raggiungibile da internet, qui o su altri server della rete."],
+  "waf-missing": ["Nessun firewall web legge le richieste", "Installa ModSecurity con le regole OWASP in sola osservazione: vede SQL injection, XSS e comandi in ogni richiesta, anche nel corpo delle POST, e non blocca niente."],
+  "waf-detection-only": ["Il firewall web osserva soltanto", "Lascialo osservare un paio di settimane: se tra quello che avrebbe bloccato non ci sono richieste dei tuoi utenti, si può passare al blocco."],
+  "ids-rules-stale": ["Le regole di Suricata sono vecchie", "Controlla l'aggiornamento notturno e l'accesso a internet del server."],
+  "ids-missing": ["Nessun controllo della rete", "Senza Suricata nessuno si accorgerebbe del server che chiama un controllore di malware (serve circa 1,5 GB di RAM)."],
+  "host-monitor-missing": ["Nessuno guarda cosa succede dentro il server", "Senza Falco, dopo un'intrusione chiavi lette, account aggiunti o un miner passerebbero inosservati (circa 230 MB di RAM)."],
+  "firewall-off": ["Il firewall del server è spento", "Consenti prima SSH, poi accendilo (ufw allow OpenSSH; ufw enable). Questo pacchetto non lo accende mai da solo: un errore chiude fuori tutti."],
+  "host-alerts-unlinked": ["Attività critica nel server senza un'origine nota", "Guardale una per una: un job di cron che conosci, o un intruso entrato da una strada che i log non mostrano."],
+  "connection-temporary": ["XRCopilotLab usa un indirizzo di test temporaneo", "Va bene per una prova. In produzione pubblica l'API sul dominio del cliente (nginx con TLS) e imposta Connection:PublicUrl."],
+  "vpn-unexpected-country": ["Un utente della VPN si è collegato da un Paese inatteso", "Chiedi alla persona se è in viaggio. Se no, il dispositivo o la sua configurazione sono stati presi: revocalo subito (la chiave smette di funzionare all'istante) e dagliene una nuova."],
+  "vpn-unused-users": ["Utenti della VPN che nessuno usa", "Una chiave inutilizzata da mesi è spesso un vecchio telefono o qualcuno che non c'è più, e apre ancora la rete: revocala."],
+  "vpn-endpoint-missing": ["La VPN non ha ancora un indirizzo pubblico", "Imposta l'IP pubblico o il nome dell'ufficio; il router deve inoltrare la porta UDP della VPN a questo server."],
+  "connection-tunnel-open": ["Un tunnel di test è ancora aperto accanto al dominio", "Chiudilo: XRCopilotLab deve usare il dominio del cliente, non l'indirizzo temporaneo del tunnel."],
+};
+const PREFIX = {
+  "guardian-stopped-": ["è installato ma fermo", "Avvialo e controlla perché si è fermato."],
+  "log-unreadable-": ["ha un log che il guardiano non riesce a leggere", "Rendi il log leggibile al gruppo adm, come fa install.sh --with."],
+  "exposed-industrial-": ["Un protocollo industriale è aperto sulla rete", "Mai su internet: raggiungilo solo dalla VPN, dalla rete dell'impianto."],
+  "exposed-ai-": ["Un servizio AI senza password è aperto sulla rete", "Chiunque lo raggiunga usa i modelli e legge i documenti indicizzati. Legalo a 127.0.0.1 (per Ollama: OLLAMA_HOST=127.0.0.1) o mettilo dietro la VPN."],
+  "exposed-service-": ["Un servizio delicato è aperto sulla rete", "Legalo a 127.0.0.1 o alla sola rete interna, o mettilo dietro la VPN."],
+};
+
+// The page's own words. A function takes the values it puts in the sentence.
+const UI = {
+  it: {
+    simulated: "dati simulati", sAttempts: "tentativi", sAddresses: "indirizzi", sBanned: "bannati ora",
+    sWaf: "attacchi web visti dal WAF", sHost: "azioni dentro il server", sBlocks: "blocchi firewall",
+    toFix: "Da sistemare", reach: "Come ti raggiunge XRCopilotLab", guardians: "Guardiani", vpn: "VPN · chi è collegato",
+    improve: "Cosa migliorare", last7: "· ultimi 7 giorni",
+    readOnly: "Questa pagina legge soltanto: non banna, non blocca e non cambia niente sul server. I comandi suggeriti vanno eseguiti da chi amministra il server. I consigli in «Da sistemare» sono quelli che un analista ha approvato nel processo SOC e inviati qui: il server li mostra soltanto, non li applica.",
+    period: "Periodo", h1: "ultima ora", h24: "ultime 24 ore", h168: "ultima settimana",
+    thSeverity: "Gravità", thAddress: "Indirizzo", thCity: "Città", thType: "Tipo di attacco", thAttempts: "Tentativi",
+    thBlocks: "Blocchi", thBanned: "Bannato", thLast: "Ultimo evento", waiting: "In attesa dei dati…",
+    loginTitle: "Chiave di accesso", loginKey: "chiave API", loginGo: "Entra",
+    loginText: "Questa pagina non è dietro il proxy del server: inserisci la chiave API (X-API-Key). Resta in questa scheda del browser e si cancella alla chiusura.",
+    noKey: "chiave mancante", attempts: (n) => `${n} tentativi`, severity: "gravità", bannedBy: "bannato da fail2ban", yes: "sì",
+    noAttacks: "Nessun attacco nel periodo.",
+    c2: (ip, where, at) => `<b>Server compromesso</b>: il server sta chiamando ${ip} (${where}), un server di controllo di malware, l'ultima volta alle ${at}. Lo ha visto Suricata.`,
+    viaWeb: "con un attacco web", viaSsh: "via SSH", user: (u) => ` (utente ${u})`,
+    inside: (how, ip, user, what, at) => `<b>Dentro il server</b>: entrato ${how} da ${ip}${user}, Falco ha visto ${what}, l'ultima volta alle ${at}.`,
+    field: { path: "nell'indirizzo di una pagina", userAgent: "nello user agent", body: "in un messaggio inviato al sito", user: "come nome utente SSH", command: "in un comando" },
+    liar: (ip, where, field, at) => `<b>Tentativo di ingannare l'AI</b>: ${ip} (${where}) ha scritto istruzioni per l'assistente ${field}, l'ultima volta alle ${at}. L'assistente le riporta come prova, non le esegue.`,
+    login: (u, ip, where, at, n) => `<b>Accesso sospetto</b>: ${u} è entrato da ${ip} (${where}) alle ${at}` + (n ? `, dopo ${n} tentativi falliti.` : "."),
+    hostLine: (h, place) => `Guardiano di rete · ${h}${place} · sola lettura`,
+    lab: "<b>LABORATORIO</b> · server di prova fatto per essere attaccato: non usarlo per una rete, utenti o un sito veri",
+    copy: "Copia", copied: "Copiato",
+    mcpUrl: "Indirizzo del server MCP (XRCopilotLab → MCP)", apiUrl: "Indirizzo API (tool HTTP / blueprint)",
+    domain: "● Dominio del cliente", stable: "indirizzo stabile",
+    domainNote: "In produzione XRCopilotLab usa questo dominio, con la chiave X-API-Key impostata all'installazione del toolkit (segreta, non mostrata qui).",
+    noPublic: "Nessun indirizzo pubblico", noPublicNote: "Imposta PUBLIC_DOMAIN (produzione) o apri un Dev Tunnel di test.",
+    signIn: "Accedi con", restartWith: "Ricomincia con", msAccount: "account Microsoft / Entra ID",
+    tunnelOff: "Dev Tunnel non collegato",
+    tunnelOffNote: "Per dare a questo server un indirizzo di test serve un account, qualsiasi: Entra ID (aziendale), Microsoft o GitHub. Microsoft Dev Tunnels, senza costi.",
+    pending: "Accesso in corso", open: (a) => `Apri ${a} e inserisci il codice:`,
+    pendingNote: "Se il browser propone un account già collegato, scegli «Usa un altro account» (o apri il link in una finestra anonima). La pagina si aggiorna da sola a login completato.",
+    askingCode: "Richiesta del codice…", keyLabel: "Chiave X-API-Key (su ogni chiamata)", loadingKey: "… (carico la chiave)",
+    online: "● Dev Tunnel online", testAddr: "indirizzo di test, temporaneo", check: "Verifica dall'indirizzo pubblico",
+    restart: "Riavvia", logout: "Esci e cambia account", closed: "Tunnel chiuso", reopen: "Riapri il tunnel", opening: "Apertura del tunnel…",
+    checking: "verifica in corso…", noAnswer: "nessuna risposta", works: (h) => `funziona: risponde ${h}`,
+    never: "mai collegato", ago: (m) => m < 60 ? `${m} min fa` : m < 2880 ? `${Math.round(m / 60)} ore fa` : `${Math.round(m / 1440)} giorni fa`,
+    vpnOff: "La VPN è spenta: nessuno può collegarsi.", vpnNoEndpoint: "Accesa, ma senza indirizzo pubblico: impostalo con xrc-vpn endpoint.",
+    vpnOn: (e, port, n, c) => `Accesa su ${e} (UDP ${port}) · ${n} utenti, ${c} collegati ora · si gestiscono con xrc-vpn sul server.`,
+    from: "da", site: "sede", connected: "collegato",
+    demoUser: "utente di prova del laboratorio · la sua chiave è data apposta all'attaccante",
+    details: "dettagli", nothing: "Niente da segnalare.",
+    fromCheck: (id) => "dal controllo " + id, fromSoc: "inviato dal processo SOC", approvedBy: "approvato da",
+    done: "✓ fatto", markDone: "segna fatto", adviceCount: (n) => `· approvati dall'analista · ${n} ${n === 1 ? "aperto" : "aperti"}`,
+    updated: (t) => "aggiornato alle " + t, labData: "Dati di laboratorio · indirizzi di documentazione (RFC 5737), posizioni d'esempio",
+    down: (e) => "il server non risponde (" + e + ")",
+  },
+  en: {
+    simulated: "simulated data", sAttempts: "attempts", sAddresses: "addresses", sBanned: "banned now",
+    sWaf: "web attacks seen by the WAF", sHost: "actions inside the host", sBlocks: "firewall blocks",
+    toFix: "To fix", reach: "How XRCopilotLab reaches you", guardians: "Guardians", vpn: "VPN · who is connected",
+    improve: "What to improve", last7: "· last 7 days",
+    readOnly: "This page only reads: it does not ban, block or change anything on the host. The suggested commands are for whoever runs the host. The advice under «To fix» is what an analyst approved in the SOC process and sent here: the host only shows it, it never applies it.",
+    period: "Period", h1: "last hour", h24: "last 24 hours", h168: "last week",
+    thSeverity: "Severity", thAddress: "Address", thCity: "City", thType: "Attack type", thAttempts: "Attempts",
+    thBlocks: "Blocks", thBanned: "Banned", thLast: "Last event", waiting: "Waiting for data…",
+    loginTitle: "Access key", loginKey: "API key", loginGo: "Enter",
+    loginText: "This page is not behind the host's proxy: enter the API key (X-API-Key). It stays in this browser tab and is cleared when you close it.",
+    noKey: "missing key", attempts: (n) => `${n} attempts`, severity: "severity", bannedBy: "banned by fail2ban", yes: "yes",
+    noAttacks: "No attacks in the period.",
+    c2: (ip, where, at) => `<b>Host compromised</b>: the host is calling ${ip} (${where}), a malware control server, last at ${at}. Suricata saw it.`,
+    viaWeb: "through a web attack", viaSsh: "over SSH", user: (u) => ` (user ${u})`,
+    inside: (how, ip, user, what, at) => `<b>Inside the host</b>: got in ${how} from ${ip}${user}, Falco saw ${what}, last at ${at}.`,
+    field: { path: "in a page address", userAgent: "in the user agent", body: "in a message sent to the site", user: "as an SSH user name", command: "in a command" },
+    liar: (ip, where, field, at) => `<b>Attempt to trick the AI</b>: ${ip} (${where}) wrote instructions for the assistant ${field}, last at ${at}. The assistant reports them as evidence, it does not follow them.`,
+    login: (u, ip, where, at, n) => `<b>Suspicious login</b>: ${u} logged in from ${ip} (${where}) at ${at}` + (n ? `, after ${n} failed attempts.` : "."),
+    hostLine: (h, place) => `Network guardian · ${h}${place} · read only`,
+    lab: "<b>LAB</b> · a test server built to be attacked: do not use it for a real network, real users or a real site",
+    copy: "Copy", copied: "Copied",
+    mcpUrl: "MCP server address (XRCopilotLab → MCP)", apiUrl: "API address (HTTP tools / blueprint)",
+    domain: "● Customer's domain", stable: "stable address",
+    domainNote: "In production XRCopilotLab uses this domain, with the X-API-Key set when the toolkit was installed (secret, not shown here).",
+    noPublic: "No public address", noPublicNote: "Set PUBLIC_DOMAIN (production) or open a test Dev Tunnel.",
+    signIn: "Sign in with", restartWith: "Start again with", msAccount: "Microsoft / Entra ID account",
+    tunnelOff: "Dev Tunnel not connected",
+    tunnelOffNote: "To give this host a test address you need an account, any of them: Entra ID (work), Microsoft or GitHub. Microsoft Dev Tunnels, free of charge.",
+    pending: "Signing in", open: (a) => `Open ${a} and enter the code:`,
+    pendingNote: "If the browser offers an account already signed in, choose «Use another account» (or open the link in a private window). The page updates by itself once the sign-in is done.",
+    askingCode: "Asking for the code…", keyLabel: "X-API-Key (on every call)", loadingKey: "… (loading the key)",
+    online: "● Dev Tunnel online", testAddr: "test address, temporary", check: "Check from the public address",
+    restart: "Restart", logout: "Sign out and switch account", closed: "Tunnel closed", reopen: "Reopen the tunnel", opening: "Opening the tunnel…",
+    checking: "checking…", noAnswer: "no answer", works: (h) => `works: ${h} answers`,
+    never: "never connected", ago: (m) => m < 60 ? `${m} min ago` : m < 2880 ? `${Math.round(m / 60)} hours ago` : `${Math.round(m / 1440)} days ago`,
+    vpnOff: "The VPN is off: nobody can connect.", vpnNoEndpoint: "On, but with no public address: set it with xrc-vpn endpoint.",
+    vpnOn: (e, port, n, c) => `On at ${e} (UDP ${port}) · ${n} users, ${c} connected now · managed with xrc-vpn on the host.`,
+    from: "from", site: "site", connected: "connected",
+    demoUser: "the lab's test user · its key is given to the attacker on purpose",
+    details: "details", nothing: "Nothing to report.",
+    fromCheck: (id) => "from the check " + id, fromSoc: "sent by the SOC process", approvedBy: "approved by",
+    done: "✓ done", markDone: "mark done", adviceCount: (n) => `· approved by the analyst · ${n} open`,
+    updated: (t) => "updated at " + t, labData: "Lab data · documentation addresses (RFC 5737), example locations",
+    down: (e) => "the server does not answer (" + e + ")",
+  },
+};
+const t = (k, ...a) => { const v = pick(UI)[k] ?? UI.it[k]; return typeof v === "function" ? v(...a) : v; };
+
+const $ = (id) => document.getElementById(id);
+if (new URLSearchParams(location.search).get("view") === "map") document.body.classList.add("map-only");
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const time = (iso) => iso ? new Date(iso).toLocaleString(LOCALE(), { hour: "2-digit", minute: "2-digit", day: "2-digit", month: "2-digit" }) : "";
+const types = (list) => (list || []).map(x => pick(TYPES_)[x] || x).join(", ");
+const sev = (s) => pick(SEVERITY_)[s] || s;
+
+// Behind the package's nginx the key is added by the proxy; opened directly, the page asks for it once per tab.
+let key = null;
+try { key = sessionStorage.getItem("xrc-key"); } catch { }
+async function api(route) {
+  const r = await fetch("api/" + route, { headers: key ? { "X-API-Key": key } : {} });
+  if (r.status === 401) { $("login").classList.add("on"); throw t("noKey"); }
+  if (!r.ok) throw r.status;
+  return r.json();
+}
+$("login-form").addEventListener("submit", (e) => {
+  e.preventDefault();
+  key = $("key").value.trim();
+  try { sessionStorage.setItem("xrc-key", key); } catch { }
+  $("login").classList.remove("on");
+  refresh(); refreshGuard();
+});
+
+const map = L.map("map", { worldCopyJump: true, minZoom: 2, maxZoom: 7 }).setView([35, 25], 2);
+map.attributionControl.setPrefix("");
+// Offline basemap: country outlines bundled with the package (vendor/world.geo.json). No external tiles, so the map
+// works on a server with no internet or blocked egress, and does not depend on OpenStreetMap's tile policy.
+fetch("vendor/world.geo.json").then(r => r.json()).then(geo => {
+  L.geoJSON(geo, { interactive: false, renderer: L.canvas(),
+    style: { fillColor: "#1a232d", fillOpacity: 1, color: "#2e3c49", weight: 0.6 },
+    attribution: "Confini e città © Natural Earth" }).addTo(map);
+}).catch(() => {});
+// Major world cities as faint labels (bundled, offline): the map has names even where there are no attacks.
+const cityLabels = L.layerGroup().addTo(map);
+fetch("vendor/world.cities.json").then(r => r.json()).then(cities => {
+  for (const [name, lat, lon] of cities)
+    L.marker([lat, lon], { interactive: false, keyboard: false,
+      icon: L.divIcon({ className: "", iconSize: [0, 0], html: `<div class="city-bg">· ${name}</div>` }) }).addTo(cityLabels);
+}).catch(() => {});
+const layer = L.layerGroup().addTo(map);
+let target = null, targetMarker = null;
+const seen = new Set();
+let firstLoad = true, framed = false;
+
+function arc(from, to) {
+  const [lat1, lon1] = from, [lat2, lon2] = to, points = [];
+  const mx = (lat1 + lat2) / 2 + (lon2 - lon1) * 0.15, my = (lon1 + lon2) / 2 - (lat2 - lat1) * 0.15;
+  for (let i = 0; i <= 24; i++) {
+    const t = i / 24, a = (1 - t) * (1 - t), b = 2 * (1 - t) * t, c = t * t;
+    points.push([a * lat1 + b * mx + c * lat2, a * lon1 + b * my + c * lon2]);
+  }
+  return points;
+}
+
+function drawMap(summary, bannedIps) {
+  layer.clearLayers();
+  const fresh = [];
+  for (const p of summary.mapPoints || []) {
+    const color = COLORS[p.severity] || COLORS.Low;
+    const size = Math.min(26, 10 + Math.log2(1 + p.attempts) * 2.5);
+    if (target) L.polyline(arc([p.latitude, p.longitude], target), { color, weight: 1.5, opacity: .55, dashArray: "4 4" }).addTo(layer);
+    const isNew = !firstLoad && !seen.has(p.ip);
+    if (isNew) fresh.push(p);
+    seen.add(p.ip);
+    const icon = L.divIcon({ className: "", iconSize: [size, size],
+      html: `<div class="dot${isNew ? " new" : ""}" style="width:${size}px;height:${size}px;background:${color};color:${color}"></div>` });
+    const m = L.marker([p.latitude, p.longitude], { icon }).addTo(layer).bindPopup(
+      `<b>${esc(p.ip)}</b><br>${esc(p.city)}, ${esc(p.country)}<br>${esc(types(p.attackTypes))}<br>` +
+      `${t("attempts", p.attempts)} · ${t("severity")} ${esc(sev(p.severity))}${bannedIps.has(p.ip) ? "<br><b>" + t("bannedBy") + "</b>" : ""}`);
+    if (p.city) m.bindTooltip(`<span class="city-atk" style="color:${color}">${esc(p.city)}</span>`,
+      { permanent: true, direction: "top", offset: [0, -size / 2], className: "city-atk-tt" });
+  }
+  if (fresh.length) map.flyTo([fresh[0].latitude, fresh[0].longitude], Math.max(map.getZoom(), 3), { duration: 1.2 });
+  // The first time there is something to show: the server and its attackers in one view, not the whole world.
+  if (!framed && (summary.mapPoints || []).length) {
+    const corners = summary.mapPoints.map(p => [p.latitude, p.longitude]);
+    if (target) corners.push(target);
+    map.fitBounds(corners, { padding: [40, 40], maxZoom: 5 });
+    framed = true;
+  }
+  firstLoad = false;
+}
+
+function drawTable(summary, bannedIps) {
+  const rows = (summary.topAttackers || []).map(r => `<tr>
+      <td><span class="sev sev-${esc(r.severity)}">${esc(sev(r.severity))}</span></td>
+      <td>${esc(r.ip)}</td>
+      <td>${esc(r.location?.city || "")}${r.location?.country ? ", " + esc(r.location.country) : ""}</td>
+      <td>${esc(types(r.attackTypes))}</td>
+      <td class="num">${r.attempts}</td>
+      <td class="num">${r.firewallBlocks}</td>
+      <td>${bannedIps.has(r.ip) ? t("yes") : ""}</td>
+      <td>${time(r.lastSeen)}</td></tr>`);
+  $("rows").innerHTML = rows.length ? rows.join("") : `<tr><td colspan="8" class="muted">${t("noAttacks")}</td></tr>`;
+}
+
+function drawStats(summary) {
+  const tot = summary.totals || {};
+  $("s-attempts").textContent = tot.attempts ?? 0;
+  $("s-addresses").textContent = tot.addresses ?? 0;
+  $("s-banned").textContent = tot.currentlyBanned ?? 0;
+  $("s-waf").textContent = tot.wafAlerts ?? 0;
+  $("s-host").textContent = tot.hostAlerts ?? 0;
+  $("s-blocks").textContent = tot.firewallBlocks ?? 0;
+  const parts = [];
+  const c2 = (summary.topAttackers || []).find(r => (r.attackTypes || []).includes("CommandAndControl"));
+  const where = (l) => `${esc(l?.city || "")}, ${esc(l?.country || "")}`;
+  if (c2) parts.push(t("c2", esc(c2.ip), where(c2.location), time(c2.lastSeen)));
+  // What was done inside (Falco), per address that got in: newest first, at most three.
+  const inside = (summary.hostAlerts || []).filter(a => a.ip);
+  for (const ip of [...new Set(inside.map(a => a.ip))].slice(0, 3)) {
+    const mine = inside.filter(a => a.ip === ip);
+    const what = [...new Set(mine.map(a => pick(TYPES_)[a.attackType] || a.attackType))].join(", ");
+    const how = mine[0].linkedBy === "web-exploit" ? t("viaWeb") : t("viaSsh");
+    parts.push(t("inside", how, esc(ip), mine[0].user ? t("user", esc(mine[0].user)) : "", esc(what), time(mine[0].time)));
+  }
+  // Text written for the AI that reads these logs: the agent was told to quote it, never to follow it.
+  const liar = (summary.topAttackers || []).find(r => (r.attackTypes || []).includes("AiPromptInjection"));
+  if (liar) {
+    const field = t("field")[liar.promptInjections?.[0]?.field] || "";
+    parts.push(t("liar", esc(liar.ip), where(liar.location), field, time(liar.lastSeen)));
+  }
+  const s = summary.suspiciousLogins || [];
+  if (s.length) {
+    const last = s[0];
+    parts.push(t("login", esc(last.user), esc(last.ip), where(last.location), time(last.time), last.failuresBefore));
+  }
+  $("alert").innerHTML = parts.join("<br><br>");
+  $("alert").classList.toggle("on", parts.length > 0);
+}
+
+function drawGuardians(g) {
+  const place = g.site && (g.site.city || g.site.country) ? [g.site.city, g.site.country].filter(Boolean).join(", ") : "";
+  $("host").textContent = t("hostLine", g.host, place ? " · " + place : "");
+  $("simulated").hidden = !g.simulated;
+  // The server on the map, at its public IP's location (city/country), not a company name.
+  if (g.site?.latitude != null && g.site?.longitude != null && !target) {
+    target = [g.site.latitude, g.site.longitude];
+    targetMarker = L.marker(target, { icon: L.divIcon({ className: "target", iconSize: [14, 14] }) })
+      .addTo(map).bindTooltip(place || g.host, { permanent: true, direction: "right", offset: [8, 0] });
+  }
+  // Only the lab's image carries the marker: a real host, in a container or not, never shows this.
+  $("lab-banner").hidden = !g.lab;
+  if (g.lab) $("lab-banner").innerHTML = t("lab");
+  $("guardians").innerHTML = (g.guardians || []).map(x => `
+    <div class="guardian" title="${esc(x.role)}${x.note ? " — " + esc(x.note) : ""}">
+      <b><i class="light ${esc(x.status)}"></i>${esc(pick(GUARDIANS_)[x.name] || x.name)}</b>
+      <span>${esc(pick(STATUS_)[x.status] || x.status)}${x.mode ? " · " + esc(pick(MODE_)[x.mode] || x.mode) : ""}${x.version ? " · " + esc(x.version) : ""}</span>
+    </div>`).join("");
+  lastConn = g.connection;
+  refreshConnection();
+}
+
+function connRow(label, value, cls) {
+  if (!value) return "";
+  return `<div class="conn-row ${cls || ""}"><span class="lbl">${esc(label)}</span>
+    <div class="val"><code title="${esc(value)}">${esc(value)}</code>
+      <button class="conn-copy" onclick='connCopy(${JSON.stringify(value)}, this)'>${t("copy")}</button></div></div>`;
+}
+window.connCopy = async (text, btn) => {
+  try { await navigator.clipboard.writeText(text); const o = btn.textContent; btn.textContent = t("copied"); setTimeout(() => btn.textContent = o, 1500); } catch {}
+};
+
+// How XRCopilotLab reaches this server. Two modes:
+//  - Production (a domain is set, connection.mode === "domain"): the stable domain URLs, no key, no Dev Tunnel.
+//  - Test (no domain): the Dev Tunnel, driven here — Microsoft login, then the URLs and the visible test key to paste
+//    into XRCopilotLab and into the attacker. Driven through the lab's tunnel container (/api/tunnel/*); on a real
+//    server, which has no tunnel container, those paths do not answer and only the domain/local view is shown.
+let lastConn = null, tunnelKey = null;
+
+function urls(base, keyRow) {
+  return connRow(t("mcpUrl"), base + "/mcp")
+    + connRow(t("apiUrl"), base + "/api")
+    + keyRow;
+}
+function domainView(c) {
+  // Production: the stable domain URLs, and NO key — in production the key is secret (set at install), never shown.
+  return `<div style="border-left:4px solid var(--ok);margin:-8px -10px;padding:8px 10px">
+    <div class="c-state"><b class="on">${t("domain")}</b> · ${t("stable")}</div>
+    ${urls(c.url, "")}
+    <p class="muted" style="font-size:12px;margin-top:6px">${t("domainNote")}</p></div>`;
+}
+function staticView(c) {
+  if (c && c.mode === "domain") return domainView(c);
+  return `<div style="border-left:4px solid var(--muted);margin:-8px -10px;padding:8px 10px">
+    <b>${t("noPublic")}</b>
+    <p class="muted" style="font-size:12px;margin-top:4px">${t("noPublicNote")}</p></div>`;
+}
+function loginButtons(prefix) {
+  const p = prefix || t("signIn");
+  return `<div class="btnrow"><button class="btn${prefix ? " ghost" : ""}" onclick="tunnelAction('login?provider=microsoft')">${p} ${t("msAccount")}</button>
+    <button class="btn ghost" onclick="tunnelAction('login?provider=github')">${p} GitHub</button></div>`;
+}
+function tunnelView(tn) {
+  const user = tn.user ? ` · ${esc(tn.user)}` : "";
+  if (tn.phase === "logged-out") {
+    return `<div class="c-state"><b class="off">${t("tunnelOff")}</b></div>
+      <p class="muted" style="font-size:12px">${t("tunnelOffNote")}</p>
+      ${tn.error ? `<div class="error">${esc(tn.error)}</div>` : ""}
+      ${loginButtons()}`;
+  }
+  if (tn.phase === "login-pending") {
+    return tn.login
+      ? `<div class="c-state"><b class="off">${t("pending")}</b></div>
+         <p style="font-size:12px">${t("open", `<a href="${esc(tn.login.url)}" target="_blank" rel="noopener">${esc(tn.login.url)}</a>`)}</p>
+         <div><span class="code-big">${esc(tn.login.code)}</span> <button class="conn-copy" onclick='connCopy(${JSON.stringify(tn.login.code)}, this)'>${t("copy")}</button></div>
+         <p class="muted" style="font-size:12px">${t("pendingNote")}</p>
+         ${loginButtons(t("restartWith"))}`
+      : `<div class="c-state"><b class="off">${t("askingCode")}</b></div>`;
+  }
+  if (tn.phase === "online") {
+    const keyRow = connRow(t("keyLabel"), tunnelKey || t("loadingKey"), "key");
+    return `<div class="c-state"><b class="on">${t("online")}</b>${user} · ${t("testAddr")}</div>
+      ${urls(tn.url, keyRow)}
+      <div class="btnrow"><button class="btn" onclick="tunnelCheck(this)">${t("check")}</button>
+        <span id="tunnel-check" class="muted" style="font-size:12px;align-self:center"></span></div>
+      <div class="btnrow"><button class="btn ghost" onclick="tunnelAction('restart')">${t("restart")}</button>
+        <button class="btn ghost" onclick="tunnelAction('logout')">${t("logout")}</button></div>`;
+  }
+  if (tn.phase === "error") {
+    return `<div class="c-state"><b class="err">${t("closed")}</b>${user}</div><div class="error">${esc(tn.error || "")}</div>
+      <div class="btnrow"><button class="btn" onclick="tunnelAction('restart')">${t("reopen")}</button>
+        <button class="btn ghost" onclick="tunnelAction('logout')">${t("logout")}</button></div>`;
+  }
+  return `<div class="c-state"><b class="off">${t("opening")}</b>${user}</div>
+    <div class="btnrow"><button class="btn ghost" onclick="tunnelAction('logout')">${t("logout")}</button></div>`;
+}
+function renderConnection(c, tn) {
+  const box = $("connection");
+  if (c && c.mode === "domain") { box.innerHTML = domainView(c); return; }   // production: no Dev Tunnel, no key
+  if (tn) { box.innerHTML = tunnelView(tn); return; }                         // test: the Dev Tunnel lives here
+  box.innerHTML = staticView(c);
+}
+async function refreshConnection() {
+  const tn = await fetch("api/tunnel/status").then(r => r.ok ? r.json() : null).catch(() => null);
+  if (tn && tn.phase === "online" && tunnelKey === null)
+    tunnelKey = await fetch("api/tunnel/key").then(r => r.ok ? r.json() : null).then(d => d && d.key).catch(() => null);
+  if (!tn || tn.phase !== "online") tunnelKey = null;
+  renderConnection(lastConn, tn);
+}
+async function tunnelAction(action) {
+  tunnelKey = null;
+  await fetch(`api/tunnel/${action}`, { method: "POST" }).catch(() => null);
+  refreshConnection();
+}
+async function tunnelCheck(btn) {
+  btn.disabled = true; $("tunnel-check").textContent = t("checking");
+  const r = await fetch("api/tunnel/check").then(r => r.json()).catch(() => ({ ok: false, error: t("noAnswer") }));
+  $("tunnel-check").innerHTML = r.ok
+    ? `<span style="color:var(--ok)">${t("works", esc(r.host))}</span>`
+    : `<span class="error">${esc(r.error)}</span>`;
+  btn.disabled = false;
+}
+
+// The VPN's users: the customer adds and revokes them with xrc-vpn; the page only says who is connected and from where.
+function ago(iso) {
+  if (!iso) return t("never");
+  return t("ago", Math.round((Date.now() - new Date(iso)) / 60000));
+}
+function drawVpn(v) {
+  $("vpn-box").hidden = !v.installed;
+  if (!v.installed) return;
+  $("vpn-note").textContent = !v.up ? t("vpnOff") : !v.endpoint ? t("vpnNoEndpoint") : t("vpnOn", v.endpoint, v.port, v.peers.length, v.connected);
+  $("vpn-users").innerHTML = (v.peers || []).map(u => {
+    const place = u.location && (u.location.city || u.location.country) ? [u.location.city, u.location.country].filter(Boolean).join(", ") : "";
+    return `<div class="vpn-user ${u.expectedCountry ? "" : "away"} ${u.labDemo ? "demo-user" : ""}" title="${esc(u.address)}${u.address6 ? " · " + esc(u.address6) : ""}${u.remoteIp ? " · " + t("from") + " " + esc(u.remoteIp) : ""}">
+      <b>${u.connected ? '<i class="light ok" style="display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:5px"></i>' : ""}${esc(u.name)}${u.kind === "router" ? " · " + t("site") : ""}</b>
+      <span>${u.connected ? t("connected") : esc(ago(u.lastHandshake))}${place ? " · " + esc(place) : ""}</span>
+      ${u.labDemo ? `<span class="demo">${t("demoUser")}</span>` : ""}</div>`;
+  }).join("");
+}
+
+function drawFindings(p) {
+  const items = (p.findings || []).map(f => {
+    const prefix = Object.keys(PREFIX).find(k => f.id.startsWith(k));
+    const [title, advice] = lang === "en" ? [f.title, f.recommendation]
+      : FINDINGS[f.id] || (prefix ? [`${f.id.slice(prefix.length)}: ${PREFIX[prefix][0]}`, PREFIX[prefix][1]] : [f.title, f.recommendation]);
+    return `<div class="finding ${esc(f.severity)}">
+      <b>${esc(title)}</b>
+      <p>${esc(advice)}</p>
+      ${f.fix ? `<code>${esc(f.fix)}</code>` : ""}
+      <details><summary>${t("severity")} ${esc(sev(f.severity))} · ${t("details")}</summary>${esc(f.evidence)}</details>
+    </div>`;
+  });
+  $("findings").innerHTML = items.length ? items.join("") : `<span class="muted">${t("nothing")}</span>`;
+}
+
+// What a person approved in the SOC process and sent back (/api/advice). Shown only, never applied. Every field is
+// text chosen upstream, so it is escaped here and never put into the page as HTML.
+function drawAdvice(list) {
+  const all = list || [];
+  const open = all.filter(a => a.status !== "done").length;
+  const sorted = [...all.filter(a => a.status !== "done"), ...all.filter(a => a.status === "done")];  // open first
+  const items = sorted.map(a => {
+    const done = a.status === "done";
+    const from = a.findingId ? t("fromCheck", a.findingId) : t("fromSoc");
+    return `<div class="finding ${esc(a.severity)}"${done ? ' style="opacity:.55"' : ""}>
+      <b>${esc(a.title)}</b>
+      <p>${esc(a.recommendation)}</p>
+      ${a.command ? `<code>${esc(a.command)}</code>` : ""}
+      <details><summary>${t("approvedBy")} ${esc(a.approvedBy)} · ${esc(ago(a.approvedAt))}${a.ip ? " · " + esc(a.ip) : ""} · ${t("severity")} ${esc(sev(a.severity))}</summary>${esc(from)}</details>
+      <div style="margin-top:6px">${done
+        ? `<span class="muted" style="font-size:12px">${t("done")}${a.doneAt ? " · " + esc(ago(a.doneAt)) : ""}</span>`
+        : `<button class="advice-done" data-id="${esc(a.id)}" style="font-size:12px;padding:3px 8px;cursor:pointer">${t("markDone")}</button>`}</div>
+    </div>`;
+  });
+  $("advice-box").hidden = !items.length;
+  $("advice-count").textContent = t("adviceCount", open);
+  $("advice").innerHTML = items.join("");
+}
+
+// Mark one advice done from the page. This updates the advice list only; it never touches the host.
+async function adviceDone(id) {
+  const r = await fetch("api/advice/" + encodeURIComponent(id) + "/done", { method: "POST", headers: key ? { "X-API-Key": key } : {} });
+  if (r.status === 401) { $("login").classList.add("on"); throw t("noKey"); }
+  if (!r.ok) throw r.status;
+}
+$("advice").addEventListener("click", async (e) => {
+  const btn = e.target.closest(".advice-done");
+  if (!btn) return;
+  btn.disabled = true;
+  try { await adviceDone(btn.dataset.id); await refreshGuard(); } catch { btn.disabled = false; }
+});
+
+async function refresh() {
+  try {
+    const hours = $("hours").value;
+    const [summary, banned] = await Promise.all([api(`summary?hours=${hours}&top=50`), api("banned").catch(() => ({ banned: [] }))]);
+    const bannedIps = new Set((banned.banned || []).map(b => b.ip));
+    last.summary = summary; last.bannedIps = bannedIps;
+    drawStats(summary); drawMap(summary, bannedIps); drawTable(summary, bannedIps);
+    $("updated").textContent = t("updated", new Date().toLocaleTimeString(LOCALE()));
+    const attr = summary.geoAttribution;
+    $("attribution").textContent = /documentation addresses|RFC 5737|Simulated/i.test(attr || "")
+      ? t("labData")
+      : (attr || "");
+    $("error").textContent = "";
+  } catch (e) {
+    $("error").textContent = t("down", e);
+  }
+}
+
+async function refreshGuard() {
+  try {
+    const [g, p, v, a] = await Promise.all([api("guardians"), api("posture"), api("vpn").catch(() => ({ installed: false })), api("advice?hours=168").catch(() => [])]);
+    Object.assign(last, { g, p, v, a });
+    drawGuardians(g); drawFindings(p); drawVpn(v); drawAdvice(a);
+  } catch { }
+}
+
+// The language: the static text by its data-i18n key, the rest drawn again from the last data.
+const last = {};
+function applyLang() {
+  document.documentElement.lang = lang;
+  document.querySelectorAll("[data-i18n]").forEach(el => el.textContent = t(el.dataset.i18n));
+  document.querySelectorAll("[data-i18n-placeholder]").forEach(el => el.placeholder = t(el.dataset.i18nPlaceholder));
+  document.querySelectorAll("#langtog button").forEach(b => b.classList.toggle("on", b.dataset.lang === lang));
+}
+document.querySelectorAll("#langtog button").forEach(b => b.addEventListener("click", () => {
+  lang = b.dataset.lang;
+  try { localStorage.setItem("lang", lang); } catch { }
+  applyLang();
+  refresh();
+  if (last.g) { drawGuardians(last.g); drawFindings(last.p); drawVpn(last.v); drawAdvice(last.a); }
+  refreshConnection();
+}));
+applyLang();
+
+$("hours").addEventListener("change", refresh);
+refreshGuard().then(refresh);
+refreshConnection();
+setInterval(refresh, 5000);
+setInterval(refreshGuard, 30000);
+setInterval(refreshConnection, 2500);
+</script>
+</body>
+</html>

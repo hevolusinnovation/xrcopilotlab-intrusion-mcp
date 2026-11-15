@@ -1,0 +1,32 @@
+# lab-01's test site (static, with a contact form), a reserved area with a password, and the intrusion package published as
+# install.sh suggests: only the console's addresses may read it.
+server {
+    listen 80 default_server;
+    server_name _;
+    root /var/www/html;
+
+    location / {
+        limit_req zone=lab burst=20 nodelay;
+        limit_req_status 429;
+    }
+
+    # The contact form: a static page that answers 200 to its POST too (nginx would say 405), as a real form would.
+    location = /contatti.html {
+        limit_req zone=lab burst=20 nodelay;
+        error_page 405 =200 $uri;
+    }
+
+    location /admin/ {
+        auth_basic "Area riservata";
+        auth_basic_user_file /etc/nginx/lab.htpasswd;
+    }
+
+    location /intrusion-mcp/ {
+        modsecurity off;
+        allow 198.51.100.240/28;
+        deny  all;
+        proxy_pass http://127.0.0.1:8470/;
+        proxy_http_version 1.1;
+        proxy_buffering off;
+    }
+}

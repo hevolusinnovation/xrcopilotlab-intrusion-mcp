@@ -1,0 +1,3 @@
+# The lab's own signature, merged into suricata.rules by suricata-update --local at build: the backdoor's check-in
+# (scenario "Backdoor che chiama casa"). Named as ET Open names its malware rules; sid in the local range.
+alert http any any -> any any (msg:"ET MALWARE Linux Backdoor CnC Checkin (lab)"; flow:established,to_server; http.uri; content:"/gate.php?id="; startswith; classtype:trojan-activity; sid:9000001; rev:1;)

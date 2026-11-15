@@ -1,0 +1,10 @@
+[Unit]
+Description=Lab: the employee anna-portatile on the VPN, her configuration where the attacker can steal it
+Requires=xrcopilotlab-vpn-init.service
+After=xrcopilotlab-vpn-init.service
+Before=wg-quick@wgxrc.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/lab-vpn-user

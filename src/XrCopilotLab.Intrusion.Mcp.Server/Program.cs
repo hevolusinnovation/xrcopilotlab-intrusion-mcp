@@ -6,13 +6,16 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.Extensions.Options;
 using OpenTelemetry.Instrumentation.AspNetCore;
 using OpenTelemetry.Trace;
+using XrCopilotLab.Intrusion.Mcp.Core.Advice;
 using XrCopilotLab.Intrusion.Mcp.Core.Analysis;
 using XrCopilotLab.Intrusion.Mcp.Core.Collector;
 using XrCopilotLab.Intrusion.Mcp.Core.Geo;
+using XrCopilotLab.Intrusion.Mcp.Core.Guard;
 using XrCopilotLab.Intrusion.Mcp.Core.Queries;
 using XrCopilotLab.Intrusion.Mcp.Core.Simulation;
 using XrCopilotLab.Intrusion.Mcp.Core.Sources;
 using XrCopilotLab.Intrusion.Mcp.Server;
+using XrCopilotLab.Intrusion.Mcp.Server.Advice;
 using XrCopilotLab.Intrusion.Mcp.Server.Agent;
 using XrCopilotLab.Intrusion.Mcp.Server.Authentication;
 using XrCopilotLab.Intrusion.Mcp.Server.Collector;
@@ -43,6 +46,8 @@ builder.Services.AddSingleton(server);
 builder.Services.AddSingleton(policy);
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddHttpContextAccessor();
+var connection = builder.Configuration.GetSection(ConnectionOptions.SectionName).Get<ConnectionOptions>() ?? new ConnectionOptions();
+builder.Services.AddSingleton(connection);
 
 // Two kinds of key: XRCopilotLab reads (role query, one tenant), an agent writes (role ingest, one host).
 builder.Services.AddOptions<ApiKeyOptions>().Bind(builder.Configuration.GetSection(ApiKeyOptions.SectionName));
@@ -83,10 +88,12 @@ if (server.IsSimulated)
     builder.Services.AddSingleton<ILogSource>(source);
     builder.Services.AddSingleton<ISourceResolver>(new SingleSourceResolver(source));
     builder.Services.AddSingleton<IGeoLocator>(new SyntheticGeo());
+    builder.Services.AddSingleton<IHostInspector>(new SimulatedHostInspector());
 }
 else if (server.IsCollector)
 {
     var collector = builder.Configuration.GetSection(CollectorOptions.SectionName).Get<CollectorOptions>() ?? new CollectorOptions();
+    collector.Validate();
     builder.Services.AddSingleton<IByteLogStore>(_ => string.Equals(collector.Store, CollectorOptions.BlobStore, StringComparison.OrdinalIgnoreCase)
         ? new BlobByteLogStore(new BlobContainerClient(
             collector.BlobConnectionString ?? throw new InvalidOperationException("Collector:BlobConnectionString is not set"), collector.BlobContainer))
@@ -104,13 +111,28 @@ else
     var logs = builder.Configuration.GetSection(LogFileOptions.SectionName).Get<LogFileOptions>() ?? new LogFileOptions();
     builder.Services.AddSingleton<ILogSource>(sp => new FileLogSource(logs, sp.GetRequiredService<ILogger<FileLogSource>>()));
     builder.Services.AddSingleton<ISourceResolver>(sp => new SingleSourceResolver(sp.GetRequiredService<ILogSource>()));
-    builder.Services.AddSingleton<IGeoLocator>(sp => GeoDatabaseLoader.Load(geoOptions, sp.GetRequiredService<ILoggerFactory>().CreateLogger("Geo")));
+    builder.Services.AddSingleton<IHostInspector>(sp => new SystemHostInspector(logs, connection, sp.GetRequiredService<ILogger<SystemHostInspector>>()));
+    // Documentation addresses (RFC 5737) never reach a real host from the internet: they are the Docker lab's attackers,
+    // and get the invented places of the simulated mode, so the lab's map has cities. Every other address: DB-IP.
+    builder.Services.AddSingleton<IGeoLocator>(sp => new DocumentationAwareGeo(GeoDatabaseLoader.Load(geoOptions, sp.GetRequiredService<ILoggerFactory>().CreateLogger("Geo"))));
 }
 builder.Services.AddSingleton<QueryScope>();
+// The guardians, the VPN, the posture and the advice are about the host the server runs on: a collector has none of it.
+if (!server.IsCollector)
+{
+    builder.Services.AddSingleton<IntrusionQueries>();
+    builder.Services.AddSingleton(builder.Configuration.GetSection(SiteOptions.SectionName).Get<SiteOptions>() ?? new SiteOptions());
+    builder.Services.AddSingleton<ISiteLocation, HttpSiteLocation>();
+    builder.Services.AddSingleton<GuardQueries>();
+    builder.Services.AddSingleton(builder.Configuration.GetSection(AdviceOptions.SectionName).Get<AdviceOptions>() ?? new AdviceOptions());
+    builder.Services.AddSingleton<AdviceStore>();
+}
 builder.Services.AddScoped<IntrusionTools>();
 
 // Stateless HTTP transport: nothing is kept between calls, so the Container App scales to zero.
-builder.Services.AddMcpServer().WithHttpTransport(o => o.Stateless = true).WithTools<IntrusionTools>();
+// The instructions tell the agent, before any answer, that some fields are the attackers' text and not orders.
+builder.Services.AddMcpServer(o => o.ServerInstructions = IntrusionTools.Instructions)
+    .WithHttpTransport(o => o.Stateless = true).WithTools<IntrusionTools>();
 
 var aiConn = builder.Configuration["APPLICATIONINSIGHTS_CONNECTION_STRING"];
 builder.Services.Configure<AspNetCoreTraceInstrumentationOptions>(o => o.Filter = ctx => !ctx.Request.Path.StartsWithSegments("/healthz"));
@@ -118,6 +140,20 @@ var otel = builder.Services.AddOpenTelemetry().WithTracing(t => t.AddAspNetCoreI
 if (!string.IsNullOrWhiteSpace(aiConn)) otel.UseAzureMonitor(o => o.ConnectionString = aiConn);
 
 var app = builder.Build();
+
+// The monitoring page: static files only, no data in them. Its data comes from /api, with a key (added by the
+// package's nginx, or typed by the person when the page is opened directly).
+app.UseDefaultFiles();
+// The page itself is revalidated on every load (no-cache keeps the ETag, so an unchanged page is a 304): after an
+// update the browser shows the new page, not the copy it kept. Its libraries and logo may be cached as usual.
+app.UseStaticFiles(new StaticFileOptions
+{
+    OnPrepareResponse = ctx =>
+    {
+        if (ctx.File.Name.EndsWith(".html", StringComparison.OrdinalIgnoreCase))
+            ctx.Context.Response.Headers.CacheControl = "no-cache";
+    },
+});
 
 app.UseAuthentication();
 app.UseAuthorization();
@@ -140,7 +176,7 @@ app.MapGet("/healthz", (IOptionsMonitor<ApiKeyOptions> keys, IOptionsMonitor<Col
 app.MapGet("/livez", () => Results.Ok(new { status = "ok" })).AllowAnonymous();
 
 app.MapMcp("/mcp").RequireAuthorization(KeyPolicies.Query);
-app.MapRestApi();
+app.MapRestApi(server.IsCollector);
 if (server.IsCollector) app.MapIngest();
 
 app.Logger.LogInformation("Intrusion MCP server: mode {Mode}, {Keys} read key(s), {Agents} agent key(s)",

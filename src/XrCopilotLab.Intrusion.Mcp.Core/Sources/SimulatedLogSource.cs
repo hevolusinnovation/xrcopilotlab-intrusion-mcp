@@ -22,7 +22,7 @@ public sealed class SimulatedLogSource(SimulationOptions options) : ILogSource
     public int MaxDays => options.Days;
 
     public IReadOnlyList<string> Describe() =>
-        [$"simulated host {options.Hostname}: fail2ban.log, auth.log, ufw.log, nginx access.log, crowdsec.log; {options.Days} days, seed {options.Seed}"];
+        [$"simulated host {options.Hostname}: fail2ban.log, auth.log, ufw.log, nginx access.log, crowdsec.log, suricata eve.json; {options.Days} days, seed {options.Seed}"];
 
     public IReadOnlyList<LogEvent> Read(DateTimeOffset since, DateTimeOffset now)
     {

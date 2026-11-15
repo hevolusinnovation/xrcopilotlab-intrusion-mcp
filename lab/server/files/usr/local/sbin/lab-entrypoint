@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# lab-01's start: first what every container of the server image does (xrc-docker-start: the page's secrets, CrowdSec's
+# credentials, Suricata's addresses), then the lab's own: the hash of the lab key (LAB_API_KEY, from lab/.env) where
+# install.sh would write it, and the tunnel's files. Then systemd.
+set -euo pipefail
+/usr/local/sbin/xrc-docker-start --prepare
+# The active key: with a domain (production) it is the hidden PROD_API_KEY, never shown on the page; without a domain
+# (test) it is LAB_API_KEY, which lab-01's page shows and copies. Only its hash is stored.
+ACTIVE_KEY="${LAB_API_KEY:-}"
+[[ -n "${PUBLIC_DOMAIN:-}" && -n "${PROD_API_KEY:-}" ]] && ACTIVE_KEY="$PROD_API_KEY"
+if [[ -n "$ACTIVE_KEY" ]]; then
+  install -d -m 0750 -g xrcopilot-intrusion /etc/xrcopilotlab-intrusion-mcp
+  printf 'ApiKeys__Hash=%s\n' "$(printf '%s' "$ACTIVE_KEY" | sha256sum | cut -d' ' -f1)" > /etc/xrcopilotlab-intrusion-mcp/env
+  chgrp xrcopilot-intrusion /etc/xrcopilotlab-intrusion-mcp/env && chmod 0640 /etc/xrcopilotlab-intrusion-mcp/env
+fi
+# The site on the page's map comes from the server's public IP, geolocated. lab-01 is isolated, so it cannot call out:
+# the tunnel container (which has internet) writes the location to the shared volume, and the toolkit reads it here.
+# With a domain, that is XRCopilotLab's address (Connection:PublicUrl) instead of a tunnel's.
+{
+  printf 'Site__LocationFile=/var/lib/lab-tunnel/location.json\n'
+  printf 'Connection__TunnelUrlFile=/var/lib/lab-tunnel/url\n'
+  if [[ -n "${PUBLIC_DOMAIN:-}" ]]; then printf 'Connection__PublicUrl=https://%s\n' "$PUBLIC_DOMAIN"; fi
+} > /etc/xrcopilotlab-intrusion-mcp/site.env
+chgrp xrcopilot-intrusion /etc/xrcopilotlab-intrusion-mcp/site.env && chmod 0640 /etc/xrcopilotlab-intrusion-mcp/site.env
+exec /sbin/init

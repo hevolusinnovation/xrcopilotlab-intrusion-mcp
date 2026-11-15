@@ -5,8 +5,9 @@ namespace XrCopilotLab.Intrusion.Mcp.Core.Parsing;
 
 /// <summary>
 /// The patterns that make a web request an attack, in order: exploits first (they say more), then the scans for known
-/// paths, then the scanner user agents, then the status codes of a refused login and of the rate limit. A request that
-/// matches none is ordinary traffic and is not kept.
+/// paths, then the search for AI services (refused or missing: a site that really serves them answers its own clients),
+/// then the scanner user agents, then the status codes of a refused login and of the rate limit, then text written
+/// for an AI (<see cref="UntrustedText.Injection"/>). A request that matches none is ordinary traffic and is not kept.
 /// </summary>
 public static partial class WebProbeRules
 {
@@ -27,16 +28,24 @@ public static partial class WebProbeRules
         ("cgi-bin", AttackType.WebVulnerabilityScan, CgiBin()),
     ];
 
+    /// <summary>A request for an AI service's path that this server refused or does not have.</summary>
+    public const string AiEndpointRule = "ai-endpoint";
+
+    /// <summary>A request whose only sign of attack is text written for the AI that reads the logs.</summary>
+    public const string PromptInjectionRule = "prompt-injection";
+
     /// <summary>The rule a request matches, or null for ordinary traffic.</summary>
     public static (string Rule, AttackType Type)? Match(string path, int status, string? userAgent)
     {
-        var decoded = Decode(path);
+        var decoded = UntrustedText.Decode(path);
         foreach (var (rule, type, pattern) in PathRules)
             if (pattern.IsMatch(decoded)) return (rule, type);
+        if (status >= 400 && AiEndpoint().IsMatch(decoded)) return (AiEndpointRule, AttackType.AiServiceProbe);
         if (userAgent is not null && Log4Shell().IsMatch(userAgent)) return ("log4shell", AttackType.WebExploitAttempt);
         if (userAgent is not null && ScannerAgent().IsMatch(userAgent)) return ("scanner-agent", AttackType.WebVulnerabilityScan);
         if (status == 401) return ("auth-failure", AttackType.WebLoginBruteForce);
         if (status == 429) return ("rate-limited", AttackType.RequestFlood);
+        if (Injection(path, userAgent) is not null) return (PromptInjectionRule, AttackType.AiPromptInjection);
         return null;
     }
 
@@ -49,15 +58,15 @@ public static partial class WebProbeRules
             "scanner-agent" => AttackType.WebVulnerabilityScan,
             "auth-failure" => AttackType.WebLoginBruteForce,
             "rate-limited" => AttackType.RequestFlood,
+            AiEndpointRule => AttackType.AiServiceProbe,
+            PromptInjectionRule => AttackType.AiPromptInjection,
             _ => AttackType.Other,
         };
     }
 
-    private static string Decode(string path)
-    {
-        try { return Uri.UnescapeDataString(path.Replace('+', ' ')); }
-        catch (UriFormatException) { return path; }
-    }
+    /// <summary>The prompt-injection rule the path (decoded) or the user agent matches, or null.</summary>
+    public static string? Injection(string path, string? userAgent) =>
+        UntrustedText.Injection(UntrustedText.Decode(path)) ?? UntrustedText.Injection(userAgent);
 
     [GeneratedRegex(@"\$\{\s*jndi\s*:", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex Log4Shell();
@@ -97,6 +106,12 @@ public static partial class WebProbeRules
 
     [GeneratedRegex(@"/cgi-bin/", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex CgiBin();
+
+    // OpenAI-compatible APIs (vLLM, LocalAI, LiteLLM, llama.cpp), Ollama, MCP servers, Gradio and the Stable Diffusion
+    // WebUI, ComfyUI, an exposed agent's plugin manifest.
+    [GeneratedRegex(@"^/(v1/(chat/completions|completions|models|embeddings|responses|messages)\b|api/(generate|chat|tags|pull|ps|show|embed|embeddings|version)\b|mcp\b|sse\b|\.well-known/(mcp|ai-plugin\.json)|gradio_api/|sdapi/v1/|prompt$|object_info$)",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex AiEndpoint();
 
     [GeneratedRegex(@"sqlmap|nikto|nuclei|zgrab|masscan|nmap|gobuster|dirbuster|wpscan|acunetix|nessus", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex ScannerAgent();

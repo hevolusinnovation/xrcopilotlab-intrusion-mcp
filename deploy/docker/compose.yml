@@ -1,0 +1,62 @@
+# The toolkit's server in Docker on a real host (a VPS, a mini PC): the same package, guardians and VPN as
+# install.sh on the host, with nothing of the lab in it. From the repository root:
+#
+#   cp deploy/docker/server.env.example deploy/docker/server.env   # then fill it in
+#   docker compose -f deploy/docker/compose.yml up -d --build
+#   docker compose -f deploy/docker/compose.yml logs server        # the page's password, printed once
+#   docker exec -it xrc-server xrc-vpn add mario-telefono     # the VPN's users, added by the customer
+#
+# network_mode host: the container's nginx, fail2ban, WireGuard and Suricata work on the host's own network, as they
+# would if installed on it. So the host must not run its own nginx on 80/443, nor another WireGuard on the VPN's port.
+# privileged + cgroup host: systemd as PID 1, iptables (fail2ban's bans, the VPN's routing), Falco's eBPF probe.
+
+name: xrcopilotlab-intrusion
+
+services:
+  server:
+    container_name: xrc-server
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile
+      target: server
+    network_mode: host
+    privileged: true
+    cgroup: host
+    tmpfs: [/run, /run/lock]
+    env_file: [server.env]
+    restart: unless-stopped
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+      # The host's logs, read-only: its sshd and its firewall are the host's, not the container's.
+      - /var/log:/var/log/host:ro
+      # The host's SSH settings, read-only: the posture checks the sshd people actually log in to.
+      - /etc/ssh:/etc/ssh:ro
+      # What a server keeps across updates: the key's hash and the settings, the page's password and certificate,
+      # the VPN (its key, its users), CrowdSec, fail2ban's bans, the toolkit's state, the guardians' logs.
+      - etc:/etc/xrcopilotlab-intrusion-mcp
+      - dashboard:/etc/nginx/xrcopilotlab-dashboard
+      - sites:/etc/nginx/sites-enabled
+      - vpn:/etc/xrcopilotlab-vpn
+      - wireguard:/etc/wireguard
+      - crowdsec-etc:/etc/crowdsec
+      - crowdsec-data:/var/lib/crowdsec/data
+      - fail2ban:/var/lib/fail2ban
+      - state:/var/lib/xrcopilotlab-intrusion-mcp
+      - logs:/var/log
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8470/livez"]
+      interval: 30s
+      retries: 10
+      start_period: 60s
+
+volumes:
+  etc: {}
+  dashboard: {}
+  sites: {}
+  vpn: {}
+  wireguard: {}
+  crowdsec-etc: {}
+  crowdsec-data: {}
+  fail2ban: {}
+  state: {}
+  logs: {}

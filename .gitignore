@@ -19,3 +19,8 @@ appsettings.Local.json
 
 # Release tarballs
 out/
+
+# Python bytecode
+__pycache__/
+*.pyc
+deploy/docker/server.env

@@ -1,3 +1,5 @@
+using XrCopilotLab.Intrusion.Mcp.Core.Collector;
+
 namespace XrCopilotLab.Intrusion.Mcp.Server.Collector;
 
 /// <summary>Settings of the collector mode (<c>Collector:*</c>).</summary>
@@ -29,6 +31,14 @@ public sealed class CollectorOptions
 
     public IEnumerable<HostRegistration> ActiveHosts() =>
         Hosts.Where(h => h.Active && !string.IsNullOrWhiteSpace(h.Name) && !string.IsNullOrWhiteSpace(h.IngestKeyHash));
+
+    /// <summary>Host and tenant names become folders of the store: one that is not a plain name stops the collector at startup.</summary>
+    public void Validate()
+    {
+        foreach (var name in Hosts.SelectMany(h => new[] { h.Name, h.Tenant }).Concat(SimulatedTenants))
+            if (!StorePaths.IsValidName(name))
+                throw new InvalidOperationException($"Collector: '{name}' is not a valid host or tenant name (lowercase letters, digits, '.', '_', '-').");
+    }
 }
 
 /// <summary>

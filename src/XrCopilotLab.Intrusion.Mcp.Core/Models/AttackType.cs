@@ -36,7 +36,46 @@ public enum AttackType
     /// <summary>A successful SSH login from an IP that had failed several times just before: possible compromise.</summary>
     LoginAfterFailures,
 
-    /// <summary>A fail2ban jail or CrowdSec scenario this server does not classify.</summary>
+    /// <summary>A network IDS signature on an attack against a service other than the web (SMB, SSH, a database, a known CVE).</summary>
+    NetworkExploitAttempt,
+
+    /// <summary>The source is on a public list of known malicious addresses (Suricata ET DROP / CINS / Dshield signatures).</summary>
+    KnownMaliciousSource,
+
+    /// <summary>Commands of an industrial protocol seen on the network (Modbus, DNP3, EtherNet/IP, S7): someone talking to a plant system.</summary>
+    IndustrialProtocolCommand,
+
+    /// <summary>The host itself connecting to a malware controller: the strongest sign that it has been compromised.</summary>
+    CommandAndControl,
+
+    /// <summary>Sensitive files read on the host: <c>/etc/shadow</c>, private keys, credentials (Falco).</summary>
+    SensitiveFileAccess,
+
+    /// <summary>A program run where it should not be: a shell started by the web server, a binary from <c>/dev/shm</c>, a reverse shell (Falco).</summary>
+    SuspiciousExecution,
+
+    /// <summary>A way back in left on the host: an SSH key added, an account created (Falco).</summary>
+    Persistence,
+
+    /// <summary>An attempt to get more rights: ptrace on another process, a kernel module loaded, a container escape (Falco).</summary>
+    PrivilegeEscalation,
+
+    /// <summary>Logs cleared or bulk data removed: covering tracks (Falco).</summary>
+    LogTampering,
+
+    /// <summary>A crypto-currency miner running on the host (Falco).</summary>
+    CryptoMining,
+
+    /// <summary>Looking for AI services: Ollama, OpenAI-compatible APIs, MCP servers, image generators, vector databases,
+    /// on the web server (paths that do not exist here) or on their ports (closed by the firewall). An exposed model is
+    /// free computing power, and an exposed MCP server hands over its tools.</summary>
+    AiServiceProbe,
+
+    /// <summary>Text written for the AI that reads the logs, in a request path, an account name or a command: "ignore your
+    /// instructions", chat-model role tokens, hidden Unicode. An attempt to make the agent lie about the attacks.</summary>
+    AiPromptInjection,
+
+    /// <summary>A fail2ban jail, CrowdSec scenario, Suricata signature or Falco rule this server does not classify.</summary>
     Other,
 }
 

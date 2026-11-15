@@ -12,8 +12,13 @@ public sealed class IntrusionQueries(ILogSource source, IGeoLocator geo, Intrusi
     public const int MaxTop = 100;
     public const int MaxTimeline = 200;
     public const int MaxMapPoints = 150;
+    public const int MaxSummaryHostAlerts = 20;
 
     private readonly ThreatAnalyzer _analyzer = new(policy, geo);
+
+    public string Host => source.Hostname;
+
+    public bool Simulated => source.Simulated;
 
     /// <summary>
     /// The period of a call. <paramref name="slotMinutes"/> wins: the last complete slot aligned to the clock (with 30, at
@@ -102,7 +107,7 @@ public sealed class IntrusionQueries(ILogSource source, IGeoLocator geo, Intrusi
             .OrderByDescending(e => e.Time)
             .Take(MaxTimeline)
             .Select(e => new TimelineEntry(e.Time, e.Kind.ToString(), DetectorName(e.Origin), e.Jail, e.User, e.Port, e.Method,
-                e.TargetPort, e.Path, e.Status, e.Rule, e.Detail, e.Host))
+                e.TargetPort, e.Path, e.Status, e.Rule, e.Detail, e.Outbound, e.Command, e.LinkedBy, e.Score, e.Injection, e.Host))
             .ToList();
         return new IpDetailResult(source.Hostname, source.Simulated, period, report,
             _analyzer.SuspiciousLogins(events).Where(s => s.Ip == ip && s.Time >= period.From).ToList(),
@@ -153,10 +158,37 @@ public sealed class IntrusionQueries(ILogSource source, IGeoLocator geo, Intrusi
             suspicious.Count,
             inPeriod.Count(e => e.Kind == LogEventKind.FirewallBlock),
             inPeriod.Count(e => e.Kind == LogEventKind.WebRequest),
-            inPeriod.Count(e => e.Kind == LogEventKind.CrowdsecAlert));
+            inPeriod.Count(e => e.Kind == LogEventKind.CrowdsecAlert),
+            inPeriod.Count(e => e.Kind == LogEventKind.IdsAlert),
+            inPeriod.Count(e => e.Kind == LogEventKind.HostAlert),
+            inPeriod.Count(e => e.Kind == LogEventKind.WafAlert),
+            inPeriod.Count(e => e.Injection is not null && e.Kind != LogEventKind.InvalidUser));
 
         return new SummaryResult(source.Hostname, source.Simulated, period, totals, byType, byCountry, ThreatAnalyzer.TargetedPorts(inPeriod, 15),
-            reports.Take(Math.Clamp(top, 1, MaxTop)).ToList(), campaigns, suspicious, points, geo.Attribution);
+            reports.Take(Math.Clamp(top, 1, MaxTop)).ToList(), campaigns, suspicious, points,
+            inPeriod.Where(e => e.Kind == LogEventKind.HostAlert).OrderByDescending(e => e.Time).Take(MaxSummaryHostAlerts)
+                .Select(ThreatAnalyzer.ToHostAlert).ToList(),
+            geo.Attribution);
+    }
+
+    public HostActivityResult HostActivity(DateTimeOffset now, Period period, string? attackType, bool unlinkedOnly)
+    {
+        var alerts = Window(now, period)
+            .Where(e => e.Kind == LogEventKind.HostAlert && e.Time >= period.From)
+            .ToList();
+        var byType = alerts
+            .GroupBy(AttackCatalog.FromHostAlert)
+            .Select(g => new AttackTypeCount(g.Key.ToString(), AttackCatalog.Describe(g.Key), g.Where(e => e.HasAddress).Select(e => e.SourceIp).Distinct().Count(), g.Count()))
+            .OrderByDescending(x => x.Attempts)
+            .ToList();
+        var shown = alerts
+            .Where(e => attackType is null || string.Equals(AttackCatalog.FromHostAlert(e).ToString(), attackType, StringComparison.OrdinalIgnoreCase))
+            .Where(e => !unlinkedOnly || !e.HasAddress)
+            .OrderByDescending(e => e.Time)
+            .Take(MaxTimeline)
+            .Select(ThreatAnalyzer.ToHostAlert)
+            .ToList();
+        return new HostActivityResult(source.Hostname, source.Simulated, period, alerts.Count, alerts.Count(e => !e.HasAddress), byType, shown, geo.Attribution);
     }
 
     public static string DetectorName(LogOrigin origin) => origin switch
@@ -165,6 +197,9 @@ public sealed class IntrusionQueries(ILogSource source, IGeoLocator geo, Intrusi
         LogOrigin.Auth => "sshd",
         LogOrigin.Firewall => "ufw",
         LogOrigin.WebAccess => "nginx",
+        LogOrigin.Suricata => "suricata",
+        LogOrigin.Falco => "falco",
+        LogOrigin.ModSecurity => "modsecurity",
         _ => "crowdsec",
     };
 
@@ -175,7 +210,10 @@ public sealed class IntrusionQueries(ILogSource source, IGeoLocator geo, Intrusi
         return _analyzer.Reports(inPeriod, bans).ToList();
     }
 
-    /// <summary>The period plus the 24 hours before it: a login at the start of the period is judged on the failures that preceded it.</summary>
+    /// <summary>
+    /// The period plus the 24 hours before it: a login at the start of the period is judged on the failures that
+    /// preceded it, and a Falco alert is tied to the login that opened its session.
+    /// </summary>
     private List<LogEvent> Window(DateTimeOffset now, Period period) =>
-        source.Read(period.From.AddHours(-24), period.To).ToList();
+        HostAlertLinker.Link(source.Read(period.From.AddHours(-24), period.To)).ToList();
 }

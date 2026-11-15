@@ -43,11 +43,21 @@ public class SimulationTests
         Assert.Equal(day.Fail2banLines.Count, events.Count(e => e.Origin == LogOrigin.Fail2ban));
         Assert.Equal(day.FirewallLines.Count, events.Count(e => e.Origin == LogOrigin.Firewall));
         Assert.Equal(day.CrowdsecLines.Count, events.Count(e => e.Origin == LogOrigin.Crowdsec));
+        // Suricata's engine events (priority 3) are in eve.json but are not events.
+        Assert.True(day.SuricataLines.Count > events.Count(e => e.Origin == LogOrigin.Suricata));
+        Assert.Contains(events, e => e.Origin == LogOrigin.Suricata);
         // Ordinary web traffic is in the log but is not an event.
         Assert.True(day.WebAccessLines.Count > events.Count(e => e.Origin == LogOrigin.WebAccess));
         Assert.Contains(events, e => e.Origin == LogOrigin.WebAccess);
+        // Falco's lines are all events; only those of an SSH session carry an address (SSH_CLIENT).
+        Assert.Equal(day.FalcoLines.Count, events.Count(e => e.Origin == LogOrigin.Falco));
+        Assert.All(events.Where(e => e.Origin == LogOrigin.Falco && e.HasAddress), e => Assert.Equal("ssh-session", e.LinkedBy));
+        Assert.Contains(events, e => e.Origin == LogOrigin.Falco && !e.HasAddress);
+        // Every audit entry is above the CRS blocking score: each one is an event.
+        Assert.Equal(day.ModSecurityLines.Count, events.Count(e => e.Origin == LogOrigin.ModSecurity));
+        Assert.Contains(events, e => e.Origin == LogOrigin.ModSecurity && e.Method == "POST");
         Assert.NotEmpty(events);
-        Assert.All(events, e => Assert.True(IpScope.IsDocumentation(e.SourceIp), $"{e.SourceIp} is not a documentation address"));
+        Assert.All(events.Where(e => e.HasAddress), e => Assert.True(IpScope.IsDocumentation(e.SourceIp), $"{e.SourceIp} is not a documentation address"));
     }
 
     [Fact]
@@ -117,6 +127,67 @@ public class SimulationTests
     }
 
     [Fact]
+    public void After_the_login_the_host_calls_a_malware_controller_and_suricata_sees_it()
+    {
+        var q = Queries();
+        var period = q.Resolve(Now, 24, null, null);
+        var controller = q.IpDetail(Now, period, SyntheticHost.ControllerIp);
+        var report = controller.Report!;
+
+        Assert.Equal(nameof(Severity.Critical), report.Severity);
+        Assert.Contains(nameof(AttackType.CommandAndControl), report.AttackTypes);
+        var signature = Assert.Single(report.IdsSignatures);
+        Assert.True(signature.Outbound);
+
+        var login = q.IpDetail(Now, period, SyntheticHost.IncidentIp).Timeline.Single(t => t.Kind == nameof(LogEventKind.AcceptedLogin)).Time;
+        Assert.All(controller.Timeline, t => Assert.True(t.Time > login && t.Outbound));
+        Assert.Contains(q.Summary(Now, period, 10).ByAttackType, t => t.Type == nameof(AttackType.CommandAndControl));
+    }
+
+    [Fact]
+    public void What_the_intruder_did_once_in_is_tied_to_the_address_that_got_in()
+    {
+        var q = Queries();
+        var period = q.Resolve(Now, 24, null, null);
+        var intruder = q.IpDetail(Now, period, SyntheticHost.IncidentIp);
+
+        var activity = intruder.Report!.HostActivity;
+        Assert.Equal(["Clear Log Activities", "Execution from /dev/shm", "Read sensitive file untrusted", "Search Private Keys or Passwords",
+            "XRC Crypto miner started", "XRC SSH authorized keys changed"], activity.Select(a => a.Rule).Order(StringComparer.Ordinal));
+        Assert.All(activity, a => Assert.Equal("ssh-session", a.LinkedBy));
+        foreach (var type in new[] { AttackType.SensitiveFileAccess, AttackType.Persistence, AttackType.SuspiciousExecution, AttackType.CryptoMining, AttackType.LogTampering })
+            Assert.Contains(type.ToString(), intruder.Report.AttackTypes);
+
+        var login = intruder.Timeline.Single(t => t.Kind == nameof(LogEventKind.AcceptedLogin)).Time;
+        Assert.All(intruder.Timeline.Where(t => t.Kind == nameof(LogEventKind.HostAlert)), t => Assert.True(t.Time > login && t.LinkedBy == "ssh-session"));
+    }
+
+    [Fact]
+    public void The_inventory_agent_stays_the_hosts_and_is_not_an_attacker()
+    {
+        var q = Queries();
+        var host = q.HostActivity(Now, q.Resolve(Now, 24, null, null), null, unlinkedOnly: true);
+
+        var agent = Assert.Single(host.Timeline, a => a.Command!.Contains("/opt/inventory/agent.py", StringComparison.Ordinal));
+        Assert.Null(agent.Ip);
+        Assert.Equal(nameof(Severity.High), agent.Severity);
+        Assert.True(host.Unlinked >= 1);
+        Assert.True(q.Summary(Now, q.Resolve(Now, 24, null, null), 10).Totals.HostAlerts >= 7);
+    }
+
+    [Fact]
+    public void Suricata_flags_reputation_and_exploits_and_drops_engine_noise()
+    {
+        var q = Queries();
+        var summary = q.Summary(Now, q.Resolve(Now, 24, null, null), 50);
+
+        Assert.True(summary.Totals.IdsAlerts > 0);
+        Assert.Contains(summary.ByAttackType, t => t.Type == nameof(AttackType.KnownMaliciousSource));
+        Assert.Contains(summary.ByAttackType, t => t.Type == nameof(AttackType.NetworkExploitAttempt));
+        Assert.DoesNotContain(summary.TopAttackers.SelectMany(r => r.IdsSignatures), s => s.Signature.StartsWith("SURICATA STREAM", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void The_intruder_scanned_the_ports_and_crowdsec_saw_it_before_the_login()
     {
         var q = Queries();
@@ -147,7 +218,9 @@ public class SimulationTests
 
         var exploits = attempts.Where(r => r.AttackTypes.Contains(nameof(AttackType.WebExploitAttempt))).ToList();
         Assert.NotEmpty(exploits);
-        Assert.All(exploits, r => Assert.NotEmpty(r.WebProbes));
+        Assert.All(exploits, r => Assert.True(r.WebProbes.Count + r.WafFindings.Count > 0));
+        // Injections hidden in a POST body: the access log shows nothing, only the WAF has them.
+        Assert.Contains(exploits, r => r.WebProbes.Count == 0 && r.WafFindings.Any(f => f.Example == "POST /contact.php"));
     }
 
     [Fact]

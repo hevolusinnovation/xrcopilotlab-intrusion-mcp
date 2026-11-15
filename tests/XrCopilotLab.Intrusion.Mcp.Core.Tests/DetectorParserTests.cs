@@ -98,3 +98,58 @@ public class CrowdsecLogParserTests
     public void Ignores_service_lines(string line) =>
         Assert.False(CrowdsecLogParser.TryParse(line, out _));
 }
+
+public class SuricataEveParserTests
+{
+    private static readonly IReadOnlySet<string> Host = new HashSet<string> { "10.30.0.15" };
+
+    private const string Inbound = """{"timestamp":"2026-11-10T04:10:02.118204+0100","flow_id":1,"event_type":"alert","src_ip":"203.0.113.40","src_port":51544,"dest_ip":"10.30.0.15","dest_port":22,"proto":"TCP","app_proto":"ssh","alert":{"action":"allowed","gid":1,"signature_id":9000010,"rev":1,"signature":"ET EXPLOIT Possible OpenSSH regreSSHion Race Condition Attempt (CVE-2024-6387)","category":"Attempted Administrator Privilege Gain","severity":1}}""";
+    private const string Outbound = """{"timestamp":"2026-11-10T03:12:40.000000+0100","event_type":"alert","src_ip":"10.30.0.15","src_port":40112,"dest_ip":"203.0.113.66","dest_port":80,"proto":"TCP","app_proto":"http","alert":{"signature_id":9000001,"signature":"ET MALWARE Linux Backdoor CnC Checkin","category":"A Network Trojan was detected","severity":1}}""";
+
+    [Fact]
+    public void Reads_an_alert_coming_in()
+    {
+        Assert.True(SuricataEveParser.TryParse(Inbound, Host, out var e));
+        Assert.Equal((LogEventKind.IdsAlert, LogOrigin.Suricata, "203.0.113.40", 22, "ssh", 9000010, 1, false),
+            (e!.Kind, e.Origin, e.SourceIp, e.TargetPort, e.Protocol, e.SignatureId, e.Priority, e.Outbound));
+        Assert.Equal(new DateTimeOffset(2026, 11, 10, 4, 10, 2, 118, TimeSpan.FromHours(1)).AddTicks(2040), e.Time);
+        Assert.Equal(AttackType.NetworkExploitAttempt, AttackCatalog.FromIdsAlert(e));
+    }
+
+    [Fact]
+    public void A_connection_the_host_opened_is_about_the_other_side()
+    {
+        Assert.True(SuricataEveParser.TryParse(Outbound, Host, out var e));
+        Assert.Equal(("203.0.113.66", true, 80), (e!.SourceIp, e.Outbound, e.TargetPort));
+        Assert.Equal(AttackType.CommandAndControl, AttackCatalog.FromIdsAlert(e));
+    }
+
+    [Fact]
+    public void Without_the_host_addresses_private_to_public_is_outbound()
+    {
+        Assert.True(SuricataEveParser.TryParse(Outbound, new HashSet<string>(), out var e));
+        Assert.True(e!.Outbound);
+    }
+
+    [Theory]
+    [InlineData("""{"timestamp":"2026-11-10T03:12:40.000000+0100","event_type":"flow","src_ip":"203.0.113.40","dest_ip":"10.30.0.15"}""")]
+    [InlineData("""{"timestamp":"2026-11-10T03:12:40.000000+0100","event_type":"alert","src_ip":"203.0.113.40","dest_ip":"10.30.0.15","alert":{"signature":"SURICATA STREAM Packet with invalid ack","category":"Generic Protocol Command Decode","severity":3}}""")]
+    [InlineData("""{"event_type":"alert", broken""")]
+    public void Skips_other_events_low_priority_alerts_and_broken_lines(string line) =>
+        Assert.False(SuricataEveParser.TryParse(line, Host, out _));
+
+    [Theory]
+    [InlineData("ET CINS Active Threat Intelligence Poor Reputation IP group 42", "Misc Attack", null, false, AttackType.KnownMaliciousSource)]
+    [InlineData("ET DROP Dshield Block Listed Source group 1", "Misc Attack", null, false, AttackType.KnownMaliciousSource)]
+    [InlineData("ET SCAN Suspicious inbound to mySQL port 3306", "Potentially Bad Traffic", null, false, AttackType.PortScan)]
+    [InlineData("ET WEB_SERVER Possible SQL Injection Attempt UNION SELECT", "Web Application Attack", "http", false, AttackType.WebExploitAttempt)]
+    [InlineData("ET SCADA Modbus Write Multiple Registers", "Attempted Information Leak", "modbus", false, AttackType.IndustrialProtocolCommand)]
+    [InlineData("ET MALWARE Linux Backdoor CnC Checkin", "A Network Trojan was detected", "http", false, AttackType.NetworkExploitAttempt)]
+    [InlineData("ET MALWARE Linux Backdoor CnC Checkin", "A Network Trojan was detected", "http", true, AttackType.CommandAndControl)]
+    [InlineData("ET EXPLOIT Apache log4j RCE Attempt (http ldap) (CVE-2021-44228)", "Attempted Administrator Privilege Gain", "http", false, AttackType.WebExploitAttempt)]
+    [InlineData("ET EXPLOIT Possible OpenSSH regreSSHion Race Condition Attempt (CVE-2024-6387)", "Attempted Administrator Privilege Gain", "ssh", false, AttackType.NetworkExploitAttempt)]
+    [InlineData("ET INFO Observed DNS Query to .xyz TLD", "Potentially Bad Traffic", "dns", false, AttackType.Other)]
+    public void Maps_signatures_to_attack_types(string signature, string category, string? protocol, bool outbound, AttackType type) =>
+        Assert.Equal(type, AttackCatalog.FromIdsAlert(new LogEvent(DateTimeOffset.UnixEpoch, LogEventKind.IdsAlert, LogOrigin.Suricata, "203.0.113.1",
+            Protocol: protocol, Rule: signature, Detail: category, Priority: 2, Outbound: outbound)));
+}

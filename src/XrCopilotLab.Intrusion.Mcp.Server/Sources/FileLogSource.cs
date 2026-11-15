@@ -1,4 +1,5 @@
 using System.IO.Compression;
+using System.Net.NetworkInformation;
 using XrCopilotLab.Intrusion.Mcp.Core.Models;
 using XrCopilotLab.Intrusion.Mcp.Core.Sources;
 
@@ -30,6 +31,27 @@ public sealed class LogFileOptions
     /// <summary>CrowdSec logs: alerts and decisions.</summary>
     public List<string> CrowdsecFiles { get; set; } = ["/var/log/crowdsec.log*"];
 
+    /// <summary>Suricata EVE logs: only its alerts are read (<c>event_type: alert</c>, severity 1 and 2).</summary>
+    public List<string> SuricataFiles { get; set; } = ["/var/log/suricata/eve.json*"];
+
+    /// <summary>Falco JSON file output (<c>json_output: true</c>): what processes did on the host. <c>install.sh --with falco</c> writes it here.</summary>
+    public List<string> FalcoFiles { get; set; } = ["/var/log/falco/events.json*"];
+
+    /// <summary>ModSecurity's JSON audit log (OWASP CRS, detection only): web attacks, request bodies included. <c>install.sh --with modsecurity</c> writes it here.</summary>
+    public List<string> ModSecurityFiles { get; set; } = ["/var/log/modsecurity/audit.json*"];
+
+    /// <summary>Who is connected to the customer's VPN, written every minute by <c>xrc-vpn state</c> (no key in it). <c>install.sh --with wireguard</c>.</summary>
+    public string VpnStateFile { get; set; } = "/run/xrcopilotlab-vpn/state.json";
+
+    /// <summary>Written only by the Docker lab's image: this host is the lab's test server, with demo users and keys given to the attacker.</summary>
+    public string LabMarkerFile { get; set; } = "/etc/xrcopilotlab-intrusion-mcp/lab.json";
+
+    /// <summary>
+    /// The host's own addresses, to tell an attack coming in from a connection the host opened (a Suricata alert on
+    /// malware calling home). Empty = the addresses of the host's network interfaces.
+    /// </summary>
+    public List<string> LocalAddresses { get; set; } = [];
+
     /// <summary>How many days back to read.</summary>
     public int MaxDays { get; set; } = 30;
 }
@@ -54,7 +76,33 @@ public sealed class FileLogSource(LogFileOptions options, ILogger<FileLogSource>
         AllPatterns().SelectMany(Expand).DefaultIfEmpty("no log file found: check the Logs:*Files settings").ToList();
 
     private IEnumerable<List<string>> AllPatterns() =>
-        [options.Fail2banFiles, options.AuthFiles, options.FirewallFiles, options.WebAccessFiles, options.CrowdsecFiles];
+        [options.Fail2banFiles, options.AuthFiles, options.FirewallFiles, options.WebAccessFiles, options.CrowdsecFiles, options.SuricataFiles, options.FalcoFiles,
+            options.ModSecurityFiles];
+
+    private IReadOnlySet<string>? _local;
+
+    // Read once: the host's addresses do not change while the service runs.
+    private IReadOnlySet<string> Local => _local ??= options.LocalAddresses.Count > 0
+        ? options.LocalAddresses.ToHashSet(StringComparer.Ordinal)
+        : InterfaceAddresses();
+
+    private HashSet<string> InterfaceAddresses()
+    {
+        try
+        {
+            var addresses = NetworkInterface.GetAllNetworkInterfaces()
+                .SelectMany(n => n.GetIPProperties().UnicastAddresses)
+                .Select(a => a.Address.ToString())
+                .ToHashSet(StringComparer.Ordinal);
+            if (addresses.Count == 0) logger.LogWarning("No address found on the host's interfaces: set Logs:LocalAddresses");
+            return addresses;
+        }
+        catch (Exception ex) when (ex is NetworkInformationException or PlatformNotSupportedException or IOException)
+        {
+            logger.LogWarning("Cannot list the host's addresses ({Error}): set Logs:LocalAddresses", ex.Message);
+            return [];
+        }
+    }
 
     public IReadOnlyList<LogEvent> Read(DateTimeOffset since, DateTimeOffset now)
     {
@@ -66,9 +114,12 @@ public sealed class FileLogSource(LogFileOptions options, ILogger<FileLogSource>
             Lines(options.AuthFiles, since),
             Lines(options.FirewallFiles, since),
             Lines(options.WebAccessFiles, since),
-            Lines(options.CrowdsecFiles, since));
+            Lines(options.CrowdsecFiles, since),
+            Lines(options.SuricataFiles, since),
+            Lines(options.FalcoFiles, since),
+            Lines(options.ModSecurityFiles, since));
         var host = Hostname;
-        var events = LogLines.Parse(logs, _zone, now)
+        var events = LogLines.Parse(logs, _zone, now, Local)
             .Where(e => e.Time >= since && e.Time <= now)
             .Select(e => e with { Host = host })
             .ToList();
@@ -103,9 +154,13 @@ public sealed class FileLogSource(LogFileOptions options, ILogger<FileLogSource>
         }
     }
 
-    private static IEnumerable<string> Expand(IEnumerable<string> patterns)
+    // The defaults of LogFileOptions and the bound configuration end up in the same list (binding appends):
+    // a file listed twice would be read twice, and every attempt counted twice.
+    private static IEnumerable<string> Expand(IEnumerable<string> patterns) => ExpandAll(patterns).Distinct(StringComparer.Ordinal);
+
+    private static IEnumerable<string> ExpandAll(IEnumerable<string> patterns)
     {
-        foreach (var pattern in patterns)
+        foreach (var pattern in patterns.Distinct(StringComparer.Ordinal))
         {
             var dir = Path.GetDirectoryName(pattern);
             var name = Path.GetFileName(pattern);

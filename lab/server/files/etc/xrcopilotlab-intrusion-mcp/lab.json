@@ -1,0 +1,10 @@
+{
+  "name": "lab-01",
+  "note": "The Docker lab's test server (deploy/docker/Dockerfile, target lab): the server image a real host runs, plus what the attack console needs to find",
+  "demoVpnUsers": ["anna-portatile"],
+  "demo": [
+    "The account operatore (sudo) logs in over SSH with a password the lab's scenarios guess",
+    "A test site, with a contact form and /admin/ behind a password the lab's scenarios guess",
+    "fail2ban and the rate limits are shortened so that the scenarios trigger them in seconds"
+  ]
+}

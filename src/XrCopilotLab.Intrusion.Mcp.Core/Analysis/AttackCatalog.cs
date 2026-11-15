@@ -24,6 +24,18 @@ public static class AttackCatalog
         [47808] = "BACnet",
     };
 
+    /// <summary>Ports of AI services that answer without a password by default: a scan for them is a scan for free models,
+    /// documents and tools.</summary>
+    public static readonly IReadOnlyDictionary<int, string> AiServicePorts = new Dictionary<int, string>
+    {
+        [1234] = "LM Studio",
+        [6333] = "Qdrant (vector database)",
+        [7860] = "Gradio (Stable Diffusion WebUI, text-generation-webui)",
+        [8188] = "ComfyUI",
+        [11434] = "Ollama",
+        [19530] = "Milvus (vector database)",
+    };
+
     private static readonly Dictionary<int, string> CommonPorts = new()
     {
         [21] = "FTP", [22] = "SSH", [23] = "Telnet", [25] = "SMTP", [53] = "DNS", [80] = "HTTP", [110] = "POP3",
@@ -34,7 +46,9 @@ public static class AttackCatalog
     };
 
     public static string? ServiceOf(int port) =>
-        IndustrialPorts.TryGetValue(port, out var ics) ? ics : CommonPorts.TryGetValue(port, out var s) ? s : null;
+        IndustrialPorts.TryGetValue(port, out var ics) ? ics
+            : AiServicePorts.TryGetValue(port, out var ai) ? ai
+            : CommonPorts.TryGetValue(port, out var s) ? s : null;
 
     public static AttackType FromJail(string jail) => jail.Trim().ToLowerInvariant() switch
     {
@@ -68,6 +82,73 @@ public static class AttackCatalog
         return AttackType.Other;
     }
 
+    // Signature families of the ET Open rules (https://rules.emergingthreats.net): the prefix says what the rule is about.
+    private static readonly string[] ReputationPrefixes = ["ET DROP", "ET CINS", "ET COMPROMISED", "ET DSHIELD", "ET 3CORESEC", "ET TOR"];
+    private static readonly string[] MalwarePrefixes = ["ET MALWARE", "ET TROJAN", "ET CNC", "ET C2", "ET COINMINER", "ET MOBILE_MALWARE"];
+    private static readonly string[] IndustrialWords = ["MODBUS", "DNP3", "ENIP", "ETHERNET/IP", "CIP ", "S7", "IEC 104", "IEC-104", "BACNET", "SCADA", "ICS "];
+    private static readonly string[] IndustrialProtocols = ["modbus", "dnp3", "enip", "cip", "s7comm", "iec104", "bacnet"];
+
+    /// <summary>
+    /// The attack type of a Suricata alert, from its signature (ET Open naming), its category and its direction. A
+    /// malware signature on a connection the host opened is <see cref="AttackType.CommandAndControl"/>; the same
+    /// signature coming in is an exploit attempt.
+    /// </summary>
+    public static AttackType FromIdsAlert(LogEvent alert)
+    {
+        var signature = (alert.Rule ?? "").ToUpperInvariant();
+        var category = (alert.Detail ?? "").ToLowerInvariant();
+        var protocol = (alert.Protocol ?? "").ToLowerInvariant();
+        bool Starts(string[] prefixes) => prefixes.Any(p => signature.StartsWith(p, StringComparison.Ordinal));
+
+        if (alert.Outbound && (Starts(MalwarePrefixes) || category.Contains("trojan", StringComparison.Ordinal)
+                || category.Contains("command and control", StringComparison.Ordinal) || category.Contains("malware", StringComparison.Ordinal)))
+            return AttackType.CommandAndControl;
+        if (Starts(ReputationPrefixes)) return AttackType.KnownMaliciousSource;
+        if (IndustrialProtocols.Contains(protocol) || IndustrialWords.Any(w => signature.Contains(w, StringComparison.Ordinal)))
+            return AttackType.IndustrialProtocolCommand;
+        if (signature.StartsWith("ET SCAN", StringComparison.Ordinal) || category.Contains("network scan", StringComparison.Ordinal))
+            return AttackType.PortScan;
+        if (signature.StartsWith("ET WEB_", StringComparison.Ordinal) || category.Contains("web application attack", StringComparison.Ordinal))
+            return AttackType.WebExploitAttempt;
+        if (category.Contains("denial of service", StringComparison.Ordinal)) return AttackType.RequestFlood;
+        if (Starts(MalwarePrefixes) || category.Contains("trojan", StringComparison.Ordinal)) return AttackType.NetworkExploitAttempt;
+        if (signature.StartsWith("ET EXPLOIT", StringComparison.Ordinal) || category.Contains("privilege gain", StringComparison.Ordinal)
+            || category.Contains("executable code", StringComparison.Ordinal) || category.Contains("attack", StringComparison.Ordinal))
+            // The same exploit carried by a web request (Log4Shell in a header) is a web exploit.
+            return protocol is "http" or "http2" ? AttackType.WebExploitAttempt : AttackType.NetworkExploitAttempt;
+        return AttackType.Other;
+    }
+
+    private static readonly string[] MinerNames = ["xmrig", "xmr-stak", "minerd", "cpuminer", "ethminer", "nbminer", "t-rex", "kdevtmpfsi", "kinsing"];
+
+    /// <summary>
+    /// The attack type of a Falco alert, from its rule name and its MITRE ATT&amp;CK tags (<c>mitre_credential_access</c>…).
+    /// The rules of Falco's default set and the three of <c>install.sh --with falco</c> each land on one type.
+    /// </summary>
+    public static AttackType FromHostAlert(LogEvent alert)
+    {
+        var rule = (alert.Rule ?? "").ToLowerInvariant();
+        var tags = (alert.Detail ?? "").ToLowerInvariant();
+        var command = (alert.Command ?? "").ToLowerInvariant();
+        bool Rule(params string[] words) => words.Any(w => rule.Contains(w, StringComparison.Ordinal));
+        bool Tag(string tag) => tags.Split(',').Contains(tag, StringComparer.Ordinal);
+
+        if (Rule("miner", "mining") || command.Contains("stratum+", StringComparison.Ordinal)
+            || MinerNames.Any(m => command.StartsWith(m, StringComparison.Ordinal) || command.Contains("/" + m, StringComparison.Ordinal)))
+            return AttackType.CryptoMining;
+        if (Rule("clear log", "log files", "remove bulk data")) return AttackType.LogTampering;
+        if (Tag("mitre_credential_access") || Rule("sensitive file", "private keys", "credentials", "shadow")) return AttackType.SensitiveFileAccess;
+        if (Tag("mitre_persistence") || Rule("authorized keys", "authorized_keys", "account")) return AttackType.Persistence;
+        if (Tag("mitre_privilege_escalation") || Rule("ptrace", "kernel module", "escape", "release_agent", "debugfs"))
+            return AttackType.PrivilegeEscalation;
+        return AttackType.SuspiciousExecution;
+    }
+
+    /// <summary>The types a host alert can have: what someone did once inside, not an attempt to get in.</summary>
+    public static bool IsHostActivity(AttackType type) =>
+        type is AttackType.SensitiveFileAccess or AttackType.SuspiciousExecution or AttackType.Persistence
+            or AttackType.PrivilegeEscalation or AttackType.LogTampering or AttackType.CryptoMining;
+
     /// <summary>Whether the jail's <c>Found</c> lines are attempts against a service (the recidive jail counts bans, not attempts).</summary>
     public static bool CountsAttempts(string jail) => !string.Equals(jail, RecidiveJail, StringComparison.OrdinalIgnoreCase);
 
@@ -88,6 +169,18 @@ public static class AttackCatalog
         AttackType.IndustrialProtocolProbe => "Connections to industrial control ports (Modbus, S7, IEC 104, DNP3, OPC UA…): looking for plant systems.",
         AttackType.RepeatOffender => "An address banned several times that keeps coming back.",
         AttackType.LoginAfterFailures => "A successful SSH login right after repeated failures from the same address: possible compromise.",
+        AttackType.NetworkExploitAttempt => "Network traffic carrying a known attack against a service (seen by the network IDS, Suricata).",
+        AttackType.KnownMaliciousSource => "An address on a public list of known attackers (Suricata reputation signatures).",
+        AttackType.IndustrialProtocolCommand => "Industrial protocol commands on the network (Modbus, DNP3, EtherNet/IP, S7): someone talking to a plant system.",
+        AttackType.CommandAndControl => "The host itself connecting to a malware controller: it is probably compromised.",
+        AttackType.SensitiveFileAccess => "Sensitive files read on the host: /etc/shadow, private keys, credentials (Falco).",
+        AttackType.SuspiciousExecution => "A program run where it should not be: a shell started by the web server, a binary from /dev/shm, a reverse shell (Falco).",
+        AttackType.Persistence => "A way back in left on the host: an SSH key added, an account created (Falco).",
+        AttackType.PrivilegeEscalation => "An attempt to get more rights on the host: ptrace, a kernel module, a container escape (Falco).",
+        AttackType.LogTampering => "Logs cleared or data removed on the host: someone covering their tracks (Falco).",
+        AttackType.CryptoMining => "A crypto-currency miner running on the host (Falco).",
+        AttackType.AiServiceProbe => "Looking for AI services (Ollama, OpenAI-compatible APIs, MCP servers, image generators, vector databases): an exposed one is free computing power, data and tools.",
+        AttackType.AiPromptInjection => "Text written for the AI that reads the logs (in a request path, an account name or a command): an attempt to make the agent hide or misreport the attacks.",
         _ => "A detector rule this server does not classify.",
     };
 }

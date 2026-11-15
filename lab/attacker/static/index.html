@@ -1,0 +1,505 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sala operativa · Laboratorio intrusioni</title>
+<style>
+:root {
+  --bg: #05080c; --bg2: #070d14; --panel: #0b131c; --panel2: #0e1922; --line: #1c2a38;
+  --text: #e8f1f8; --muted: #7f93a6; --faint: #4c6076;
+  --cyan: #38e1ff; --cyan-dim: #1a7f96;
+  --amber: #ffb84a; --green: #3fe08a; --red: #ff4d57; --red-glow: rgba(255,77,87,.45);
+  --grid: rgba(56,225,255,.045);
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { min-height: 100%; }
+body {
+  background:
+    radial-gradient(1200px 600px at 78% -5%, rgba(56,225,255,.10), transparent 60%),
+    radial-gradient(900px 500px at 10% 110%, rgba(255,77,87,.08), transparent 55%),
+    linear-gradient(180deg, var(--bg2), var(--bg));
+  color: var(--text);
+  font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+  letter-spacing: .1px;
+}
+/* faint tactical grid + scanline, never in the way of the text */
+body::before {
+  content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 0; opacity: .5;
+  background-image: linear-gradient(var(--grid) 1px, transparent 1px), linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+body::after {
+  content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 0;
+  background: repeating-linear-gradient(180deg, rgba(0,0,0,0) 0 2px, rgba(0,0,0,.14) 3px);
+  mix-blend-mode: multiply; animation: scan 9s linear infinite; opacity: .5;
+}
+@keyframes scan { from { transform: translateY(-4px); } to { transform: translateY(4px); } }
+@media (prefers-reduced-motion: reduce) { body::after { animation: none; } }
+
+.page { position: relative; z-index: 1; max-width: 1240px; margin: 0 auto; padding: 18px 16px 40px; }
+
+/* ── header / mission bar ────────────────────────────────────────────── */
+.bar {
+  display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap;
+  border: 1px solid var(--line); border-radius: 12px; padding: 12px 16px;
+  background: linear-gradient(180deg, rgba(56,225,255,.06), rgba(11,19,28,.7));
+  box-shadow: inset 0 0 0 1px rgba(56,225,255,.04);
+}
+.brand { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.live { display: inline-flex; align-items: center; gap: 7px; font: 700 10px/1 ui-monospace, Menlo, monospace;
+  letter-spacing: .18em; color: var(--red); text-transform: uppercase; padding: 5px 9px; border: 1px solid var(--red-glow);
+  border-radius: 999px; background: rgba(255,77,87,.08); white-space: nowrap; }
+.live .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--red); box-shadow: 0 0 10px var(--red); animation: blink 1.4s steps(1) infinite; }
+@keyframes blink { 50% { opacity: .25; } }
+.brand h1 { font: 700 16px/1.1 system-ui, sans-serif; letter-spacing: .02em; }
+.brand h1 small { display: block; color: var(--muted); font: 400 11.5px/1.3 system-ui, sans-serif; letter-spacing: .02em; margin-top: 3px; }
+.right { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; justify-content: flex-end; }
+.langtog { display: inline-flex; border: 1px solid var(--line); border-radius: 999px; overflow: hidden; }
+.langtog button { background: transparent; color: var(--muted); border: 0; padding: 5px 12px; cursor: pointer;
+  font: 700 11px ui-monospace, Menlo, monospace; letter-spacing: .1em; }
+.langtog button.on { background: var(--cyan); color: #04121a; }
+.meta { display: flex; align-items: center; gap: 18px; font: 500 11px ui-monospace, Menlo, monospace; color: var(--muted); letter-spacing: .08em; text-align: right; }
+.meta .clock { font-size: 19px; color: var(--cyan); letter-spacing: .14em; text-shadow: 0 0 14px rgba(56,225,255,.4); }
+.meta .k { display: block; font-size: 9.5px; color: var(--faint); text-transform: uppercase; letter-spacing: .16em; }
+
+/* ── briefing banner (for non-experts) ───────────────────────────────── */
+.brief { margin-top: 16px; border: 1px solid var(--line); border-left: 3px solid var(--cyan); border-radius: 10px;
+  padding: 13px 16px; background: linear-gradient(90deg, rgba(56,225,255,.06), rgba(11,19,28,.55)); }
+.brief .tag { font: 700 10px ui-monospace, Menlo, monospace; letter-spacing: .2em; color: var(--cyan); text-transform: uppercase; }
+.brief p { margin-top: 5px; color: #cdddea; max-width: 94ch; }
+.brief b { color: var(--text); }
+.brief details { margin-top: 9px; border-top: 1px solid var(--line); padding-top: 9px; }
+.brief summary { cursor: pointer; color: var(--cyan); font: 600 12px ui-monospace, Menlo, monospace; letter-spacing: .03em; list-style: none; }
+.brief summary::-webkit-details-marker { display: none; }
+.brief summary::before { content: "▸ "; }
+.brief details[open] summary::before { content: "▾ "; }
+.brief details ul { margin: 9px 0 0; padding-left: 20px; display: flex; flex-direction: column; gap: 7px; }
+.brief details li { color: #cdddea; line-height: 1.55; max-width: 94ch; }
+
+/* ── layout ──────────────────────────────────────────────────────────── */
+.grid { margin-top: 18px; display: grid; grid-template-columns: 340px 1fr; gap: 18px; align-items: start; }
+.side, .main { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.card-box { border: 1px solid var(--line); border-radius: 12px; background: linear-gradient(180deg, var(--panel2), var(--panel)); overflow: hidden; }
+.card-box > h2 { font: 700 10.5px ui-monospace, Menlo, monospace; text-transform: uppercase; letter-spacing: .18em; color: var(--muted);
+  padding: 11px 14px; border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 8px; }
+.card-box > h2 .pip { width: 6px; height: 6px; border-radius: 50%; background: var(--cyan); box-shadow: 0 0 8px var(--cyan); }
+.card-pad { padding: 14px; }
+
+/* ── target lock ─────────────────────────────────────────────────────── */
+.target { display: flex; flex-direction: column; gap: 12px; }
+.reticle { display: grid; grid-template-columns: 54px 1fr; gap: 12px; align-items: center; }
+.scope { position: relative; width: 54px; height: 54px; }
+.scope i { position: absolute; inset: 0; border: 1px solid var(--cyan-dim); border-radius: 50%; }
+.scope i.r2 { inset: 9px; border-color: rgba(56,225,255,.35); }
+.scope i.spin { inset: -3px; border: 1px dashed rgba(56,225,255,.5); border-top-color: var(--cyan); animation: rot 4.5s linear infinite; }
+.scope::before, .scope::after { content: ""; position: absolute; background: rgba(56,225,255,.5); }
+.scope::before { left: 50%; top: 6px; bottom: 6px; width: 1px; transform: translateX(-.5px); }
+.scope::after { top: 50%; left: 6px; right: 6px; height: 1px; transform: translateY(-.5px); }
+.scope b { position: absolute; left: 50%; top: 50%; width: 7px; height: 7px; margin: -3.5px 0 0 -3.5px; border-radius: 50%;
+  background: var(--green); box-shadow: 0 0 10px var(--green); }
+@keyframes rot { to { transform: rotate(360deg); } }
+.lock .state { font: 600 14px system-ui, sans-serif; }
+.lock .state b.on { color: var(--green); text-shadow: 0 0 10px rgba(63,224,138,.4); }
+.lock .state .sub { display: block; color: var(--muted); font: 400 11.5px ui-monospace, Menlo, monospace; letter-spacing: .04em; margin-top: 2px; }
+.label { color: var(--muted); font-size: 11.5px; }
+.field { display: flex; gap: 6px; }
+input { background: #05090d; color: var(--text); border: 1px solid var(--line); border-radius: 7px; padding: 7px 9px;
+  font: 13px ui-monospace, Menlo, monospace; flex: 1; min-width: 0; }
+input:focus { outline: none; border-color: var(--cyan-dim); box-shadow: 0 0 0 2px rgba(56,225,255,.12); }
+.btn { background: linear-gradient(180deg, var(--cyan), #15c3e6); color: #04121a; border: 0; border-radius: 7px; padding: 8px 12px;
+  font: 700 12px system-ui, sans-serif; cursor: pointer; letter-spacing: .02em; white-space: nowrap; }
+.btn:hover { box-shadow: 0 0 16px rgba(56,225,255,.35); }
+.btn.ghost { background: transparent; color: var(--muted); border: 1px solid var(--line); }
+.btn.ghost:hover { color: var(--text); border-color: var(--cyan-dim); box-shadow: none; }
+.btn:disabled { opacity: .45; cursor: default; box-shadow: none; }
+#target-msg { font-size: 11.5px; }
+#target-msg .ok { color: var(--green); } #target-msg .err { color: var(--red); }
+.sidenote { color: var(--muted); font-size: 11.5px; line-height: 1.55; }
+.sidenote a, .brief a { color: var(--cyan); }
+
+/* ── kill chain ──────────────────────────────────────────────────────── */
+.chain-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-bottom: 4px; }
+.chain-head h2 { font: 700 12px system-ui, sans-serif; text-transform: uppercase; letter-spacing: .1em; color: var(--text); }
+.chain-head .err { color: var(--red); font: 500 12px system-ui; letter-spacing: 0; text-transform: none; }
+.legend { display: flex; gap: 14px; font: 500 10.5px ui-monospace, Menlo, monospace; color: var(--muted); letter-spacing: .04em; flex-wrap: wrap; }
+.legend span { display: inline-flex; align-items: center; gap: 5px; }
+.legend i { width: 9px; height: 9px; border-radius: 2px; }
+.legend i.hit { background: var(--red); box-shadow: 0 0 6px var(--red-glow); } .legend i.block { background: var(--green); }
+
+.phase { position: relative; padding: 0 0 6px 46px; }
+.phase::before { content: ""; position: absolute; left: 15px; top: 30px; bottom: -12px; width: 2px;
+  background: linear-gradient(180deg, var(--cyan-dim), rgba(56,225,255,.06)); }
+.phase:last-child::before { display: none; }
+.phase .n { position: absolute; left: 0; top: 2px; width: 32px; height: 32px; border-radius: 9px;
+  display: flex; align-items: center; justify-content: center; font: 800 14px ui-monospace, Menlo, monospace;
+  color: var(--cyan); background: var(--panel2); border: 1px solid var(--cyan-dim); box-shadow: 0 0 0 4px var(--bg), inset 0 0 12px rgba(56,225,255,.12); }
+.phase-head { margin-bottom: 9px; }
+.phase-head h3 { font: 700 14px system-ui, sans-serif; }
+.phase-head p { color: var(--muted); font-size: 12px; margin-top: 2px; max-width: 80ch; }
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(248px, 1fr)); gap: 9px; }
+
+.scenario { position: relative; text-align: left; display: flex; flex-direction: column; gap: 4px; cursor: pointer; font: inherit;
+  color: var(--text); background: linear-gradient(180deg, rgba(14,25,34,.9), rgba(9,16,23,.9)); border: 1px solid var(--line);
+  border-radius: 10px; padding: 11px 12px; transition: border-color .15s, box-shadow .15s, transform .15s; }
+.scenario:hover:not(:disabled) { border-color: var(--cyan-dim); box-shadow: 0 0 0 1px rgba(56,225,255,.18), 0 6px 20px rgba(0,0,0,.4); transform: translateY(-1px); }
+.scenario:disabled { opacity: .4; cursor: default; }
+.scenario .title { font: 700 13px system-ui, sans-serif; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.scenario .origin { font: 500 11px ui-monospace, Menlo, monospace; color: var(--faint); letter-spacing: .03em; }
+.scenario .expect { font-size: 11.5px; color: var(--muted); line-height: 1.5; margin-top: 2px; }
+.scenario .expect::before { content: "▸ "; color: var(--cyan-dim); }
+.scenario.running { border-color: var(--amber); box-shadow: 0 0 0 1px var(--amber), 0 0 24px rgba(255,184,74,.25); }
+.scenario.running::after { content: attr(data-run); position: absolute; top: 10px; right: 10px; font: 800 9px ui-monospace, Menlo, monospace;
+  letter-spacing: .14em; color: var(--amber); animation: blink 1s steps(1) infinite; }
+.badge { font: 800 9px ui-monospace, Menlo, monospace; letter-spacing: .1em; text-transform: uppercase; padding: 2px 6px; border-radius: 5px; }
+.badge.real { color: var(--amber); background: rgba(255,184,74,.12); border: 1px solid rgba(255,184,74,.4); }
+
+/* ── live feed / terminal ────────────────────────────────────────────── */
+.feed-top { display: flex; align-items: center; gap: 8px; }
+.feed-top .dots { display: flex; gap: 5px; }
+.feed-top .dots i { width: 9px; height: 9px; border-radius: 50%; background: #2a3a48; }
+.feed-top .dots i:nth-child(1) { background: #ff5f57; } .feed-top .dots i:nth-child(2) { background: #febc2e; } .feed-top .dots i:nth-child(3) { background: #28c840; }
+.feed-status { margin-left: auto; font: 600 10.5px ui-monospace, Menlo, monospace; letter-spacing: .08em; color: var(--muted); display: flex; align-items: center; gap: 7px; }
+.feed-status .spin { width: 11px; height: 11px; border: 2px solid rgba(255,184,74,.3); border-top-color: var(--amber); border-radius: 50%; animation: rot .8s linear infinite; }
+.feed-status.go { color: var(--amber); } .feed-status.done { color: var(--green); } .feed-status.err { color: var(--red); }
+.log { background: #03070b; border-top: 1px solid var(--line); padding: 12px 14px;
+  font: 12.5px/1.65 ui-monospace, SFMono-Regular, Menlo, monospace; min-height: 240px; max-height: 440px; overflow-y: auto; white-space: pre-wrap; }
+.log .run-line { color: var(--cyan); font-weight: 600; }
+.log .t { color: var(--faint); }
+.log .hit { color: var(--red); font-weight: 700; text-shadow: 0 0 10px var(--red-glow); }
+.log .block { color: var(--green); }
+.log .msf { color: var(--cyan); }
+.log .err { color: var(--red); }
+.log .cursor { display: inline-block; width: 8px; height: 14px; background: var(--cyan); vertical-align: -2px; animation: blink 1s steps(1) infinite; box-shadow: 0 0 8px var(--cyan); }
+.log::-webkit-scrollbar { width: 9px; } .log::-webkit-scrollbar-thumb { background: #16222e; border-radius: 9px; }
+
+@media (max-width: 920px) { .grid { grid-template-columns: 1fr; } .meta { display: none; } }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <div class="bar">
+    <div class="brand">
+      <span class="live"><span class="dot"></span><span id="t-live">Live</span></span>
+      <h1><span id="t-h1"></span><small id="t-h1sub"></small></h1>
+    </div>
+    <div class="right">
+      <div class="langtog" id="langtog"><button data-lang="it">IT</button><button data-lang="en">EN</button></div>
+      <div class="meta">
+        <div><span class="k" id="t-mtargetk"></span><span id="t-mtargetv"></span></div>
+        <div><span class="k" id="t-mclockk"></span><span class="clock" id="clock">--:--:--</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="brief">
+    <span class="tag" id="t-brieftag"></span>
+    <p id="t-briefp"></p>
+    <details>
+      <summary id="t-briefsum"></summary>
+      <ul id="t-brieful"></ul>
+    </details>
+  </div>
+
+  <div class="grid">
+    <div class="side">
+      <div class="card-box">
+        <h2><span class="pip"></span><span id="t-targettitle"></span></h2>
+        <div class="card-pad target">
+          <div class="reticle">
+            <div class="scope"><i></i><i class="r2"></i><i class="spin"></i><b></b></div>
+            <div class="lock">
+              <div class="state" id="target-state"><b class="on">● lab-01</b><span class="sub"></span></div>
+            </div>
+          </div>
+          <div class="label" id="t-targetlabel"></div>
+          <div class="field"><input id="target-url"></div>
+          <div class="field"><input id="target-key" type="password"></div>
+          <div class="field"><button class="btn" id="target-set"></button><button class="btn ghost" id="target-clear"></button></div>
+          <span id="target-msg"></span>
+        </div>
+      </div>
+      <div class="sidenote" id="t-sidenote"></div>
+    </div>
+
+    <div class="main">
+      <div>
+        <div class="chain-head">
+          <h2><span id="t-chaintitle"></span> <span class="err" id="error"></span></h2>
+          <div class="legend">
+            <span><i class="hit"></i> <span id="t-leghit"></span></span>
+            <span><i class="block"></i> <span id="t-legblock"></span></span>
+          </div>
+        </div>
+        <div id="scenarios"></div>
+      </div>
+
+      <div class="card-box">
+        <h2 class="feed-top"><span class="dots"><i></i><i></i><i></i></span><span id="t-feedtitle"></span>
+          <span class="feed-status" id="feed-status"></span></h2>
+        <div class="log" id="log"><span id="t-logempty" style="color:var(--muted)"></span><span class="cursor"></span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+// ── i18n ────────────────────────────────────────────────────────────────
+const T = {
+  it: {
+    docTitle: "Sala operativa · Laboratorio intrusioni",
+    live: "Live",
+    h1: "Sala operativa · Attacco controllato",
+    h1sub: "Lanci gli strumenti dei veri hacker contro un bersaglio di prova e guardi, in diretta, cosa il toolkit rileva e blocca.",
+    mTargetK: "Bersaglio", mTargetV: "lab-01 · server di prova", mClockK: "Orario missione",
+    briefTag: "⚠ Briefing",
+    briefP: `Questi <b>non sono attacchi finti</b>. Sono gli stessi strumenti dei veri criminali informatici — <b>Metasploit</b>, <b>nmap</b>, forza bruta SSH, exploit web — lanciati contro <b>lab-01</b>, un vero server di prova con il toolkit installato. Servono a vedere, dal vivo, cosa il toolkit riesce a <b>rilevare e fermare</b>. Gli attacchi sono in ordine: come in una vera intrusione, parti dall'alto e scendi. La mappa e gli attacchi ricevuti sono sulla pagina di monitoraggio del server, su <a href="http://localhost:8089/" target="_blank" rel="noopener">localhost:8089</a>.`,
+    briefSum: "Come funzionano gli attacchi, e perché la mappa mostra città in tutto il mondo",
+    briefLi: [
+      "<b>Strumenti veri, traffico vero.</b> nmap, Metasploit, forza bruta SSH ed exploit web generano pacchetti reali verso lab-01: non c'è niente di simulato nell'attacco.",
+      "<b>Bersaglio vero.</b> lab-01 è un server reale con il toolkit e le difese attive — fail2ban, Falco, Suricata, ModSecurity, limiti di nginx: sono queste a rilevare e bloccare.",
+      "<b>Indirizzo di partenza finto.</b> Gli attacchi partono da indirizzi di documentazione (RFC 5737), che su internet non esistono. Il toolkit assegna a ciascuno una città inventata: per questo sulla mappa vedi IP sparsi per il mondo. <b>L'origine geografica è finta, l'attacco è reale.</b>",
+      "<b>Eccezione Metasploit.</b> Metasploit non falsifica l'indirizzo: parte dall'indirizzo del suo container (sulla mappa, Ashburn), come lo vedrebbero le difese di un vero server.",
+    ],
+    targetTitle: "Bersaglio",
+    targetLabel: "Per colpire un altro server con il toolkit installato: il suo indirizzo API e la sua chiave. La chiave prova che amministri quel server.",
+    phUrl: "indirizzo MCP o API (…/mcp o …/api)", phKey: "chiave API del server",
+    btnSet: "Aggancia", btnClear: "Torna a lab-01",
+    sidenote: "Senza un bersaglio esterno gli attacchi partono solo verso lab-01, dentro la rete del laboratorio, da indirizzi di documentazione (RFC 5737) con città inventate. Verso un server esterno partono dal nostro indirizzo, solo gli attacchi web, e solo dopo che la chiave ha provato che puoi già leggere quel server.",
+    chainTitle: "Catena d'attacco",
+    legHit: "l'attaccante è entrato", legBlock: "la difesa ha retto",
+    feedTitle: "Feed live — cosa sta facendo l'attaccante",
+    logEmpty: "In attesa. Scegli un attacco dalla catena qui sopra.",
+    from: "da", inAzione: "IN AZIONE", feedDone: "✓ COMPLETATO", feedErr: "✕ ERRORE",
+    status: { "in corso": "in corso", "finito": "finito", "errore": "errore" },
+    notStarted: "non avviato", needBoth: "servono l'indirizzo e la chiave", verifying: "verifica in corso…",
+    notVerified: "non verificato", lockedOn: "agganciato", noAnswer: "nessuna risposta",
+    tipMsf: "Avvia il container Metasploit: make lab-up-msf",
+    tipWeb: "Non disponibile contro un server esterno (solo attacchi web)",
+    subLab: "laboratorio · agganciato", extServer: "server esterno", subExt: "esterno · solo attacchi web, dal nostro indirizzo",
+  },
+  en: {
+    docTitle: "Operations room · Intrusion lab",
+    live: "Live",
+    h1: "Operations room · Controlled attack",
+    h1sub: "You launch real hackers' tools against a test target and watch, live, what the toolkit detects and blocks.",
+    mTargetK: "Target", mTargetV: "lab-01 · test server", mClockK: "Mission time",
+    briefTag: "⚠ Briefing",
+    briefP: `These are <b>not fake attacks</b>. They are the same tools real cybercriminals use — <b>Metasploit</b>, <b>nmap</b>, SSH brute force, web exploits — launched against <b>lab-01</b>, a real test server with the toolkit installed. They let you see, live, what the toolkit can <b>detect and block</b>. The attacks are in order: like a real intrusion, start at the top and work down. The map and the attacks received are on the server's monitoring page, at <a href="http://localhost:8089/" target="_blank" rel="noopener">localhost:8089</a>.`,
+    briefSum: "How the attacks work, and why the map shows cities all over the world",
+    briefLi: [
+      "<b>Real tools, real traffic.</b> nmap, Metasploit, SSH brute force and web exploits generate real packets to lab-01: there is nothing simulated about the attack.",
+      "<b>Real target.</b> lab-01 is a real server with the toolkit and its defences active — fail2ban, Falco, Suricata, ModSecurity, nginx rate limits: these are what detect and block.",
+      "<b>Fake source address.</b> The attacks start from documentation addresses (RFC 5737), which do not exist on the internet. The toolkit assigns each an invented city: that is why the map shows IPs all over the world. <b>The geographic origin is fake, the attack is real.</b>",
+      "<b>Metasploit exception.</b> Metasploit does not spoof its address: it starts from its container's address (on the map, Ashburn), exactly as a real server's defences would see it.",
+    ],
+    targetTitle: "Target",
+    targetLabel: "To hit another server with the toolkit installed: its API address and its key. The key proves you administer that server.",
+    phUrl: "MCP or API address (…/mcp or …/api)", phKey: "server API key",
+    btnSet: "Lock on", btnClear: "Back to lab-01",
+    sidenote: "Without an external target the attacks go only to lab-01, inside the lab network, from documentation addresses (RFC 5737) with invented cities. To an external server they go from our address, web attacks only, and only after the key has proved you can already read that server.",
+    chainTitle: "Attack chain",
+    legHit: "the attacker got in", legBlock: "the defence held",
+    feedTitle: "Live feed — what the attacker is doing",
+    logEmpty: "Standing by. Pick an attack from the chain above.",
+    from: "from", inAzione: "RUNNING", feedDone: "✓ COMPLETED", feedErr: "✕ ERROR",
+    status: { "in corso": "running", "finito": "done", "errore": "error" },
+    notStarted: "not started", needBoth: "address and key required", verifying: "verifying…",
+    notVerified: "not verified", lockedOn: "locked on", noAnswer: "no answer",
+    tipMsf: "Start the Metasploit container: make lab-up-msf",
+    tipWeb: "Not available against an external server (web attacks only)",
+    subLab: "lab · locked on", extServer: "external server", subExt: "external · web attacks only, from our address",
+  },
+};
+
+// Intrusion phases, in order. `key` matches the API's (Italian) phase field; label/desc come per language.
+const PHASES = [
+  { key: "Ricognizione", it: ["Ricognizione", "L'attaccante cerca porte aperte, servizi e pagine deboli: sta studiando il bersaglio."],
+    en: ["Reconnaissance", "The attacker looks for open ports, services and weak pages: it is studying the target."] },
+  { key: "Accesso", it: ["Accesso", "Prova a entrare: password a raffica, exploit sul sito, flood di richieste."],
+    en: ["Access", "It tries to get in: password spraying, exploits on the site, request floods."] },
+  { key: "Dentro il server", it: ["Dentro il server", "Una volta dentro, cosa fa l'intruso: ruba chiavi, lascia una porta aperta, cancella le tracce."],
+    en: ["Inside the server", "Once inside, what the intruder does: steals keys, leaves a backdoor open, wipes its tracks."] },
+  { key: "Controllo remoto", it: ["Controllo remoto", "Il server compromesso richiama di nascosto il controllore dell'attaccante."],
+    en: ["Remote control", "The compromised server secretly calls the attacker's controller."] },
+  { key: "VPN", it: ["VPN", "La porta dei dipendenti: invisibile a chi non ha una chiave, ma una chiave rubata entra."],
+    en: ["VPN", "The employees' door: invisible to anyone without a key, but a stolen key gets in."] },
+  { key: "Inganno dell'AI", it: ["Inganno dell'AI", "Scrive nei log istruzioni per l'assistente che li legge: prompt injection."],
+    en: ["Tricking the AI", "It writes instructions into the logs for the assistant that reads them: prompt injection."] },
+  { key: "Tutto", it: ["Tutto", "La sequenza completa, dall'inizio alla fine."],
+    en: ["All", "The full sequence, from start to finish."] },
+];
+
+let scenarios = [];
+let targetMode = "lab";
+let lang = "it";
+try { const saved = localStorage.getItem("lang"); lang = saved === "en" ? "en" : (saved === "it" ? "it" : ((navigator.language || "").slice(0, 2) === "en" ? "en" : "it")); } catch {}
+
+const tr = (s, field) => (lang === "en" ? (s[field + "_en"] || s[field]) : s[field]);
+
+function card(s) {
+  return `<button class="scenario" data-id="${esc(s.id)}" data-web="${s.web ? 1 : 0}" data-available="${s.available ? 1 : 0}">
+      <span class="title">${esc(tr(s, "title"))}${s.real ? '<span class="badge real">Metasploit</span>' : ''}</span>
+      <span class="origin">${esc(T[lang].from)} ${esc(tr(s, "source"))} · ${esc(tr(s, "place"))}</span>
+      <span class="expect">${esc(tr(s, "expect"))}</span>
+    </button>`;
+}
+
+function renderScenarios() {
+  $("scenarios").innerHTML = PHASES.map((p, i) => {
+    const group = scenarios.filter(s => (s.phase || "Tutto") === p.key);
+    if (!group.length) return "";
+    const [name, desc] = p[lang];
+    return `<section class="phase"><span class="n">${i + 1}</span>
+      <div class="phase-head"><h3>${esc(name)}</h3><p>${esc(desc)}</p></div>
+      <div class="cards">${group.map(card).join("")}</div></section>`;
+  }).join("");
+  $("scenarios").querySelectorAll("button").forEach(b => b.addEventListener("click", () => run(b.dataset.id)));
+}
+
+async function loadScenarios() {
+  scenarios = await fetch("/api/scenarios").then(r => r.json());
+  renderScenarios();
+}
+
+function runTitle(runObj) {
+  const s = scenarios.find(x => x.id === runObj.scenario);
+  return s ? tr(s, "title") : runObj.title;
+}
+
+function applyLang() {
+  const d = T[lang];
+  document.documentElement.lang = lang;
+  document.title = d.docTitle;
+  $("t-live").textContent = d.live;
+  $("t-h1").textContent = d.h1;
+  $("t-h1sub").textContent = d.h1sub;
+  $("t-mtargetk").textContent = d.mTargetK;
+  $("t-mtargetv").textContent = d.mTargetV;
+  $("t-mclockk").textContent = d.mClockK;
+  $("t-brieftag").textContent = d.briefTag;
+  $("t-briefp").innerHTML = d.briefP;
+  $("t-briefsum").textContent = d.briefSum;
+  $("t-brieful").innerHTML = d.briefLi.map(x => `<li>${x}</li>`).join("");
+  $("t-targettitle").textContent = d.targetTitle;
+  $("t-targetlabel").textContent = d.targetLabel;
+  $("target-url").placeholder = d.phUrl;
+  $("target-key").placeholder = d.phKey;
+  $("target-set").textContent = d.btnSet;
+  $("target-clear").textContent = d.btnClear;
+  $("t-sidenote").textContent = d.sidenote;
+  $("t-chaintitle").textContent = d.chainTitle;
+  $("t-leghit").textContent = d.legHit;
+  $("t-legblock").textContent = d.legBlock;
+  $("t-feedtitle").textContent = d.feedTitle;
+  const le = $("t-logempty"); if (le) le.textContent = d.logEmpty;
+  document.querySelectorAll("#langtog button").forEach(b => b.classList.toggle("on", b.dataset.lang === lang));
+  if (scenarios.length) renderScenarios();
+  refreshTarget();
+}
+
+async function run(id) {
+  const r = await fetch(`/api/scenarios/${encodeURIComponent(id)}/run`, { method: "POST" });
+  if (!r.ok) { const e = await r.json().catch(() => ({})); $("error").textContent = e.error || T[lang].notStarted; }
+  else { $("error").textContent = ""; }
+  refreshRuns();
+}
+
+// Verify and arm an external server; or go back to lab-01. The attacks against it start only after this succeeds.
+async function setTarget() {
+  const url = $("target-url").value.trim(), key = $("target-key").value.trim();
+  if (!url || !key) { $("target-msg").innerHTML = `<span class="err">${esc(T[lang].needBoth)}</span>`; return; }
+  $("target-set").disabled = true; $("target-msg").textContent = T[lang].verifying;
+  try {
+    const r = await fetch("/api/target", { method: "POST", body: JSON.stringify({ url, key }) });
+    const d = await r.json();
+    if (!r.ok) { $("target-msg").innerHTML = `<span class="err">${esc(d.error || T[lang].notVerified)}</span>`; }
+    else {
+      const note = d.note || d.warning;
+      $("target-msg").innerHTML = `<span class="ok">${esc(T[lang].lockedOn)}: ${esc(d.host)} (${esc((d.detectors || []).join(", "))})</span>`
+        + (note ? `<br><span class="${d.warning ? "err" : ""}">${esc(note)}</span>` : "");
+      $("target-key").value = "";
+    }
+  } catch { $("target-msg").innerHTML = `<span class="err">${esc(T[lang].noAnswer)}</span>`; }
+  $("target-set").disabled = false;
+  refreshTarget();
+}
+async function clearTarget() {
+  await fetch("/api/target/clear", { method: "POST" }).catch(() => null);
+  $("target-msg").textContent = ""; refreshTarget();
+}
+async function refreshTarget() {
+  const t = await fetch("/api/target").then(r => r.json()).catch(() => null);
+  if (!t) return;
+  targetMode = t.mode;
+  $("target-state").innerHTML = t.mode === "external"
+    ? `<b class="on">● ${esc(t.host || T[lang].extServer)}</b><span class="sub">${esc(T[lang].subExt)}</span>`
+    : `<b class="on">● lab-01</b><span class="sub">${esc(T[lang].subLab)}</span>`;
+  refreshRuns();
+}
+
+// Colour one feed line by what it means for the defender. The log text itself comes from the backend in Italian.
+function classify(msg) {
+  if (/ACCESSO RIUSCITO|handshake: RIUSCITO|la VPN la accetta|è nella rete|backdoor attiva/.test(msg)) return "hit";
+  if (/^errore:|\berrore\b/.test(msg)) return "err";
+  if (/rifiutata|nessuna risposta|bloccato|banna|limitato|scarta|non risponde|non registra|ignora chi|404|429|403|401|open\|filtered/.test(msg)) return "block";
+  if (/^\s*\[[+*!\-]\]|\[.+\]|metasploit|moduli|modulo/.test(msg)) return "msf";
+  return "";
+}
+
+async function refreshRuns() {
+  const data = await fetch("/api/runs").then(r => r.json()).catch(() => null);
+  if (!data) return;
+  const running = data.runs.find(r => r.id === data.current);
+  $("scenarios").querySelectorAll("button").forEach(b => {
+    const blocked = targetMode === "external" && b.dataset.web !== "1";
+    const unavailable = b.dataset.available === "0";
+    b.disabled = !!running || blocked || unavailable;
+    b.title = unavailable ? T[lang].tipMsf : (blocked ? T[lang].tipWeb : "");
+    const isRun = !!running && running.scenario === b.dataset.id;
+    b.classList.toggle("running", isRun);
+    if (isRun) b.setAttribute("data-run", T[lang].inAzione);
+  });
+  const last = data.runs[0];
+  const fs = $("feed-status");
+  if (!last) { fs.className = "feed-status"; fs.textContent = ""; return; }
+  if (last.status === "in corso") { fs.className = "feed-status go"; fs.innerHTML = `<span class="spin"></span>${esc(runTitle(last)).toUpperCase()}`; }
+  else if (last.status === "errore") { fs.className = "feed-status err"; fs.textContent = T[lang].feedErr; }
+  else { fs.className = "feed-status done"; fs.textContent = T[lang].feedDone; }
+
+  const box = $("log");
+  const atBottom = box.scrollTop + box.clientHeight >= box.scrollHeight - 4;
+  const statusText = T[lang].status[last.status] || last.status;
+  const head = `<span class="t">${esc(last.started)}</span> <span class="run-line">▶ ${esc(runTitle(last))} — ${esc(statusText)}</span>\n`;
+  const lines = last.log.map(l => {
+    const txt = lang === "en" ? (l.msg_en || l.msg) : l.msg;
+    const cls = l.cls != null ? l.cls : classify(l.msg);   // backend tags the class; classify() is the fallback
+    return `<span class="t">${esc(l.t)}</span> <span class="${cls}">${esc(txt)}</span>`;
+  }).join("\n");
+  box.innerHTML = head + lines + `\n<span class="cursor"></span>`;
+  if (atBottom) box.scrollTop = box.scrollHeight;
+}
+
+function tick() {
+  const d = new Date();
+  $("clock").textContent = [d.getHours(), d.getMinutes(), d.getSeconds()].map(n => String(n).padStart(2, "0")).join(":");
+}
+
+$("target-set").addEventListener("click", setTarget);
+$("target-clear").addEventListener("click", clearTarget);
+document.querySelectorAll("#langtog button").forEach(b => b.addEventListener("click", () => {
+  lang = b.dataset.lang; try { localStorage.setItem("lang", lang); } catch {}
+  applyLang();
+}));
+
+applyLang();            // fill static text immediately (scenarios load next)
+loadScenarios();
+tick(); setInterval(tick, 1000);
+setInterval(refreshRuns, 1500);
+</script>
+</body>
+</html>

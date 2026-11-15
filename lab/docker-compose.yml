@@ -1,0 +1,159 @@
+# The intrusion lab: the server lab-01 (service "server": an Ubuntu server with the customer package installed, reached
+# only through the tunnel container — the Dev Tunnel, or the customer's domain), the attacker, which serves the console
+# on http://localhost:8090, Metasploit, and the tunnel that gives lab-01 a public address (Dev Tunnels).
+# Three networks with documentation addresses (RFC 5737): every attacker address gets an invented city, as in the
+# simulated mode. None of them reaches the internet.
+#   make lab-up    /    make lab-down    /    make lab-reset
+# Fixed container names (intrusion-lab-server, intrusion-lab-attacker, intrusion-lab-tunnel, intrusion-lab-metasploit), so `docker exec` and
+# `docker logs` work without the compose suffix; the services keep their short names for `make lab-shell SVC=…`.
+
+name: intrusion-lab
+
+services:
+  # The customer's server: service and container "server" (Docker Desktop shows it so), host lab-01.
+  server:
+    container_name: intrusion-lab-server
+    # The toolkit's server image (deploy/docker/Dockerfile, target server, the one for a real host) plus the lab's files:
+    # what runs here is what runs on a customer's VPS, with what the attacks need to find on top (target lab).
+    build:
+      context: ..
+      dockerfile: deploy/docker/Dockerfile
+      target: lab
+    hostname: lab-01
+    # systemd as PID 1, iptables for the firewall and fail2ban (as deploy/docker/compose.yml on a real host).
+    privileged: true
+    cgroup: host
+    tmpfs: [/run, /run/lock]
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+      # The tunnel's public address, written by the tunnel container: the package shows it on its page. Outside the
+      # package's StateDirectory: a read-only mount inside it makes systemd fail to set it up (status 238).
+      - tunnel-state:/var/lib/lab-tunnel:ro
+      # The VPN configuration of an employee (lab-vpn-user), which the attacker "steals" in a VPN scenario.
+      - lab-vpn:/var/lib/lab-vpn
+      # The package's own state (the advice approved in the SOC process, /api/advice): kept when lab-01 is rebuilt,
+      # as on a real server across updates. Writable and the StateDirectory itself, so systemd sets it up as usual.
+      - lab-state:/var/lib/xrcopilotlab-intrusion-mcp
+    environment:
+      LAB_API_KEY: ${LAB_API_KEY:?run make lab-up, which creates lab/.env}
+      # The hidden production key, used (its hash) when a domain is set; never shown on the page.
+      PROD_API_KEY: ${PROD_API_KEY:-}
+      # Set: the package says https://<domain> is XRCopilotLab's address (Connection:PublicUrl).
+      PUBLIC_DOMAIN: ${PUBLIC_DOMAIN:-}
+      # The VPN's public address in the lab (the attacker's "internet" side).
+      VPN_ENDPOINT: 203.0.113.250
+    networks:
+      it:       { ipv4_address: 198.51.100.20 }
+      internet: { ipv4_address: 203.0.113.250 }
+      homes:    { ipv4_address: 192.0.2.250 }
+      tunnel:   { ipv4_address: 10.77.0.20 }
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8470/healthz"]
+      interval: 10s
+      retries: 30
+
+  attacker:
+    container_name: intrusion-lab-attacker
+    build:
+      context: attacker
+    hostname: attacker
+    cap_add: [NET_ADMIN, NET_RAW]
+    environment:
+      LAB_API_KEY: ${LAB_API_KEY:?run make lab-up, which creates lab/.env}
+      TARGET_IT: 198.51.100.20
+      TARGET_INTERNET: 203.0.113.250
+      TARGET_HOMES: 192.0.2.250
+      # The Metasploit container (started with the lab): the console drives it over msfrpcd. When it
+      # is not running the three "Metasploit · …" scenarios stay disabled.
+      MSF_RPC_HOST: metasploit
+      MSF_RPC_PORT: "55553"
+      MSF_RPC_PASSWORD: ${MSF_RPC_PASSWORD:-labmsf}
+    volumes:
+      # The employee's VPN configuration written by lab-01: the lost laptop of the VPN scenarios (read-only here).
+      - lab-vpn:/lab/vpn:ro
+    ports:
+      - "127.0.0.1:8090:8090"
+    networks:
+      it:       {}
+      internet: {}
+      homes:    {}
+      console:  {}
+    depends_on:
+      server: { condition: service_healthy }
+
+  # The lab's public address (Microsoft Dev Tunnels): login and address from the console, nothing on the Mac.
+  tunnel:
+    container_name: intrusion-lab-tunnel
+    build:
+      context: tunnel
+    hostname: tunnel
+    # The only container that publishes a local port for lab-01's page: lab-01 stays on internal networks (no internet),
+    # and localhost:8089 reaches its monitoring page through here (socat → lab-01:8093). The page's Dev Tunnel controls
+    # and its test key are driven through this container's controller (lab-01 nginx proxies /api/tunnel/ to it).
+    ports:
+      - "127.0.0.1:8089:8089"
+    environment:
+      LAB_API: 10.77.0.20:8091
+      LAB_PAGE: 10.77.0.20:8093
+      # The test key, shown and copyable on lab-01's page (served here via the controller's /key, lab only).
+      LAB_API_KEY: ${LAB_API_KEY:?run make lab-up, which creates lab/.env}
+      # Set (lab/.env): no Dev Tunnel; lab-01's ports are published for the domain (lab/docker-compose.domain.yml).
+      PUBLIC_DOMAIN: ${PUBLIC_DOMAIN:-}
+      PUBLIC_PAGE_PORT: ${PUBLIC_PAGE_PORT:-8443}
+    volumes:
+      - tunnel-login:/root
+      - tunnel-state:/state
+    networks:
+      tunnel:  { ipv4_address: 10.77.0.30 }
+      console: {}
+    depends_on:
+      server: { condition: service_healthy }
+
+  # Metasploit, a real attack engine, in its own container (official image, ~2 GB): part of the lab, started with
+  # make lab-up (make lab-down-msf stops it alone). It exposes msfrpcd on the lab's internal networks; the console drives it
+  # over RPC. On the same it/internet/homes networks as the attacker, so it reaches lab-01 and the console reaches it.
+  # Nothing leaves the lab. When it is not running, the three "Metasploit · …" scenarios stay disabled in the console.
+  metasploit:
+    container_name: intrusion-lab-metasploit
+    image: metasploitframework/metasploit-framework:latest
+    # Published for amd64 only: on Apple silicon Docker runs it emulated (Rosetta), slower to start but fine for the
+    # lab. Declared, so the pull is deliberate and compose does not warn on every start.
+    platform: linux/amd64
+    hostname: metasploit
+    entrypoint: ["./msfrpcd"]
+    command: ["-U", "msf", "-P", "${MSF_RPC_PASSWORD:-labmsf}", "-a", "0.0.0.0", "-p", "55553", "-S", "-f"]
+    networks:
+      it:       {}
+      # Fixed: Metasploit does not spoof, so its attacks come from this address (Ashburn, US, on the lab's map).
+      internet: { ipv4_address: 203.0.113.72 }
+      homes:    {}
+    depends_on:
+      server: { condition: service_healthy }
+
+volumes:
+  # The Dev Tunnels login and the tunnel id: kept by make lab-down, so the address does not change.
+  tunnel-login: {}
+  # The tunnel's current address (one file), shared with lab-01.
+  tunnel-state: {}
+  # lab-01 writes an employee's VPN configuration here; the attacker reads it (the "stolen laptop").
+  lab-vpn: {}
+  # lab-01's package state (approved advice): kept by make lab-down and rebuilds, deleted by make lab-reset.
+  lab-state: {}
+
+networks:
+  # Docker gives its own addresses from the /28 at the top; the attackers' addresses are added below it.
+  it:
+    internal: true
+    ipam: { config: [ { subnet: 198.51.100.0/24, ip_range: 198.51.100.240/28, gateway: 198.51.100.254 } ] }
+  internet:
+    internal: true
+    ipam: { config: [ { subnet: 203.0.113.0/24, ip_range: 203.0.113.240/28, gateway: 203.0.113.254 } ] }
+  homes:
+    internal: true
+    ipam: { config: [ { subnet: 192.0.2.0/24, ip_range: 192.0.2.240/28, gateway: 192.0.2.254 } ] }
+  # lab-01's API-only port, for the tunnel container.
+  tunnel:
+    internal: true
+    ipam: { config: [ { subnet: 10.77.0.0/24 } ] }
+  # The only network with a way out: it publishes the console on the Mac's localhost. The attacks never use it.
+  console: {}

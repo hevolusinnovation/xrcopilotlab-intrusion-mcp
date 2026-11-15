@@ -1,0 +1,75 @@
+#!/usr/bin/env bash
+# The container's start, before systemd: what install.sh does on a server at its first run, done at every start of the
+# container (it keeps what is already there), then systemd as PID 1. systemd does not pass the container's environment
+# to the services: this is the bridge.
+#
+#   INTRUSION_MCP_API_KEY  the key XRCopilotLab sends (X-API-Key, 24+ characters); only its hash is stored. Given once
+#                          is enough: the hash stays in the volume. INTRUSION_MCP_API_KEY_HASH: the hash instead.
+#   PUBLIC_URL             https://… the address XRCopilotLab uses, on the customer's domain
+#   DASHBOARD_PASSWORD     the page's password on the first start (default: generated, printed once in docker logs)
+#   DASHBOARD_ALLOW, DASHBOARD_PORT   who may open the page, and its port (see dashboard.sh)
+#   VPN_ENDPOINT, VPN_SUBNET, VPN_SUBNET6, VPN_PORT, VPN_LAN, VPN_DNS   the VPN's settings (see guardians.sh)
+#   /var/log/host          the host's /var/log, read-only (compose.yml): the toolkit and fail2ban read the host's SSH and
+#                          firewall logs there, since the host's sshd and firewall are not the container's
+#
+#   --prepare   do everything but start systemd (lab-01's own entrypoint goes on from here)
+set -euo pipefail
+PKG=/opt/xrcopilotlab-intrusion-mcp/package
+ETC=/etc/xrcopilotlab-intrusion-mcp
+GROUP=xrcopilot-intrusion
+
+# install.sh again: the page's password, certificate and key are made if missing, the key's hash and the public address
+# written if given. --no-start: systemd is not running yet.
+with=()
+if [[ -x /usr/local/sbin/xrc-vpn ]] && env | grep -qE '^VPN_(ENDPOINT|SUBNET|SUBNET6|PORT|LAN|DNS)='; then with=(--with wireguard); fi
+"$PKG/install.sh" --no-start "${with[@]}"
+
+if [[ -n "${INTRUSION_MCP_API_KEY_HASH:-}" ]]; then
+  [[ "$INTRUSION_MCP_API_KEY_HASH" =~ ^[0-9a-f]{64}$ ]] || { echo "INTRUSION_MCP_API_KEY_HASH must be a SHA-256 in hex" >&2; exit 2; }
+  ( umask 027 && printf 'ApiKeys__Hash=%s\n' "$INTRUSION_MCP_API_KEY_HASH" > "$ETC/env" ) && chgrp "$GROUP" "$ETC/env"
+fi
+
+# CrowdSec's credentials are not in the image: each container registers itself once (and with the central API when
+# online_client is in its configuration, to receive the community blocklist).
+# The central API first: cscli refuses to load the local one while online_client names a credentials file that is not
+# there. Without internet, online_client is dropped and CrowdSec runs with its local API only.
+if [[ -f /etc/crowdsec/config.yaml ]]; then
+  if grep -q '^    online_client:' /etc/crowdsec/config.yaml && [[ ! -s /etc/crowdsec/online_api_credentials.yaml ]]; then
+    if ! cscli capi register >/dev/null 2>&1; then
+      sed -i '/^    online_client:/,+1d' /etc/crowdsec/config.yaml
+      echo "crowdsec: no central API (no internet?): it runs with its local API only" >&2
+    fi
+  fi
+  if [[ ! -s /etc/crowdsec/local_api_credentials.yaml ]]; then
+    if cscli machines add --auto --force >/dev/null 2>&1; then echo "crowdsec: registered this container (first start)"
+    else echo "crowdsec: could not register with its local API: cscli machines add --auto --force" >&2; fi
+  fi
+fi
+
+# Suricata: this host's addresses and the interface with the default route, not those of the image build.
+if [[ -f /etc/suricata/suricata.yaml ]]; then
+  home="$(hostname -I | tr ' ' '\n' | grep -v '^$' | grep -v ':' | sed 's|$|/32|' | paste -sd, -)"
+  [[ -z "$home" ]] || sed -i "0,/^    HOME_NET:.*/s##    HOME_NET: \"[$home,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16]\"#" /etc/suricata/suricata.yaml
+  iface="${SURICATA_INTERFACE:-$(ip -o route show default 2>/dev/null | awk '{print $5; exit}')}"
+  [[ -z "$iface" ]] || sed -i "0,/^  - interface: .*/s##  - interface: $iface#" /etc/suricata/suricata.yaml
+fi
+
+# The host's logs, when compose mounts them: SSH and the firewall are the host's.
+settings=()
+if [[ -d /var/log/host ]]; then
+  if [[ -e /var/log/host/auth.log ]]; then
+    settings+=("Logs__AuthFiles__0=/var/log/host/auth.log*")
+    printf '# Written by xrc-docker-start: the host'"'"'s sshd, from its log.\n[sshd]\nenabled = true\nbackend = auto\nlogpath = /var/log/host/auth.log\n' \
+      > /etc/fail2ban/jail.d/zz-docker-host.conf
+  else
+    rm -f /etc/fail2ban/jail.d/zz-docker-host.conf
+  fi
+  [[ -e /var/log/host/ufw.log ]] && settings+=("Logs__FirewallFiles__0=/var/log/host/ufw.log*")
+fi
+touch "$ETC/site.env"
+{ grep -v '^Logs__' "$ETC/site.env" || true; printf '%s\n' "${settings[@]}"; } | grep -v '^$' > "$ETC/site.env.tmp" || true
+chgrp "$GROUP" "$ETC/site.env.tmp" && chmod 0640 "$ETC/site.env.tmp" && mv -f "$ETC/site.env.tmp" "$ETC/site.env"
+
+[[ "${1:-}" == --prepare ]] && exit 0
+[[ -s "$ETC/env" ]] || echo "no API key yet: set INTRUSION_MCP_API_KEY (or INTRUSION_MCP_API_KEY_HASH) and restart; the page works meanwhile" >&2
+exec /sbin/init

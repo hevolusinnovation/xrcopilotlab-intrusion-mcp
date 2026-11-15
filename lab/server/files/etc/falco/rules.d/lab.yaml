@@ -1,0 +1,11 @@
+# lab-01 is a container: two of Falco's container rules fire on every SSH login and on Suricata's capture socket.
+# A server is not a container: on a customer's host these rules stay as Falco ships them.
+- rule: Redirect STDOUT/STDIN to Network Connection in Container
+  enabled: false
+  override:
+    enabled: replace
+
+- rule: Packet socket created in container
+  enabled: false
+  override:
+    enabled: replace

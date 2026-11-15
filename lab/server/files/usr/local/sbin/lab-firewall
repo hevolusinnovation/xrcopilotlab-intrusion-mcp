@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# What UFW does with `default deny incoming` and `logging low`: open ssh and http, log and drop the rest. UFW logs
+# with the kernel LOG target, which a container cannot read; NFLOG + ulogd2 + rsyslog write the same line to
+# /var/log/ufw.log (see /etc/rsyslog.d/20-ufw.conf). fail2ban inserts its chains in front of these rules.
+set -euo pipefail
+iptables -F INPUT
+iptables -A INPUT -i lo -j ACCEPT
+iptables -A INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+iptables -A INPUT -p icmp -j ACCEPT
+iptables -A INPUT -p tcp --dport 22 -j ACCEPT
+iptables -A INPUT -p tcp --dport 80 -j ACCEPT
+# The package API for the Dev Tunnel, from the tunnel container only (nginx allows the same range).
+iptables -A INPUT -p tcp -s 10.77.0.0/24 --dport 8091 -j ACCEPT
+# The monitoring page for the Dev Tunnel, from the tunnel container only.
+iptables -A INPUT -p tcp -s 10.77.0.0/24 --dport 8093 -j ACCEPT
+# The VPN (install.sh --with wireguard): WireGuard answers only a known key, so opening the port shows nothing to others.
+iptables -A INPUT -p udp --dport 51820 -j ACCEPT
+iptables -A INPUT -m limit --limit 50/s --limit-burst 200 -j NFLOG --nflog-group 1 --nflog-prefix "[UFW BLOCK] "
+iptables -A INPUT -j DROP
