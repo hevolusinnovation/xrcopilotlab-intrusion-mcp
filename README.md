@@ -1623,7 +1623,7 @@ answers. In one line each:
 
 | Program | What it is for, in plain words | Installed by | Licence |
 |---|---|---|---|
-| **This toolkit** | Reads the guardians' logs and answers the agent and the page | `install.sh` | Hevolus |
+| **This toolkit** | Reads the guardians' logs and answers the agent and the page | `install.sh` | PolyForm Noncommercial 1.0.0 |
 | **nginx** | The web server; publishes the toolkit's API with TLS and the monitoring page | the customer, or `install.sh` for the page | BSD-2 |
 | **fail2ban** | Bans for a while an address that gets the password wrong too many times | `--with fail2ban` | GPL-2 |
 | **UFW** | The firewall: closed ports stay closed. The toolkit reads it, **never** switches it on | the customer | GPL-3 |
@@ -1632,8 +1632,8 @@ answers. In one line each:
 | **Falco** | Watches what programs do inside the server (eBPF), after a break-in | `--with falco` | Apache-2.0 |
 | **ModSecurity** + **OWASP CRS** | Web firewall inside nginx: reads whole requests, bodies included; detection only | `--with modsecurity` | Apache-2.0 |
 | **WireGuard** + `qrencode` | The VPN for the customer's people and branches; QR codes for the phone app | `--with wireguard` | GPL-2 / LGPL-2.1 |
-| **xrc-vpn** | The command the customer uses to add, revoke and reissue VPN users | `--with wireguard` | Hevolus |
-| **xrc-audit** | The host audit (the toolkit's own program, as root, read-only) and the command the customer uses to see what changed and accept it; it also reads how the host is kept (updates, firewall rules, certificates, containers) | `--with audit` | Hevolus |
+| **xrc-vpn** | The command the customer uses to add, revoke and reissue VPN users | `--with wireguard` | PolyForm Noncommercial 1.0.0 |
+| **xrc-audit** | The host audit (the toolkit's own program, as root, read-only) and the command the customer uses to see what changed and accept it; it also reads how the host is kept (updates, firewall rules, certificates, containers) | `--with audit` | PolyForm Noncommercial 1.0.0 |
 | **DB-IP Lite** (optional) | Puts each address on a city, offline | downloaded by the customer | CC BY 4.0 |
 | **systemd**, **iptables/ip6tables** | Run the services; route the VPN to the internal network | the distribution | — |
 
@@ -1793,3 +1793,18 @@ infra/                                   Container App of the demo
   branch network) is the customer's network setup.
 - Windows hosts (Event Log), Apache access logs, nginx in a custom log format.
 - Reputation data (AbuseIPDB, CrowdSec CTI): commercial plans needed.
+
+## Licence
+
+The toolkit's own code is under the [PolyForm Noncommercial License 1.0.0](LICENSE.md): you may use it, change it
+and pass it on for any **noncommercial** purpose (study, research, testing, a hobby server, a school, a public body),
+keeping the licence and the notice below with every copy.
+
+**Commercial use is reserved to Hevolus.** Running the toolkit for a business, offering it as part of a paid service
+or selling it needs a commercial licence from Hevolus: write to Hevolus before you do.
+
+> Required Notice: Copyright (c) Hevolus Srl (https://www.hevolus.it)
+
+The licence covers only what Hevolus wrote. The programs the installer adds (fail2ban, CrowdSec, Suricata, Falco,
+ModSecurity, WireGuard…) and the parts bundled in the page (Leaflet, Natural Earth) keep their own licences, listed in
+[Every tool explained](#every-tool-explained): the toolkit reads their logs, it does not include or change them.
