@@ -77,9 +77,19 @@ body::after {
 .brief details ul { margin: 9px 0 0; padding-left: 20px; display: flex; flex-direction: column; gap: 7px; }
 .brief details li { color: #cdddea; line-height: 1.55; max-width: 94ch; }
 
-/* ── layout ──────────────────────────────────────────────────────────── */
-.grid { margin-top: 18px; display: grid; grid-template-columns: 340px 1fr; gap: 18px; align-items: start; }
-.side, .main { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+/* ── layout: 1) configurazione in alto · 2) sotto due colonne (attacchi | feed live) ── */
+.config { margin-top: 18px; }
+.config-row { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; }
+.config-row .reticle { flex: 0 0 auto; grid-template-columns: 54px auto; }
+.config-fields { flex: 1; min-width: 260px; display: flex; flex-direction: column; gap: 8px; }
+.config-inputs { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.config-inputs input { flex: 1; min-width: 190px; }
+.work { margin-top: 16px; display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 18px; align-items: start; }
+.attacks { min-width: 0; }
+.feed-col { min-width: 0; position: sticky; top: 16px; }
+.chain-actions { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.btn.all { padding: 7px 14px; }
+.btn.all.on { background: var(--amber); }
 .card-box { border: 1px solid var(--line); border-radius: 12px; background: linear-gradient(180deg, var(--panel2), var(--panel)); overflow: hidden; }
 .card-box > h2 { font: 700 10.5px ui-monospace, Menlo, monospace; text-transform: uppercase; letter-spacing: .18em; color: var(--muted);
   padding: 11px 14px; border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 8px; }
@@ -163,7 +173,7 @@ input:focus { outline: none; border-color: var(--cyan-dim); box-shadow: 0 0 0 2p
 .feed-status .spin { width: 11px; height: 11px; border: 2px solid rgba(255,184,74,.3); border-top-color: var(--amber); border-radius: 50%; animation: rot .8s linear infinite; }
 .feed-status.go { color: var(--amber); } .feed-status.done { color: var(--green); } .feed-status.err { color: var(--red); }
 .log { background: #03070b; border-top: 1px solid var(--line); padding: 12px 14px;
-  font: 12.5px/1.65 ui-monospace, SFMono-Regular, Menlo, monospace; min-height: 240px; max-height: 440px; overflow-y: auto; white-space: pre-wrap; }
+  font: 12.5px/1.65 ui-monospace, SFMono-Regular, Menlo, monospace; min-height: 320px; max-height: calc(100vh - 170px); overflow-y: auto; white-space: pre-wrap; }
 .log .run-line { color: var(--cyan); font-weight: 600; }
 .log .t { color: var(--faint); }
 .log .hit { color: var(--red); font-weight: 700; text-shadow: 0 0 10px var(--red-glow); }
@@ -173,7 +183,12 @@ input:focus { outline: none; border-color: var(--cyan-dim); box-shadow: 0 0 0 2p
 .log .cursor { display: inline-block; width: 8px; height: 14px; background: var(--cyan); vertical-align: -2px; animation: blink 1s steps(1) infinite; box-shadow: 0 0 8px var(--cyan); }
 .log::-webkit-scrollbar { width: 9px; } .log::-webkit-scrollbar-thumb { background: #16222e; border-radius: 9px; }
 
-@media (max-width: 920px) { .grid { grid-template-columns: 1fr; } .meta { display: none; } }
+@media (max-width: 920px) {
+  .work { grid-template-columns: 1fr; }   /* responsive: in colonna, nell'ordine configurazione · attacchi · feed */
+  .feed-col { position: static; }
+  .log { max-height: 440px; }
+  .meta { display: none; }
+}
 </style>
 </head>
 <body>
@@ -202,39 +217,47 @@ input:focus { outline: none; border-color: var(--cyan-dim); box-shadow: 0 0 0 2p
     </details>
   </div>
 
-  <div class="grid">
-    <div class="side">
-      <div class="card-box">
-        <h2><span class="pip"></span><span id="t-targettitle"></span></h2>
-        <div class="card-pad target">
-          <div class="reticle">
-            <div class="scope"><i></i><i class="r2"></i><i class="spin"></i><b></b></div>
-            <div class="lock">
-              <div class="state" id="target-state"><b class="on">● lab-01</b><span class="sub"></span></div>
-            </div>
-          </div>
-          <div class="label" id="t-targetlabel"></div>
-          <div class="field"><input id="target-url"></div>
-          <div class="field"><input id="target-key" type="password"></div>
-          <div class="field"><button class="btn" id="target-set"></button><button class="btn ghost" id="target-clear"></button></div>
-          <span id="target-msg"></span>
+  <!-- 1 · configurazione: collegamento al server, in alto, tutta la larghezza -->
+  <div class="card-box config">
+    <h2><span class="pip"></span><span id="t-targettitle"></span></h2>
+    <div class="card-pad config-row">
+      <div class="reticle">
+        <div class="scope"><i></i><i class="r2"></i><i class="spin"></i><b></b></div>
+        <div class="lock">
+          <div class="state" id="target-state"><b class="on">● lab-01</b><span class="sub"></span></div>
         </div>
       </div>
-      <div class="sidenote" id="t-sidenote"></div>
+      <div class="config-fields">
+        <div class="label" id="t-targetlabel"></div>
+        <div class="config-inputs">
+          <input id="target-url">
+          <input id="target-key" type="password">
+          <button class="btn" id="target-set"></button>
+          <button class="btn ghost" id="target-clear"></button>
+        </div>
+        <span id="target-msg"></span>
+      </div>
     </div>
+  </div>
+  <div class="sidenote" id="t-sidenote" style="margin-top: 10px"></div>
 
-    <div class="main">
-      <div>
-        <div class="chain-head">
-          <h2><span id="t-chaintitle"></span> <span class="err" id="error"></span></h2>
+  <!-- 2 · sotto, due colonne: a sinistra gli attacchi, a destra il feed live -->
+  <div class="work">
+    <div class="attacks">
+      <div class="chain-head">
+        <h2><span id="t-chaintitle"></span> <span class="err" id="error"></span></h2>
+        <div class="chain-actions">
+          <button class="btn all" id="run-all"></button>
           <div class="legend">
             <span><i class="hit"></i> <span id="t-leghit"></span></span>
             <span><i class="block"></i> <span id="t-legblock"></span></span>
           </div>
         </div>
-        <div id="scenarios"></div>
       </div>
+      <div id="scenarios"></div>
+    </div>
 
+    <div class="feed-col">
       <div class="card-box">
         <h2 class="feed-top"><span class="dots"><i></i><i></i><i></i></span><span id="t-feedtitle"></span>
           <span class="feed-status" id="feed-status"></span></h2>
@@ -271,6 +294,7 @@ const T = {
     btnSet: "Aggancia", btnClear: "Torna a lab-01",
     sidenote: "Senza un bersaglio esterno gli attacchi partono solo verso lab-01, dentro la rete del laboratorio, da indirizzi di documentazione (RFC 5737) con città inventate. Verso un server esterno partono dal nostro indirizzo, solo gli attacchi web, e solo dopo che la chiave ha provato che puoi già leggere quel server.",
     chainTitle: "Catena d'attacco",
+    btnAll: "Lancia tutti", feedRunning: "in corso",
     legHit: "l'attaccante è entrato", legBlock: "la difesa ha retto",
     feedTitle: "Feed live — cosa sta facendo l'attaccante",
     logEmpty: "In attesa. Scegli un attacco dalla catena qui sopra.",
@@ -303,6 +327,7 @@ const T = {
     btnSet: "Lock on", btnClear: "Back to lab-01",
     sidenote: "Without an external target the attacks go only to lab-01, inside the lab network, from documentation addresses (RFC 5737) with invented cities. To an external server they go from our address, web attacks only, and only after the key has proved you can already read that server.",
     chainTitle: "Attack chain",
+    btnAll: "Launch all", feedRunning: "running",
     legHit: "the attacker got in", legBlock: "the defence held",
     feedTitle: "Live feed — what the attacker is doing",
     logEmpty: "Standing by. Pick an attack from the chain above.",
@@ -393,6 +418,7 @@ function applyLang() {
   $("target-clear").textContent = d.btnClear;
   $("t-sidenote").textContent = d.sidenote;
   $("t-chaintitle").textContent = d.chainTitle;
+  $("run-all").textContent = d.btnAll;
   $("t-leghit").textContent = d.legHit;
   $("t-legblock").textContent = d.legBlock;
   $("t-feedtitle").textContent = d.feedTitle;
@@ -407,6 +433,21 @@ async function run(id) {
   if (!r.ok) { const e = await r.json().catch(() => ({})); $("error").textContent = e.error || T[lang].notStarted; }
   else { $("error").textContent = ""; }
   refreshRuns();
+}
+
+// "Lancia tutti": the backend runs scenarios in parallel, so we fire every available (not already running) attack at
+// once. Each starts its own run; the feed shows them together.
+async function runAll() {
+  const ra = $("run-all"); ra.disabled = true; $("error").textContent = "";
+  try {
+    const ids = [...$("scenarios").querySelectorAll("button")]
+      .filter(b => !b.disabled && b.dataset.available === "1" && !(targetMode === "external" && b.dataset.web !== "1"))
+      .map(b => b.dataset.id);
+    await Promise.all(ids.map(id => run(id)));
+  } finally {
+    ra.disabled = false;
+    refreshRuns();
+  }
 }
 
 // Verify and arm an external server; or go back to lab-01. The attacks against it start only after this succeeds.
@@ -454,34 +495,49 @@ function classify(msg) {
 async function refreshRuns() {
   const data = await fetch("/api/runs").then(r => r.json()).catch(() => null);
   if (!data) return;
-  const running = data.runs.find(r => r.id === data.current);
+  const runs = data.runs || [];                       // già dal più recente
+  const runningIds = new Set(runs.filter(r => r.status === "in corso").map(r => r.scenario));
   $("scenarios").querySelectorAll("button").forEach(b => {
     const blocked = targetMode === "external" && b.dataset.web !== "1";
     const unavailable = b.dataset.available === "0";
-    b.disabled = !!running || blocked || unavailable;
+    const isRun = runningIds.has(b.dataset.id);        // si disabilita solo lo stesso attacco già in corso: gli altri partono in parallelo
+    b.disabled = isRun || blocked || unavailable;
     b.title = unavailable ? T[lang].tipMsf : (blocked ? T[lang].tipWeb : "");
-    const isRun = !!running && running.scenario === b.dataset.id;
     b.classList.toggle("running", isRun);
     if (isRun) b.setAttribute("data-run", T[lang].inAzione);
   });
-  const last = data.runs[0];
-  const fs = $("feed-status");
-  if (!last) { fs.className = "feed-status"; fs.textContent = ""; return; }
-  if (last.status === "in corso") { fs.className = "feed-status go"; fs.innerHTML = `<span class="spin"></span>${esc(runTitle(last)).toUpperCase()}`; }
-  else if (last.status === "errore") { fs.className = "feed-status err"; fs.textContent = T[lang].feedErr; }
-  else { fs.className = "feed-status done"; fs.textContent = T[lang].feedDone; }
 
+  const fs = $("feed-status");
+  if (runningIds.size) { fs.className = "feed-status go"; fs.innerHTML = `<span class="spin"></span>${runningIds.size} ${esc(T[lang].feedRunning)}`; }
+  else {
+    const last = runs[0];
+    if (!last) { fs.className = "feed-status"; fs.textContent = ""; }
+    else if (last.status === "errore") { fs.className = "feed-status err"; fs.textContent = T[lang].feedErr; }
+    else { fs.className = "feed-status done"; fs.textContent = T[lang].feedDone; }
+  }
+
+  // feed: gli attacchi in corso in alto, poi i più recenti conclusi (per rileggere i risultati), fino a 8 blocchi
+  const show = runs.filter(r => r.status === "in corso");
+  for (const r of runs) { if (show.length >= 8) break; if (r.status !== "in corso") show.push(r); }
+  renderFeed(show);
+}
+
+function renderFeed(list) {
   const box = $("log");
+  if (!list.length) { box.innerHTML = `<span style="color:var(--muted)">${esc(T[lang].logEmpty)}</span><span class="cursor"></span>`; return; }
   const atBottom = box.scrollTop + box.clientHeight >= box.scrollHeight - 4;
-  const statusText = T[lang].status[last.status] || last.status;
-  const head = `<span class="t">${esc(last.started)}</span> <span class="run-line">▶ ${esc(runTitle(last))} — ${esc(statusText)}</span>\n`;
-  const lines = last.log.map(l => {
-    const txt = lang === "en" ? (l.msg_en || l.msg) : l.msg;
-    const cls = l.cls != null ? l.cls : classify(l.msg);   // backend tags the class; classify() is the fallback
-    return `<span class="t">${esc(l.t)}</span> <span class="${cls}">${esc(txt)}</span>`;
-  }).join("\n");
-  box.innerHTML = head + lines + `\n<span class="cursor"></span>`;
-  if (atBottom) box.scrollTop = box.scrollHeight;
+  const blocks = list.map(r => {
+    const statusText = T[lang].status[r.status] || r.status;
+    const head = `<span class="t">${esc(r.started)}</span> <span class="run-line">▶ ${esc(runTitle(r))} — ${esc(statusText)}</span>`;
+    const lines = r.log.map(l => {
+      const txt = lang === "en" ? (l.msg_en || l.msg) : l.msg;
+      const cls = l.cls != null ? l.cls : classify(l.msg);   // backend tags the class; classify() is the fallback
+      return `<span class="t">${esc(l.t)}</span> <span class="${cls}">${esc(txt)}</span>`;
+    }).join("\n");
+    return head + (lines ? "\n" + lines : "");
+  });
+  box.innerHTML = blocks.join("\n\n") + `\n<span class="cursor"></span>`;
+  if (list.length === 1 && atBottom) box.scrollTop = box.scrollHeight;   // un solo attacco: segue l'ultima riga, come prima
 }
 
 function tick() {
@@ -491,6 +547,7 @@ function tick() {
 
 $("target-set").addEventListener("click", setTarget);
 $("target-clear").addEventListener("click", clearTarget);
+$("run-all").addEventListener("click", runAll);
 document.querySelectorAll("#langtog button").forEach(b => b.addEventListener("click", () => {
   lang = b.dataset.lang; try { localStorage.setItem("lang", lang); } catch {}
   applyLang();
