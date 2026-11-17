@@ -11,11 +11,14 @@ This program reads those logs, works out what kind of attack each line is and wh
 agent. The company also gets a **monitoring page** with a world map of the attacks, and an optional **VPN** for its
 own people.
 
-![The monitoring page: numbers, alerts, guardians, the map of the attackers and the table](docs/images/monitoring.jpg)
+![The monitoring page, Mappa tab: the numbers with a red label on the cards hit, the full-width map of the attackers and the table of attacks received; two more tabs hold the SOC advice and the host status](docs/images/monitoring.jpg)
 
-*The monitoring page of the lab's test server, after one night of attacks. Left: the numbers, the red alerts (the
-server is calling a malware controller, an intruder got in, someone tried to fool the AI) and the guardians. Right:
-where the attackers are, and what each one did. All addresses are test addresses with invented cities.*
+*The monitoring page of the lab's test server, after one night of attacks — the **Mappa** tab: the numbers across the
+top, each carrying a red label when something serious happened (a successful login, a compromised host, an attempt to
+fool the AI), the full-width map of where the attackers are and the table of what each one did. Two more tabs hold
+**Da sistemare** (the SOC advice) and **Stato server** (the guardians, the VPN, what to fix, and the full summary of any
+compromise). All addresses are test addresses with invented
+cities.*
 
 ```mermaid
 flowchart LR
@@ -639,10 +642,12 @@ To see the toolkit at work without a customer's server, `make up` starts a small
   [below](#a-public-test-address-for-xrcopilotlab-dynamic-url)), and forwards `lab-01`'s monitoring page to
   **http://localhost:8089** on your laptop.
 
-![The attack console: the server to test, and the attacks grouped by phase of an intrusion](docs/images/console.jpg)
+![The attack console, in three parts: the server to connect to at the top, the attacks by phase of an intrusion on the left, the live feed on the right](docs/images/console.jpg)
 
-The console is bilingual: the **IT/EN** toggle at the top right switches the whole page — the briefing, the attack
-phases, every scenario and the live feed. A briefing at the top spells out, for non-experts, that these are real tools
+The console is in three parts: the **server to connect to** at the top, the **attacks** grouped by phase of an
+intrusion on the left, and the **live feed** on the right. **Lancia tutti** launches every available attack at once, in
+parallel, and the feed shows the running attacks together. The console is bilingual: the **IT/EN** toggle at the top
+right switches the whole page — the briefing, the attack phases, every scenario and the live feed. A briefing at the top spells out, for non-experts, that these are real tools
 against a real target and why the map shows cities worldwide (the source addresses are faked, the attacks are not).
 
 The attacks never leave the lab: all addresses are "documentation" addresses (RFC 5737) that no real computer uses,
@@ -1011,7 +1016,7 @@ journalctl -u xrcopilotlab-intrusion-mcp -f                                 # it
 
 ### 5. The monitoring page
 
-![The monitoring page](docs/images/monitoring.jpg)
+![The monitoring page, Mappa tab: the numbers with a red label on the cards hit, the full-width map and the table of attacks received](docs/images/monitoring.jpg)
 
 `install.sh` also publishes a **read-only monitoring page** (unless you pass `--no-dashboard`): nginx serves it on
 **`https://<server>:8471`**, with a password (user `admin`, a password printed once at install; change it by removing
@@ -1021,6 +1026,16 @@ how XRCopilotLab reaches the server and, with `--with wireguard`, who is connect
 from an unexpected country is highlighted). It only reads: it never bans, blocks or changes anything, and the commands it
 suggests are for a person to run. The page reads the toolkit's API with a key of its own that the browser never sees.
 `…/?view=map` shows only the map and the list of the attacks received, for a screen on the wall.
+
+The page is in **three tabs**. **Mappa** holds the numbers, the full-width map and the table of attacks received; when
+something serious happens a red label appears on the card it concerns (*accesso riuscito*, *compromesso*, *inganno AI*)
+instead of a banner over the map. **Stato server** holds the guardians (a traffic light each), who is connected to the
+VPN, how XRCopilotLab reaches the server, "what to fix" and the full red summary of any compromise. **Da sistemare** is
+the inbox of advice a SOC analyst approved and sent to the toolkit (`POST /api/advice`): each one shows the exact
+command to run on the server, a "copy" button, and whether the problem is still there. The page runs nothing and marks
+nothing — its API proxy allows only GET.
+
+![The «Da sistemare» tab: the advice a SOC analyst approved, each with the command to run on the server and whether it is still active](docs/images/advice.jpg)
 
 **Cities on the map (optional):** download the free DB-IP "IP to City Lite" file (https://db-ip.com/db/lite.php),
 save it as `/opt/xrcopilotlab-intrusion-mcp/geo/dbip-city-lite.csv.gz` and run

@@ -19,9 +19,30 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font: 14px
 .langtog { margin-left: auto; display: inline-flex; border: 1px solid var(--line); border-radius: 999px; overflow: hidden; flex-shrink: 0; }
 .langtog button { background: transparent; color: var(--muted); border: 0; padding: 4px 11px; cursor: pointer; font: 600 12px system-ui, sans-serif; }
 .langtog button.on { background: var(--accent); color: #0b0f13; }
-.app { display: grid; grid-template-columns: 400px 1fr; height: calc(100vh - 56px); }
-aside { background: var(--panel); border-right: 1px solid var(--line); overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 18px; }
-main { display: grid; grid-template-rows: 1fr 280px; min-width: 0; }
+/* Tre pagine (Mappa · Da sistemare · Stato server): intestazione, banner e schede fissi, la vista attiva riempie il resto. */
+body { display: flex; flex-direction: column; }
+.tabs { display: flex; gap: 4px; padding: 6px 12px; background: var(--panel); border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.tab { background: transparent; color: var(--muted); border: 1px solid transparent; border-radius: 8px; padding: 6px 14px; cursor: pointer; font: 600 13px system-ui, sans-serif; }
+.tab:hover { color: var(--text); }
+.tab.on { background: var(--bg); color: var(--text); border-color: var(--line); }
+.view { display: none; flex: 1; min-height: 0; }
+body.page-mappa .view-mappa, body.page-dasistemare .view-dasistemare, body.page-stato .view-stato { display: flex; flex-direction: column; }
+.view-dasistemare, .view-stato { overflow-y: auto; }
+.page-pad { padding: 16px; width: 100%; max-width: 900px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; }
+.advice-intro { background: rgba(74,163,255,.08); border: 1px solid var(--line); border-left: 3px solid var(--accent); border-radius: 8px; padding: 10px 12px; font-size: 13px; }
+.advice-actions { margin-top: 6px; }
+.advice-foot { margin-top: 6px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.advice-done { background: var(--accent); color: #0b0f13; border: 0; border-radius: 6px; padding: 4px 10px; font: 600 12px system-ui, sans-serif; cursor: pointer; }
+.advice-done:disabled { opacity: .5; cursor: default; }
+.advice-sep { margin: 14px 0 2px; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); border-top: 1px solid var(--line); padding-top: 10px; }
+.advice-check { font-size: 12px; margin-top: 6px; }
+.advice-check.ok { color: var(--muted); } .advice-check.bad b { color: var(--high); }
+.stat.flagged { border-color: var(--critical); cursor: pointer; }
+.stat-flag { display: inline-block; margin-top: 5px; font: 700 10px system-ui, sans-serif; text-transform: uppercase; letter-spacing: .04em; padding: 1px 7px; border-radius: 10px; background: var(--critical); color: #fff; }
+.stat-flag.amber { background: var(--high); color: #0f1419; }
+.stat-flag[hidden] { display: none; }
+main { display: grid; grid-template-rows: 1fr 280px; min-width: 0; flex: 1; min-height: 0; }
 h1 { font-size: 17px; font-weight: 600; }
 h1 small { display: block; color: var(--muted); font-size: 12px; font-weight: 400; margin-top: 2px; }
 h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 600; margin-bottom: 8px; }
@@ -30,7 +51,7 @@ h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: v
 .lab-banner { background: var(--critical); color: #fff; font-size: 13px; padding: 6px 16px; text-align: center; }
 .lab-banner b { letter-spacing: .08em; }
 .badge { display: inline-block; font-size: 11px; padding: 1px 7px; border-radius: 10px; background: var(--medium); color: #0f1419; font-weight: 600; margin-left: 6px; vertical-align: middle; }
-.stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.stats { display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; padding: 12px 16px 0; }
 .stat { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 8px; }
 .stat b { display: block; font-size: 20px; font-variant-numeric: tabular-nums; }
 .stat span { color: var(--muted); font-size: 11px; }
@@ -95,15 +116,16 @@ td.num { font-variant-numeric: tabular-nums; text-align: right; }
 .login.on { display: flex; }
 .login form { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 20px; width: min(420px, 92vw); display: flex; flex-direction: column; gap: 10px; }
 .btn { background: var(--accent); color: #0b0f13; border: 0; border-radius: 6px; padding: 6px 12px; font: 600 13px system-ui, sans-serif; cursor: pointer; }
-/* ?view=map: only the map and the attacks received, for a screen on the wall or the lab's server page. */
-body.map-only .app { grid-template-columns: 1fr; }
-body.map-only aside { display: none; }
-body.map-only main { grid-template-rows: 1fr 300px; }
+/* ?view=map: solo la mappa e gli attacchi ricevuti, per uno schermo a muro o per la pagina del server. */
+body.map-only .tabs,
+body.map-only .view-mappa .stats,
+body.map-only .view-mappa .alert { display: none; }
+body.map-only .view-mappa main { grid-template-rows: 1fr 300px; }
 @media (max-width: 900px) {
-  .app { grid-template-columns: 1fr; height: auto; }
   .top h1 small { display: block; margin: 2px 0 0; }
-  aside { border-right: 0; border-bottom: 1px solid var(--line); }
-  main { grid-template-rows: 60vh auto; }
+  .view-mappa main { grid-template-rows: 60vh auto; }
+  .stats { grid-template-columns: repeat(3, 1fr); }
+  .tabs { overflow-x: auto; }
 }
 </style>
 </head>
@@ -115,54 +137,22 @@ body.map-only main { grid-template-rows: 1fr 300px; }
   <div class="langtog" id="langtog"><button data-lang="it">IT</button><button data-lang="en">EN</button></div>
 </header>
 <div class="lab-banner" id="lab-banner" hidden></div>
-<div class="app">
-  <aside>
+<nav class="tabs" id="tabs">
+  <button class="tab" data-view="mappa" data-i18n="tabMap">Mappa</button>
+  <button class="tab" data-view="dasistemare" data-i18n="tabFix">Da sistemare</button>
+  <button class="tab" data-view="stato" data-i18n="tabStatus">Stato server</button>
+</nav>
 
-    <div class="stats">
-      <div class="stat"><b id="s-attempts">–</b><span data-i18n="sAttempts">tentativi</span></div>
-      <div class="stat"><b id="s-addresses">–</b><span data-i18n="sAddresses">indirizzi</span></div>
-      <div class="stat"><b id="s-banned">–</b><span data-i18n="sBanned">bannati ora</span></div>
-      <div class="stat"><b id="s-waf">–</b><span data-i18n="sWaf">attacchi web visti dal WAF</span></div>
-      <div class="stat"><b id="s-host">–</b><span data-i18n="sHost">azioni dentro il server</span></div>
-      <div class="stat"><b id="s-blocks">–</b><span data-i18n="sBlocks">blocchi firewall</span></div>
-    </div>
-
-    <div class="alert" id="alert"></div>
-
-    <!-- At the top: what the SOC analyst approved and sent here is what the person reading this page acts on. -->
-    <div id="advice-box" hidden>
-      <h2><span data-i18n="toFix">Da sistemare</span> <span class="muted" id="advice-count" style="text-transform:none;letter-spacing:0"></span></h2>
-      <div class="findings" id="advice"></div>
-    </div>
-
-    <div>
-      <h2 data-i18n="reach">Come ti raggiunge XRCopilotLab</h2>
-      <div class="finding" id="connection"><span class="muted">…</span></div>
-    </div>
-
-    <div>
-      <h2 data-i18n="guardians">Guardiani</h2>
-      <div class="guardians" id="guardians"><span class="muted">…</span></div>
-    </div>
-
-    <div id="vpn-box" hidden>
-      <h2 data-i18n="vpn">VPN · chi è collegato</h2>
-      <div class="muted" id="vpn-note" style="font-size:12px"></div>
-      <div class="vpn-users" id="vpn-users"></div>
-    </div>
-
-    <div>
-      <h2><span data-i18n="improve">Cosa migliorare</span> <span class="muted" style="text-transform:none;letter-spacing:0" data-i18n="last7">· ultimi 7 giorni</span></h2>
-      <div class="findings" id="findings"><span class="muted">…</span></div>
-    </div>
-
-    <div class="muted" style="font-size:12px" data-i18n="readOnly">
-      Questa pagina legge soltanto: non banna, non blocca e non cambia niente sul server. I comandi suggeriti vanno
-      eseguiti da chi amministra il server. I consigli in «Da sistemare» sono quelli che un analista ha approvato nel
-      processo SOC e inviati qui: il server li mostra soltanto, non li applica.
-    </div>
-  </aside>
-
+<!-- Mappa: statistiche, mappa a tutta larghezza, tabella degli attacchi ricevuti -->
+<section class="view view-mappa">
+  <div class="stats">
+    <div class="stat" id="card-attempts"><b id="s-attempts">–</b><span data-i18n="sAttempts">tentativi</span><span class="stat-flag" id="flag-login" hidden></span></div>
+    <div class="stat"><b id="s-addresses">–</b><span data-i18n="sAddresses">indirizzi</span></div>
+    <div class="stat"><b id="s-banned">–</b><span data-i18n="sBanned">bannati ora</span></div>
+    <div class="stat" id="card-waf"><b id="s-waf">–</b><span data-i18n="sWaf">attacchi web visti dal WAF</span><span class="stat-flag amber" id="flag-ai" hidden></span></div>
+    <div class="stat" id="card-host"><b id="s-host">–</b><span data-i18n="sHost">azioni dentro il server</span><span class="stat-flag" id="flag-host" hidden></span></div>
+    <div class="stat"><b id="s-blocks">–</b><span data-i18n="sBlocks">blocchi firewall</span></div>
+  </div>
   <main>
     <div id="map"></div>
     <div class="table-wrap">
@@ -183,7 +173,48 @@ body.map-only main { grid-template-rows: 1fr 300px; }
       </table>
     </div>
   </main>
-</div>
+</section>
+
+<!-- Da sistemare: la posta dei consigli approvati dal SOC (mostrati, mai applicati) -->
+<section class="view view-dasistemare">
+  <div class="page-pad">
+    <p class="advice-intro" data-i18n="adviceIntro">Consigli approvati dal SOC. Esegui il comando indicato sul server; la pagina controlla solo se il problema è ancora presente. Non banna, non blocca, non applica niente da sola.</p>
+    <div id="advice-box" hidden>
+      <h2><span data-i18n="toFix">Da sistemare</span> <span class="muted" id="advice-count" style="text-transform:none;letter-spacing:0"></span></h2>
+      <div class="findings" id="advice"></div>
+    </div>
+    <p class="muted" id="advice-empty" hidden data-i18n="adviceEmpty">Nessun consiglio dal SOC.</p>
+  </div>
+</section>
+
+<!-- Stato server: compromissione, come ti raggiunge, guardiani, VPN, cosa migliorare -->
+<section class="view view-stato">
+  <div class="page-pad">
+    <div class="alert" id="alert"></div>
+    <div class="card">
+      <h2 data-i18n="reach">Come ti raggiunge XRCopilotLab</h2>
+      <div class="finding" id="connection"><span class="muted">…</span></div>
+    </div>
+    <div class="card">
+      <h2 data-i18n="guardians">Guardiani</h2>
+      <div class="guardians" id="guardians"><span class="muted">…</span></div>
+    </div>
+    <div class="card" id="vpn-box" hidden>
+      <h2 data-i18n="vpn">VPN · chi è collegato</h2>
+      <div class="muted" id="vpn-note" style="font-size:12px"></div>
+      <div class="vpn-users" id="vpn-users"></div>
+    </div>
+    <div class="card">
+      <h2><span data-i18n="improve">Cosa migliorare</span> <span class="muted" style="text-transform:none;letter-spacing:0" data-i18n="last7">· ultimi 7 giorni</span></h2>
+      <div class="findings" id="findings"><span class="muted">…</span></div>
+    </div>
+    <div class="muted" style="font-size:12px" data-i18n="readOnly">
+      Questa pagina legge soltanto: non banna, non blocca e non cambia niente sul server. I comandi suggeriti vanno
+      eseguiti da chi amministra il server. I consigli in «Da sistemare» sono quelli che un analista ha approvato nel
+      processo SOC e inviati qui: il server li mostra soltanto, non li applica.
+    </div>
+  </div>
+</section>
 
 <div class="login" id="login">
   <form id="login-form">
@@ -301,6 +332,11 @@ const UI = {
     sWaf: "attacchi web visti dal WAF", sHost: "azioni dentro il server", sBlocks: "blocchi firewall",
     toFix: "Da sistemare", reach: "Come ti raggiunge XRCopilotLab", guardians: "Guardiani", vpn: "VPN · chi è collegato",
     improve: "Cosa migliorare", last7: "· ultimi 7 giorni",
+    tabMap: "Mappa", tabFix: "Da sistemare", tabStatus: "Stato server",
+    adviceIntro: "Consigli approvati dal SOC. Esegui il comando indicato sul server; la pagina controlla solo se il problema è ancora presente. Non banna, non blocca, non applica niente da sola.",
+    adviceEmpty: "Nessun consiglio dal SOC.", copyCmd: "Copia comando",
+    stillOpen: "⚠ ancora attivo sul server", archived: "archiviato",
+    flagCompromised: "compromesso", flagLogin: "accesso riuscito", flagAi: "inganno AI",
     readOnly: "Questa pagina legge soltanto: non banna, non blocca e non cambia niente sul server. I comandi suggeriti vanno eseguiti da chi amministra il server. I consigli in «Da sistemare» sono quelli che un analista ha approvato nel processo SOC e inviati qui: il server li mostra soltanto, non li applica.",
     period: "Periodo", h1: "ultima ora", h24: "ultime 24 ore", h168: "ultima settimana",
     thSeverity: "Gravità", thAddress: "Indirizzo", thCity: "Città", thType: "Tipo di attacco", thAttempts: "Tentativi",
@@ -339,7 +375,7 @@ const UI = {
     details: "dettagli", nothing: "Niente da segnalare.",
     fromCheck: (id) => "dal controllo " + id, fromSoc: "inviato dal processo SOC", approvedBy: "approvato da",
     done: "✓ fatto", markDone: "segna fatto", verified: "✓ verificato: il controllo non lo segnala più",
-    notEffective: "⚠ segnato fatto, ma il controllo lo segnala ancora", adviceCount: (n) => `· approvati dall'analista · ${n} ${n === 1 ? "aperto" : "aperti"}`,
+    notEffective: "⚠ segnato fatto, ma il controllo lo segnala ancora", adviceCount: (n) => `· approvati dall'analista · ${n}`,
     updated: (t) => "aggiornato alle " + t, labData: "Dati di laboratorio · indirizzi di documentazione (RFC 5737), posizioni d'esempio",
     down: (e) => "il server non risponde (" + e + ")",
   },
@@ -348,6 +384,11 @@ const UI = {
     sWaf: "web attacks seen by the WAF", sHost: "actions inside the host", sBlocks: "firewall blocks",
     toFix: "To fix", reach: "How XRCopilotLab reaches you", guardians: "Guardians", vpn: "VPN · who is connected",
     improve: "What to improve", last7: "· last 7 days",
+    tabMap: "Map", tabFix: "To fix", tabStatus: "Host status",
+    adviceIntro: "Advice a SOC analyst approved. Run the command shown on the server; the page only checks whether the problem is still there. It bans nothing, blocks nothing, applies nothing by itself.",
+    adviceEmpty: "No advice from the SOC.", copyCmd: "Copy command",
+    stillOpen: "⚠ still active on the host", archived: "archived",
+    flagCompromised: "compromised", flagLogin: "login succeeded", flagAi: "AI trick",
     readOnly: "This page only reads: it does not ban, block or change anything on the host. The suggested commands are for whoever runs the host. The advice under «To fix» is what an analyst approved in the SOC process and sent here: the host only shows it, it never applies it.",
     period: "Period", h1: "last hour", h24: "last 24 hours", h168: "last week",
     thSeverity: "Severity", thAddress: "Address", thCity: "City", thType: "Attack type", thAttempts: "Attempts",
@@ -386,7 +427,7 @@ const UI = {
     details: "details", nothing: "Nothing to report.",
     fromCheck: (id) => "from the check " + id, fromSoc: "sent by the SOC process", approvedBy: "approved by",
     done: "✓ done", markDone: "mark done", verified: "✓ verified: the check no longer reports it",
-    notEffective: "⚠ marked done, but the check still reports it", adviceCount: (n) => `· approved by the analyst · ${n} open`,
+    notEffective: "⚠ marked done, but the check still reports it", adviceCount: (n) => `· approved by the analyst · ${n}`,
     updated: (t) => "updated at " + t, labData: "Lab data · documentation addresses (RFC 5737), example locations",
     down: (e) => "the server does not answer (" + e + ")",
   },
@@ -523,6 +564,20 @@ function drawStats(summary) {
   }
   $("alert").innerHTML = parts.join("<br><br>");
   $("alert").classList.toggle("on", parts.length > 0);
+  // Sulla Mappa, invece di un banner, una targhetta sulla card interessata; il riepilogo esteso è nella scheda «Stato server».
+  statFlag("flag-host", "card-host", c2 || inside.length > 0, t("flagCompromised"));
+  statFlag("flag-login", "card-attempts", s.length > 0, t("flagLogin"));
+  statFlag("flag-ai", "card-waf", !!liar, t("flagAi"));
+}
+
+// A red (or amber) label on a stat card when something serious happened; clicking it opens the full summary on «Stato server».
+function statFlag(flagId, cardId, on, label) {
+  const flag = $(flagId), card = $(cardId);
+  if (!flag || !card) return;
+  flag.hidden = !on;
+  flag.textContent = on ? label : "";
+  card.classList.toggle("flagged", !!on);
+  card.onclick = on ? () => setView("stato") : null;
 }
 
 function drawGuardians(g) {
@@ -681,46 +736,43 @@ function drawFindings(p) {
   $("findings").innerHTML = items.length ? items.join("") : `<span class="muted">${t("nothing")}</span>`;
 }
 
-// What a person approved in the SOC process and sent back (/api/advice). Shown only, never applied. Every field is
+// What a SOC analyst approved and sent back (/api/advice). The page only SHOWS it — it is read-only (its /api proxy
+// allows GET only), it never applies the fix or marks anything: you run the command on the server. For each advice the
+// page checks whether the problem is still there (the check it came from): "ancora attivo" or "risolto". Every field is
 // text chosen upstream, so it is escaped here and never put into the page as HTML.
+function adviceCard(a) {
+  const ver = a.verification === "open" ? `<div class="advice-check bad"><b>${t("stillOpen")}</b>${a.evidence ? " · " + esc(a.evidence) : ""}</div>`
+    : a.verification === "fixed" ? `<div class="advice-check ok">${t("verified")}</div>` : "";
+  const from = a.findingId ? t("fromCheck", a.findingId) : t("fromSoc");
+  const archived = a.status === "done" ? ` · <span class="muted">${t("archived")}</span>` : "";
+  // The command is read from the <code> element on copy, so no untrusted text goes into an attribute or handler.
+  const command = a.command
+    ? `<code>${esc(a.command)}</code><div class="advice-actions"><button type="button" class="conn-copy cmd-copy">${t("copyCmd")}</button></div>`
+    : "";
+  return `<div class="finding ${esc(a.severity)}">
+      <b>${esc(a.title)} <span class="sev sev-${esc(a.severity)}">${esc(sev(a.severity))}</span></b>
+      <p>${esc(a.recommendation)}</p>
+      ${command}
+      ${ver}
+      <details><summary>${t("approvedBy")} ${esc(a.approvedBy)} · ${esc(ago(a.approvedAt))}${a.ip ? " · " + esc(a.ip) : ""}${archived}</summary>${esc(from)}</details>
+    </div>`;
+}
 function drawAdvice(list) {
   const all = list || [];
-  const open = all.filter(a => a.status !== "done").length;
-  const sorted = [...all.filter(a => a.status !== "done"), ...all.filter(a => a.status === "done")];  // open first
-  const items = sorted.map(a => {
-    const done = a.status === "done";
-    // What the host says now, beside what a person said: "done" that the check still reports did not take effect.
-    const failed = done && a.verification === "open";
-    const check = failed ? `<div style="font-size:12px;margin-top:6px"><b>${t("notEffective")}</b>${a.evidence ? " · " + esc(a.evidence) : ""}</div>`
-      : a.verification === "fixed" ? `<div class="muted" style="font-size:12px;margin-top:6px">${t("verified")}</div>` : "";
-    const from = a.findingId ? t("fromCheck", a.findingId) : t("fromSoc");
-    return `<div class="finding ${esc(a.severity)}"${done && !failed ? ' style="opacity:.55"' : ""}>
-      <b>${esc(a.title)}</b>
-      <p>${esc(a.recommendation)}</p>
-      ${a.command ? `<code>${esc(a.command)}</code>` : ""}
-      <details><summary>${t("approvedBy")} ${esc(a.approvedBy)} · ${esc(ago(a.approvedAt))}${a.ip ? " · " + esc(a.ip) : ""} · ${t("severity")} ${esc(sev(a.severity))}</summary>${esc(from)}</details>
-      ${check}
-      <div style="margin-top:6px">${done
-        ? `<span class="muted" style="font-size:12px">${t("done")}${a.doneAt ? " · " + esc(ago(a.doneAt)) : ""}</span>`
-        : `<button class="advice-done" data-id="${esc(a.id)}" style="font-size:12px;padding:3px 8px;cursor:pointer">${t("markDone")}</button>`}</div>
-    </div>`;
-  });
-  $("advice-box").hidden = !items.length;
-  $("advice-count").textContent = t("adviceCount", open);
-  $("advice").innerHTML = items.join("");
+  const rank = { open: 0, unknown: 1, fixed: 2 };
+  const sorted = [...all].sort((x, y) => (rank[x.verification] ?? 1) - (rank[y.verification] ?? 1));  // ciò che è ancora attivo sul server in alto
+  $("advice").innerHTML = sorted.map(adviceCard).join("");
+  $("advice-box").hidden = !all.length;
+  $("advice-empty").hidden = !!all.length;
+  $("advice-count").textContent = t("adviceCount", all.length);
 }
 
-// Mark one advice done from the page. This updates the advice list only; it never touches the host.
-async function adviceDone(id) {
-  const r = await fetch("api/advice/" + encodeURIComponent(id) + "/done", { method: "POST", headers: key ? { "X-API-Key": key } : {} });
-  if (r.status === 401) { $("login").classList.add("on"); throw t("noKey"); }
-  if (!r.ok) throw r.status;
-}
+// Copy an advice command, to run on the server. The page makes no other call from here: it is read-only.
 $("advice").addEventListener("click", async (e) => {
-  const btn = e.target.closest(".advice-done");
-  if (!btn) return;
-  btn.disabled = true;
-  try { await adviceDone(btn.dataset.id); await refreshGuard(); } catch { btn.disabled = false; }
+  const copy = e.target.closest(".cmd-copy");
+  if (!copy) return;
+  const code = copy.closest(".finding").querySelector("code");
+  if (code) { try { await navigator.clipboard.writeText(code.textContent); const o = copy.textContent; copy.textContent = t("copied"); setTimeout(() => copy.textContent = o, 1500); } catch { } }
 });
 
 async function refresh() {
@@ -766,6 +818,22 @@ document.querySelectorAll("#langtog button").forEach(b => b.addEventListener("cl
   refreshConnection();
 }));
 applyLang();
+
+// Le tre schede: Mappa · Da sistemare · Stato server. Una classe sul body mostra la vista attiva; i dati girano
+// comunque sui timer, quindi cambiare scheda è immediato. Link diretti via hash (#mappa, #dasistemare, #stato);
+// ?view=map (modalità muro) resta e ha la precedenza, forzando Mappa senza le schede.
+const VIEWS = ["mappa", "dasistemare", "stato"];
+function setView(v) {
+  if (!VIEWS.includes(v)) v = "mappa";
+  document.body.classList.remove("page-mappa", "page-dasistemare", "page-stato");
+  document.body.classList.add("page-" + v);
+  document.querySelectorAll(".tab").forEach(b => b.classList.toggle("on", b.dataset.view === v));
+  if (v === "mappa") setTimeout(() => map.invalidateSize(), 0);   // la mappa, costruita mentre era nascosta, va ridimensionata
+  if (location.hash.slice(1) !== v) { try { history.replaceState(null, "", "#" + v); } catch { } }
+}
+document.querySelectorAll(".tab").forEach(b => b.addEventListener("click", () => setView(b.dataset.view)));
+window.addEventListener("hashchange", () => setView(location.hash.slice(1)));
+setView(document.body.classList.contains("map-only") ? "mappa" : (location.hash.slice(1) || "mappa"));
 
 $("hours").addEventListener("change", refresh);
 refreshGuard().then(refresh);
