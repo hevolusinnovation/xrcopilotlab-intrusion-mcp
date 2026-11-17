@@ -747,12 +747,12 @@ def web_endpoint_of(target):
 
 
 class Runner:
-    """One scenario at a time: the map is easier to read, and the target's bans stay attributable."""
+    """Scenarios can run in parallel: each attack is its own thread (its web target is thread-local), and the console
+    feed shows the running attacks together. The same scenario cannot be launched twice at once."""
 
     def __init__(self):
         self._lock = threading.Lock()
         self.runs = []
-        self.current = None
 
     def start(self, scenario_id, target=None):
         scenario = next((s for s in SCENARIOS if s["id"] == scenario_id), None)
@@ -766,15 +766,19 @@ class Runner:
         if scenario.get("msf") and not metasploit_available():
             return None, "il container Metasploit non è in esecuzione: avvialo con  make lab-up-msf"
         with self._lock:
-            if self.current is not None:
-                return None, f"è già in corso «{self.current['title']}»"
+            if any(r["scenario"] == scenario_id and r["status"] == "in corso" for r in self.runs):
+                return None, f"«{scenario['title']}» è già in corso"
             run = {"id": len(self.runs) + 1, "scenario": scenario_id, "title": scenario["title"],
                    "started": time.strftime("%H:%M:%S"), "finished": None, "status": "in corso", "log": []}
             self.runs.append(run)
-            self.runs = self.runs[-20:]
-            self.current = run
+            self.runs = self.runs[-40:]
         threading.Thread(target=self._run, args=(scenario, run, target if external else None), daemon=True).start()
         return run, None
+
+    def snapshot(self):
+        """A copy safe to serialise while other threads append to the live runs."""
+        with self._lock:
+            return [{**r, "log": list(r["log"])} for r in self.runs]
 
     def _run(self, scenario, run, external):
         def log(it, en=None):
@@ -792,8 +796,6 @@ class Runner:
         finally:
             set_web_target(None)
             run["finished"] = time.strftime("%H:%M:%S")
-            with self._lock:
-                self.current = None
 
 
 if __name__ == "__main__" and "--addresses" in sys.argv:

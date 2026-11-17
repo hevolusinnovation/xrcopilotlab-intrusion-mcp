@@ -60,7 +60,9 @@ class Handler(BaseHTTPRequestHandler):
         if url.path == "/api/scenarios":
             return self._send(200, scenarios.describe())
         if url.path == "/api/runs":
-            return self._send(200, {"current": runner.current["id"] if runner.current else None, "runs": runner.runs[::-1]})
+            runs = runner.snapshot()
+            running = [r["id"] for r in runs if r["status"] == "in corso"]
+            return self._send(200, {"running": running, "runs": runs[::-1]})
         if url.path == "/api/tunnel/status":
             return self._forward(TUNNEL + "/status", "GET")
         if url.path == "/api/tunnel/key":
