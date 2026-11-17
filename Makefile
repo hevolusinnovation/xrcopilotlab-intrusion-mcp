@@ -90,7 +90,7 @@ key:
 
 # The lab key lives in lab/.env (git-ignored), created on the first run; the console sends it, the server keeps its hash.
 lab/.env:
-	@sed -e "s/^LAB_API_KEY=.*/LAB_API_KEY=$$(openssl rand -hex 32)/" -e "s/^PROD_API_KEY=.*/PROD_API_KEY=$$(openssl rand -hex 32)/" lab/.env.example > $@
+	@sed -e "s/^LAB_API_KEY=.*/LAB_API_KEY=lab-key-$$(openssl rand -hex 24)/" -e "s/^PROD_API_KEY=.*/PROD_API_KEY=$$(openssl rand -hex 32)/" lab/.env.example > $@
 	@echo "created lab/.env with new keys (PUBLIC_DOMAIN empty: Dev Tunnel, test key shown on the page)"
 
 up: lab-up
